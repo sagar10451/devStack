@@ -5,7 +5,7 @@ import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, Download, Upl
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
-import type { AnimationStep, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig } from './types';
+import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig } from './types';
 import AnimationPanel from './AnimationPanel';
 import SubTopicTracker from './SubTopicTracker';
 import { applyIdleAnimation } from './animationEngine';
@@ -18,6 +18,7 @@ import DiagramToolbar from './diagram/DiagramToolbar';
 import DraggableWidget from './DraggableWidget';
 import NodeCatalog from './diagram/NodeCatalog';
 import { EMPTY_DIAGRAM } from './diagram/diagramTypes';
+import TimelineBar from './TimelineBar';
 import type { DiagramData } from './diagram/diagramTypes';
 import './diagram/diagramStyles.css';
 import PublicMarkdownEditor from './PublicMarkdownEditor';
@@ -413,6 +414,55 @@ export default function LessonCanvas({
     const unsub = editor.store.listen(cleanup, { scope: 'document' });
     return () => unsub();
   }, [editor, isLocked, animationSteps, subTopicLabels, shapeAnimations, diagramData]);
+
+  // ─── Auto-add new shapes to timeline ─────────────────────────────────────
+  const knownShapeIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!editor || isLocked) return;
+
+    // Initialize known shapes
+    const allShapes = editor.getCurrentPageShapes();
+    knownShapeIdsRef.current = new Set(allShapes.map(s => s.id as string));
+
+    const detectNewShapes = () => {
+      const currentShapes = editor.getCurrentPageShapes();
+      const currentIds = new Set(currentShapes.map(s => s.id as string));
+      const newIds: string[] = [];
+
+      for (const id of currentIds) {
+        if (!knownShapeIdsRef.current.has(id)) {
+          newIds.push(id);
+        }
+      }
+
+      // Update known set
+      knownShapeIdsRef.current = currentIds;
+
+      if (newIds.length === 0) return;
+
+      // Check if these shapes are already in a step
+      const existingStepShapeIds = new Set(animationSteps.flatMap(s => s.shapeIds));
+      const trulyNew = newIds.filter(id => !existingStepShapeIds.has(id));
+      if (trulyNew.length === 0) return;
+
+      // Auto-add each new shape as a step
+      const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
+        id: `step-${Date.now()}-${i}`,
+        shapeIds: [id],
+        animation: 'appear' as AnimationType,
+        duration: 800,
+        label: `Step ${animationSteps.length + i + 1}`,
+        action: 'enter' as StepAction,
+      }));
+
+      setAnimationSteps(prev => [...prev, ...newSteps]);
+      setIsSaved(false);
+    };
+
+    const unsub = editor.store.listen(detectNewShapes, { scope: 'document' });
+    return () => unsub();
+  }, [editor, isLocked, animationSteps]);
 
   const handleLabelsChange = useCallback((newLabels: SubTopicLabel[]) => {
     setSubTopicLabels(newLabels);
@@ -1228,6 +1278,16 @@ export default function LessonCanvas({
         {/* Laser pointer overlay — only in presentation mode with laser tool */}
         {isPresenting && isLocked && presentationTool === 'laser' && <LaserPointer />}
       </div>
+
+      {/* Timeline bottom bar */}
+      <TimelineBar
+        steps={animationSteps}
+        onStepsChange={handleStepsChange}
+        editor={editor}
+        currentStep={currentStep}
+        isLocked={isLocked}
+        diagramData={diagramData}
+      />
       </>
       )}
     </div>
