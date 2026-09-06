@@ -6,7 +6,6 @@ import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
 import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig } from './types';
-import AnimationPanel from './AnimationPanel';
 import SubTopicTracker from './SubTopicTracker';
 import { applyIdleAnimation } from './animationEngine';
 import { applyStepAnimation, clearStepAnimations, applyExitAnimation, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
@@ -28,48 +27,6 @@ import type { PublicCanvasData } from './types';
  *  Tldraw IDs contain ':' (e.g. 'shape:xxx'). RF IDs don't. */
 const isRfId = (id: string) => !id.includes(':');
 const isTldrawId = (id: string) => id.includes(':');
-
-/** Resizable wrapper for the Steps panel — drag the right edge to widen */
-function ResizableStepsPanel({ children }: { children: React.ReactNode }) {
-  const [width, setWidth] = useState(288);
-  const isResizing = useRef(false);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    isResizing.current = true;
-    const startX = e.clientX;
-    const startWidth = width;
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isResizing.current) return;
-      const newWidth = Math.max(250, Math.min(500, startWidth + (ev.clientX - startX)));
-      setWidth(newWidth);
-    };
-    const onMouseUp = () => {
-      isResizing.current = false;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }, [width]);
-
-  return (
-    <div
-      className="bg-[#0f1b3d]/95 backdrop-blur-xl rounded-xl border border-blue-400/25 shadow-2xl shadow-blue-500/5 overflow-hidden relative"
-      style={{ width }}
-    >
-      {children}
-      {/* Resize handle on right edge */}
-      <div
-        onMouseDown={handleMouseDown}
-        className="absolute top-0 right-0 w-2 h-full cursor-ew-resize hover:bg-blue-400/20 transition-colors z-10"
-        title="Drag to resize"
-      />
-    </div>
-  );
-}
 
 /**
  * DropZone — only appears during drag operations from the node catalog.
@@ -180,10 +137,9 @@ export default function LessonCanvas({
   const [snapshot, setSnapshot] = useState<unknown>(initialData?.snapshot || null);
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
+  const [sidebarTitle, setSidebarTitle] = useState('Outline');
   const [shapeAnimations, setShapeAnimations] = useState<Record<string, ShapeAnimationConfig>>(initialData?.shapeAnimations || {});
-  const [currentStep, setCurrentStep] = useState(0);
-  const [showAnimPanel, setShowAnimPanel] = useState(false);
-  const [showSubTopics, setShowSubTopics] = useState(false);
+  const [currentStep, setCurrentStep] = useState(-1);
   const [showAnimBar, setShowAnimBar] = useState(false);
   const [showLineConfig, setShowLineConfig] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
@@ -203,7 +159,7 @@ export default function LessonCanvas({
   const [rfPathType, setRfPathType] = useState(diagramData.pathType);
   const [rfArrowType, setRfArrowType] = useState(diagramData.arrowType);
   const [rfColor, setRfColor] = useState(diagramData.color);
-  const [rfSelectedNodeIds, setRfSelectedNodeIds] = useState<string[]>([]);
+  const [, setRfSelectedNodeIds] = useState<string[]>([]);
   const [rfSelectedEdgeIds, setRfSelectedEdgeIds] = useState<string[]>([]);
   const diagramWrapperRef = useRef<HTMLDivElement>(null);
   const moveOriginalPositionsRef = useRef<Record<string, MoveRecord[]>>({});
@@ -245,7 +201,7 @@ export default function LessonCanvas({
       if (initialData?.camera) {
         ed.setCamera(initialData.camera);
       }
-      applyAnimationState(ed, animationSteps, 0);
+      applyAnimationState(ed, animationSteps, -1);
       ed.updateInstanceState({ isReadonly: true });
       setCanvasReady(true);
     }, 50);
@@ -264,32 +220,50 @@ export default function LessonCanvas({
     return () => unsub();
   }, [editor]);
 
-  const applyAnimationState = useCallback((ed: Editor, steps: AnimationStep[], upToStep: number) => {
+  // Track selected shape IDs for timeline highlighting
+  const [selectedShapeIds, setSelectedShapeIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!editor || isLocked) return;
+    const updateSelection = () => {
+      const ids = editor.getSelectedShapeIds() as string[];
+      setSelectedShapeIds(ids);
+    };
+    updateSelection();
+    const unsub = editor.store.listen(updateSelection, { scope: 'session' });
+    return () => unsub();
+  }, [editor, isLocked]);
+
+  const applyAnimationState = useCallback((_ed: Editor, steps: AnimationStep[], upToStep: number) => {
     if (steps.length === 0) return;
 
-    // Temporarily allow tldraw edits
-    ed.updateInstanceState({ isReadonly: false });
-
-    // Hide all tldraw animated shapes (none steps excluded — they don't affect visibility)
+    // Use CSS visibility instead of tldraw opacity — avoids store changes that cause reflows
     const visibilitySteps = steps.filter(s => (s.action || 'enter') !== 'none');
+
+    // Hide all tldraw animated shapes via CSS
     const allAnimatedIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isTldrawId));
     allAnimatedIds.forEach(shapeId => {
-      const shape = ed.getShape(shapeId as any);
-      if (shape) ed.updateShape({ id: shape.id, type: shape.type, opacity: 0 });
+      const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+      if (el) {
+        el.style.visibility = 'hidden';
+        el.style.opacity = '0';
+      }
     });
 
-    // Hide all RF animated elements via class (none steps excluded)
+    // Hide all RF animated elements via class
     const allRfIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isRfId));
     allRfIds.forEach(rfId => {
       const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
       if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
     });
 
-    // Also collect exit shape IDs from swap steps
+    // Also hide exit shape IDs from swap steps
     const allExitIds = new Set(steps.flatMap(s => s.exitShapeIds || []).filter(isTldrawId));
     allExitIds.forEach(shapeId => {
-      const shape = ed.getShape(shapeId as any);
-      if (shape) ed.updateShape({ id: shape.id, type: shape.type, opacity: 0 });
+      const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+      if (el) {
+        el.style.visibility = 'hidden';
+        el.style.opacity = '0';
+      }
     });
     const allRfExitIds = new Set(steps.flatMap(s => s.exitShapeIds || []).filter(isRfId));
     allRfExitIds.forEach(rfId => {
@@ -305,28 +279,35 @@ export default function LessonCanvas({
       if (stepAction === 'none') continue;
 
       if (stepAction === 'exit') {
-        // Exit step: shapes should be HIDDEN at this step
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
-          const shape = ed.getShape(shapeId as any);
-          if (shape) ed.updateShape({ id: shape.id, type: shape.type, opacity: 0 });
+          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          if (el) {
+            el.style.visibility = 'hidden';
+            el.style.opacity = '0';
+          }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
           if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
         });
       } else if (stepAction === 'swap') {
-        // Swap: show entering shapes, hide exiting shapes
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
-          const shape = ed.getShape(shapeId as any);
-          if (shape) ed.updateShape({ id: shape.id, type: shape.type, opacity: 1 });
+          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          if (el) {
+            el.style.visibility = 'visible';
+            el.style.opacity = '1';
+          }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
           if (el) { el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible'); }
         });
         (steps[i].exitShapeIds || []).filter(isTldrawId).forEach(shapeId => {
-          const shape = ed.getShape(shapeId as any);
-          if (shape) ed.updateShape({ id: shape.id, type: shape.type, opacity: 0 });
+          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          if (el) {
+            el.style.visibility = 'hidden';
+            el.style.opacity = '0';
+          }
         });
         (steps[i].exitShapeIds || []).filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
@@ -335,8 +316,11 @@ export default function LessonCanvas({
       } else {
         // Enter, blink, move, teleport: shapes should be VISIBLE
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
-          const shape = ed.getShape(shapeId as any);
-          if (shape) ed.updateShape({ id: shape.id, type: shape.type, opacity: 1 });
+          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          if (el) {
+            el.style.visibility = 'visible';
+            el.style.opacity = '1';
+          }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
@@ -344,9 +328,6 @@ export default function LessonCanvas({
         });
       }
     }
-
-    // Re-lock tldraw
-    ed.updateInstanceState({ isReadonly: true });
   }, []);
 
   // Called when DiagramEditor's React Flow is initialized — RF nodes are now in DOM
@@ -446,7 +427,7 @@ export default function LessonCanvas({
       const trulyNew = newIds.filter(id => !existingStepShapeIds.has(id));
       if (trulyNew.length === 0) return;
 
-      // Auto-add each new shape as a step
+      // Auto-add each new shape as a step (no camera capture — user adds manually)
       const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
         id: `step-${Date.now()}-${i}`,
         shapeIds: [id],
@@ -605,6 +586,11 @@ export default function LessonCanvas({
       document.querySelectorAll('.rf-anim-hidden, .rf-anim-visible').forEach(el => {
         el.classList.remove('rf-anim-hidden', 'rf-anim-visible');
       });
+      // Remove CSS visibility overrides from all tldraw shapes
+      document.querySelectorAll('[data-shape-id]').forEach(el => {
+        (el as HTMLElement).style.visibility = '';
+        (el as HTMLElement).style.opacity = '';
+      });
       // Delete any move/teleport clones and restore originals
       for (const records of Object.values(moveOriginalPositionsRef.current)) {
         rewindMoveRecords(records, editor);
@@ -617,6 +603,8 @@ export default function LessonCanvas({
       if (editingCameraRef.current) {
         editor.setCamera(editingCameraRef.current, { force: true });
       }
+      // Unlock tldraw camera
+      editor.setCameraOptions({ isLocked: false });
       setIsLocked(false);
     } else {
       editor.updateInstanceState({ isReadonly: false });
@@ -630,25 +618,22 @@ export default function LessonCanvas({
       const cam = editor.getCamera();
       editingCameraRef.current = { x: cam.x, y: cam.y, z: cam.z };
       presentationStartCameraRef.current = { x: cam.x, y: cam.y, z: cam.z };
-      setCurrentStep(0);
-      applyAnimationState(editor, animationSteps, 0);
+      setCurrentStep(-1);
+      applyAnimationState(editor, animationSteps, -1);
       // Re-apply after a frame to catch RF elements that might not be in DOM yet
-      setTimeout(() => applyAnimationState(editor, animationSteps, 0), 100);
+      setTimeout(() => applyAnimationState(editor, animationSteps, -1), 100);
       editor.updateInstanceState({ isReadonly: true });
+      // Lock tldraw camera to prevent any internal shifts during presentation
+      editor.setCameraOptions({ isLocked: true });
       setIsLocked(true);
-      setShowAnimPanel(false);
-      setShowSubTopics(false);
       setShowAnimBar(false);
       setShowNodes(false);
     }
   }, [isLocked, editor, animationSteps, applyAnimationState, stopStepAudio]);
 
-  // Camera nudge
+  // Camera nudge — only for completely off-screen elements
   const ensureShapesVisible = useCallback((shapeIds: string[]) => {
     if (!editor) return;
-    const viewportBounds = editor.getViewportScreenBounds();
-    const camera = editor.getCamera();
-    const zoom = camera.z;
 
     // Collect page-space bounding box of all shapes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -674,40 +659,22 @@ export default function LessonCanvas({
 
     if (minX === Infinity) return;
 
-    // Convert page bounds to screen coordinates
-    const screenTopLeft = editor.pageToScreen({ x: minX, y: minY });
-    const screenBottomRight = editor.pageToScreen({ x: maxX, y: maxY });
+    // Use tldraw's viewport page bounds (accounts for actual canvas area, not sidebar)
+    const vp = editor.getViewportPageBounds();
 
-    // Compare with actual viewport screen bounds
-    // Only nudge if the shape is actually off-screen (outside viewport), not just near the edge
-    let dx = 0, dy = 0;
-    const nudgePadding = 20; // Small padding when nudging to position
+    // Check if shape overlaps with viewport in page space
+    const isVisible =
+      maxX > vp.x &&
+      minX < vp.x + vp.w &&
+      maxY > vp.y &&
+      minY < vp.y + vp.h;
 
-    if (screenBottomRight.x < viewportBounds.x || screenTopLeft.x > viewportBounds.x + viewportBounds.w) {
-      // Shape is completely off-screen horizontally — center it
-      const centerX = (screenTopLeft.x + screenBottomRight.x) / 2;
-      const viewCenterX = viewportBounds.x + viewportBounds.w / 2;
-      dx = (viewCenterX - centerX) / zoom;
-    } else if (screenTopLeft.x < viewportBounds.x) {
-      dx = (viewportBounds.x + nudgePadding - screenTopLeft.x) / zoom;
-    } else if (screenBottomRight.x > viewportBounds.x + viewportBounds.w) {
-      dx = (viewportBounds.x + viewportBounds.w - nudgePadding - screenBottomRight.x) / zoom;
-    }
+    if (isVisible) return;
 
-    if (screenBottomRight.y < viewportBounds.y || screenTopLeft.y > viewportBounds.y + viewportBounds.h) {
-      // Shape is completely off-screen vertically — center it
-      const centerY = (screenTopLeft.y + screenBottomRight.y) / 2;
-      const viewCenterY = viewportBounds.y + viewportBounds.h / 2;
-      dy = (viewCenterY - centerY) / zoom;
-    } else if (screenTopLeft.y < viewportBounds.y) {
-      dy = (viewportBounds.y + nudgePadding - screenTopLeft.y) / zoom;
-    } else if (screenBottomRight.y > viewportBounds.y + viewportBounds.h) {
-      dy = (viewportBounds.y + viewportBounds.h - nudgePadding - screenBottomRight.y) / zoom;
-    }
-
-    if (dx !== 0 || dy !== 0) {
-      editor.setCamera({ x: camera.x + dx, y: camera.y + dy, z: zoom }, { force: true, animation: { duration: 300 } });
-    }
+    // Completely off-screen — center on shape, offset left to account for sidebar
+    const pageCenterX = (minX + maxX) / 2;
+    const pageCenterY = (minY + maxY) / 2;
+    editor.centerOnPoint({ x: pageCenterX, y: pageCenterY }, { force: true, animation: { duration: 300 } });
   }, [editor]);
 
   const goNext = useCallback(() => {
@@ -789,10 +756,9 @@ export default function LessonCanvas({
     playStepAudio(step);
 
     setCurrentStep(nextStep);
-    // If this step has a captured camera, it handles its own camera movement — skip nudge
-    // Otherwise, nudge camera to keep newly revealed shapes visible
+    // If step has no camera lock and element is off-screen, nudge to show it
     if (!step.cameraPosition) {
-      setTimeout(() => ensureShapesVisible(step.shapeIds), 150);
+      setTimeout(() => ensureShapesVisible(step.shapeIds), 500);
     }
   }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio]);
 
@@ -1051,12 +1017,6 @@ export default function LessonCanvas({
                 <FileText className="w-3 h-3" />
                 Markdown
               </button>
-              <button onClick={() => setShowAnimPanel(!showAnimPanel)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showAnimPanel ? 'bg-blue-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
-                Steps
-              </button>
-              <button onClick={() => setShowSubTopics(!showSubTopics)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showSubTopics ? 'bg-indigo-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
-                Sub Topics
-              </button>
             </>
           )}
           {/* Public canvas toggle — hidden when presenting */}
@@ -1104,8 +1064,10 @@ export default function LessonCanvas({
         />
       )}
 
-      {/* ─── Canvas Area (full remaining space) ───────────────────────── */}
+      {/* ─── Canvas + Sidebar ─────────────────────────────────────── */}
       <div className="flex-1 relative overflow-hidden">
+        {/* Canvas Area (full width — sidebar overlays) */}
+        <div className="absolute inset-0">
         {/* tldraw canvas — always visible */}
         <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}>
           <CanvasEditor
@@ -1227,56 +1189,23 @@ export default function LessonCanvas({
           </DraggableWidget>
         )}
 
-        {/* Animation Steps Panel */}
-        {!isLocked && showAnimPanel && (
-          <DraggableWidget defaultPosition={{ x: window.innerWidth - 320, y: 16 }} zIndex={50}>
-            <ResizableStepsPanel>
-              <div data-drag-handle className="flex items-center justify-between px-3 py-2.5 border-b border-blue-400/15 bg-blue-500/8 cursor-grab active:cursor-grabbing">
-                <span className="text-xs font-semibold text-blue-300">Animation Steps</span>
-              </div>
-              <div className="max-h-[400px] overflow-y-auto">
-                <AnimationPanel
-                  steps={animationSteps}
-                  onStepsChange={handleStepsChange}
-                  editor={editor}
-                  rfSelectedNodeIds={rfSelectedNodeIds}
-                  rfSelectedEdgeIds={rfSelectedEdgeIds}
-                  diagramData={diagramData}
-                  onPickDestination={(stepId) => {
-                    if (!editor) return;
-                    const step = animationSteps.find(s => s.id === stepId);
-                    if (!step || step.shapeIds.length === 0) return;
-                    const shapeId = step.shapeIds[0];
-                    if (!shapeId.includes(':')) return; // Only tldraw shapes
-                    const shape = editor.getShape(shapeId as any);
-                    if (!shape) return;
-                    // Save original position
-                    setPickOriginalPosition({ x: (shape as any).x, y: (shape as any).y });
-                    setPickingDestinationForStep(stepId);
-                    // Unlock canvas so user can drag the shape
-                    editor.updateInstanceState({ isReadonly: false });
-                    // Select the shape so it's easy to drag
-                    editor.select(shapeId as any);
-                  }}
-                />
-              </div>
-            </ResizableStepsPanel>
-          </DraggableWidget>
-        )}
-
-        {/* Sub Topic Tracker */}
-        {(isLocked || showSubTopics) && (
-          <SubTopicTracker
-            labels={subTopicLabels}
-            onLabelsChange={handleLabelsChange}
-            steps={animationSteps}
-            isLocked={isLocked}
-            currentStep={currentStep}
-          />
-        )}
-
         {/* Laser pointer overlay — only in presentation mode with laser tool */}
         {isPresenting && isLocked && presentationTool === 'laser' && <LaserPointer />}
+      </div>
+
+      {/* Sub Topic Sidebar (overlays right side) */}
+      <div className="absolute top-0 right-0 bottom-0 w-[15%] min-w-[180px] border-l border-[#1a2a5e] bg-[#0a1230] flex flex-col overflow-hidden z-30">
+        <SubTopicTracker
+          labels={subTopicLabels}
+          onLabelsChange={handleLabelsChange}
+          steps={animationSteps}
+          isLocked={isLocked}
+          currentStep={currentStep}
+          sidebar
+          sidebarTitle={sidebarTitle}
+          onSidebarTitleChange={setSidebarTitle}
+        />
+      </div>
       </div>
 
       {/* Timeline bottom bar */}
@@ -1284,9 +1213,9 @@ export default function LessonCanvas({
         steps={animationSteps}
         onStepsChange={handleStepsChange}
         editor={editor}
-        currentStep={currentStep}
         isLocked={isLocked}
         diagramData={diagramData}
+        selectedShapeIds={selectedShapeIds}
       />
       </>
       )}

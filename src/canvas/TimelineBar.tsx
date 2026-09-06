@@ -4,9 +4,9 @@
  * Shapes auto-added when created on canvas.
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import {
-  Trash2, ChevronLeft, ChevronRight, Camera, CameraOff,
+  Trash2, Camera, CameraOff, ChevronDown, ChevronUp, Plus, Eye, Volume2, VolumeX,
   Type, Square, ArrowRight, Image, Pencil, Circle, Triangle, Star, Minus,
   GitBranch, Cable,
 } from 'lucide-react';
@@ -19,43 +19,44 @@ interface TimelineBarProps {
   steps: AnimationStep[];
   onStepsChange: (steps: AnimationStep[]) => void;
   editor: Editor | null;
-  currentStep: number;
   isLocked: boolean;
   diagramData?: DiagramData;
+  selectedShapeIds?: string[];
 }
 
-const actionOptions: { value: StepAction; label: string }[] = [
-  { value: 'none', label: 'None' },
-  { value: 'enter', label: 'Enter' },
-  { value: 'exit', label: 'Exit' },
-  { value: 'blink', label: 'Blink' },
+const ANIMATION_OPTIONS: { value: string; label: string; group: string }[] = [
+  // Entrance
+  { value: 'appear', label: 'Appear', group: 'Entrance' },
+  { value: 'flyInLeft', label: 'Fly Left', group: 'Entrance' },
+  { value: 'flyInRight', label: 'Fly Right', group: 'Entrance' },
+  { value: 'flyInTop', label: 'Fly Top', group: 'Entrance' },
+  { value: 'flyInBottom', label: 'Fly Bottom', group: 'Entrance' },
+  { value: 'pop', label: 'Pop', group: 'Entrance' },
+  { value: 'pulse', label: 'Pulse', group: 'Entrance' },
+  { value: 'bounce', label: 'Bounce', group: 'Entrance' },
+  // Reveal
+  { value: 'revealLeft', label: 'Reveal L→R', group: 'Reveal' },
+  { value: 'revealRight', label: 'Reveal R→L', group: 'Reveal' },
+  { value: 'revealTop', label: 'Reveal T→D', group: 'Reveal' },
+  { value: 'revealBottom', label: 'Reveal B→U', group: 'Reveal' },
+  { value: 'revealCenter', label: 'Reveal Center', group: 'Reveal' },
+  // Special
+  { value: 'blink', label: 'Blink', group: 'Special' },
+  // Loop
+  { value: 'idleFloat', label: 'Float (loop)', group: 'Loop' },
+  { value: 'idleShake', label: 'Shake (loop)', group: 'Loop' },
+  { value: 'idlePulse', label: 'Pulse (loop)', group: 'Loop' },
+  { value: 'idleBounce', label: 'Bounce (loop)', group: 'Loop' },
+  { value: 'idleBreathe', label: 'Breathe (loop)', group: 'Loop' },
+  { value: 'idleWiggle', label: 'Wiggle (loop)', group: 'Loop' },
+  { value: 'idleSway', label: 'Sway (loop)', group: 'Loop' },
+];
+
+const MANUAL_ACTION_OPTIONS: { value: StepAction; label: string }[] = [
+  { value: 'exit', label: 'Erase' },
   { value: 'move', label: 'Move' },
   { value: 'teleport', label: 'Teleport' },
   { value: 'swap', label: 'Swap' },
-];
-
-const animationTypes: { value: AnimationType; label: string }[] = [
-  { value: 'none', label: 'None' },
-  { value: 'appear', label: 'Appear' },
-  { value: 'fadeIn', label: 'Fade In' },
-  { value: 'flyInLeft', label: 'Fly Left' },
-  { value: 'flyInRight', label: 'Fly Right' },
-  { value: 'flyInTop', label: 'Fly Top' },
-  { value: 'flyInBottom', label: 'Fly Bottom' },
-  { value: 'slideInLeft', label: 'Slide Left' },
-  { value: 'slideInRight', label: 'Slide Right' },
-  { value: 'slideInTop', label: 'Slide Top' },
-  { value: 'slideInBottom', label: 'Slide Bottom' },
-  { value: 'zoomIn', label: 'Zoom In' },
-  { value: 'zoomOut', label: 'Zoom Out' },
-  { value: 'pop', label: 'Pop' },
-  { value: 'pulse', label: 'Pulse' },
-  { value: 'bounce', label: 'Bounce' },
-  { value: 'revealLeft', label: 'Reveal L→R' },
-  { value: 'revealRight', label: 'Reveal R→L' },
-  { value: 'revealTop', label: 'Reveal T→D' },
-  { value: 'revealBottom', label: 'Reveal B→U' },
-  { value: 'revealCenter', label: 'Reveal Center' },
 ];
 
 function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: DiagramData): { icon: React.ReactNode; label: string } {
@@ -138,75 +139,238 @@ export default function TimelineBar({
   steps,
   onStepsChange,
   editor,
-  currentStep,
   isLocked,
   diagramData,
+  selectedShapeIds = [],
 }: TimelineBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const preZoomCameraRef = useRef<Record<string, { x: number; y: number; z: number }>>({});
+  const [minimized, setMinimized] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  // Auto-scroll timeline to selected card
+  useEffect(() => {
+    if (!scrollRef.current || selectedShapeIds.length === 0 || minimized) return;
+    const selectedStepIndex = steps.findIndex(s => s.shapeIds.some(id => selectedShapeIds.includes(id)));
+    if (selectedStepIndex === -1) return;
+    const card = scrollRef.current.querySelector(`[data-timeline-index="${selectedStepIndex}"]`) as HTMLElement | null;
+    if (!card) return;
+    const container = scrollRef.current;
+    const cardLeft = card.offsetLeft;
+    const cardWidth = card.offsetWidth;
+    const containerLeft = container.scrollLeft;
+    const containerWidth = container.clientWidth;
+    // If card is outside visible area, scroll to center it
+    if (cardLeft < containerLeft || cardLeft + cardWidth > containerLeft + containerWidth) {
+      container.scrollTo({
+        left: cardLeft - containerWidth / 2 + cardWidth / 2,
+        behavior: 'smooth',
+      });
+    }
+  }, [selectedShapeIds, steps, minimized]);
 
   const updateStep = useCallback((id: string, updates: Partial<AnimationStep>) => {
     onStepsChange(steps.map(s => s.id === id ? { ...s, ...updates } : s));
   }, [steps, onStepsChange]);
 
   const removeStep = useCallback((id: string) => {
+    const step = steps.find(s => s.id === id);
+    if (step && editor) {
+      const action = step.action || 'enter';
+      const isManual = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
+      // Only delete shapes from canvas for auto-added (entrance) cards
+      if (!isManual) {
+        const tldrawIds = step.shapeIds.filter(sid => sid.includes(':'));
+        if (tldrawIds.length > 0) {
+          editor.deleteShapes(tldrawIds as any);
+        }
+      }
+    }
     onStepsChange(steps.filter(s => s.id !== id));
-  }, [steps, onStepsChange]);
-
-  const moveStep = useCallback((index: number, direction: 'left' | 'right') => {
-    const targetIndex = direction === 'left' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= steps.length) return;
-    const newSteps = [...steps];
-    [newSteps[index], newSteps[targetIndex]] = [newSteps[targetIndex], newSteps[index]];
-    onStepsChange(newSteps);
-  }, [steps, onStepsChange]);
+  }, [steps, onStepsChange, editor]);
 
   const captureCamera = useCallback((stepId: string) => {
     if (!editor) return;
     const cam = editor.getCamera();
     updateStep(stepId, { cameraPosition: { x: cam.x, y: cam.y, z: cam.z } });
-    // Restore to pre-capture view
-    const preCam = preZoomCameraRef.current[stepId];
-    if (preCam) {
-      editor.setCamera(preCam, { force: true });
-    }
   }, [editor, updateStep]);
 
   const clearCamera = useCallback((stepId: string) => {
     updateStep(stepId, { cameraPosition: undefined });
-    delete preZoomCameraRef.current[stepId];
   }, [updateStep]);
 
+  // Jump canvas to the saved camera position for this step
+  const viewPosition = useCallback((step: AnimationStep) => {
+    if (!editor || !step.cameraPosition) return;
+    editor.setCamera(step.cameraPosition, { force: true, animation: { duration: 300 } });
+  }, [editor]);
+
+  // ─── Audio ──────────────────────────────────────────────────────────────
+  const audioFileRef = useRef<HTMLInputElement>(null);
+  const audioUploadStepRef = useRef<string>('');
+  const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
+  const audioPreviewCtxRef = useRef<AudioContext | null>(null);
+  const audioPreviewGainRef = useRef<GainNode | null>(null);
+  const [audioExpandedSteps, setAudioExpandedSteps] = useState<Set<string>>(new Set());
+
+  const toggleAudioExpanded = useCallback((stepId: string) => {
+    setAudioExpandedSteps(prev => {
+      const next = new Set(prev);
+      if (next.has(stepId)) next.delete(stepId); else next.add(stepId);
+      return next;
+    });
+  }, []);
+
+  const handleAudioUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    const fileName = file.name;
+    reader.onload = () => {
+      const stepId = audioUploadStepRef.current;
+      if (!stepId) return;
+      const existing = steps.find(s => s.id === stepId)?.audio;
+      onStepsChange(steps.map(s => s.id === stepId ? { ...s, audio: {
+        data: reader.result as string,
+        fileName,
+        startTime: existing?.startTime ?? 0,
+        endTime: existing?.endTime ?? 5,
+        loop: existing?.loop ?? false,
+        volume: existing?.volume ?? 0.8,
+      }} : s));
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }, [steps, onStepsChange]);
+
+  const previewAudio = useCallback((step: AnimationStep) => {
+    if (!step.audio?.data) return;
+    if (audioPreviewRef.current) { audioPreviewRef.current.pause(); audioPreviewRef.current = null; }
+    if (!audioPreviewCtxRef.current) audioPreviewCtxRef.current = new AudioContext();
+    const ctx = audioPreviewCtxRef.current;
+    const audio = new Audio(step.audio.data);
+    audio.currentTime = step.audio.startTime;
+    const source = ctx.createMediaElementSource(audio);
+    const gain = ctx.createGain();
+    gain.gain.value = Math.max(0, Math.min(1, step.audio.volume));
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    audioPreviewGainRef.current = gain;
+    audio.play();
+    const { endTime, startTime, loop } = step.audio;
+    audio.addEventListener('timeupdate', () => {
+      if (audio.currentTime >= endTime) {
+        if (loop) { audio.currentTime = startTime; } else { audio.pause(); audioPreviewRef.current = null; }
+      }
+    });
+    audio.addEventListener('ended', () => {
+      if (loop) { audio.currentTime = startTime; audio.play().catch(() => {}); } else { audioPreviewRef.current = null; }
+    });
+    audioPreviewRef.current = audio;
+  }, []);
+
   const clearAll = useCallback(() => {
-    if (window.confirm('Delete all steps from timeline?')) {
+    if (window.confirm('Delete all steps and shapes from canvas?')) {
+      // Delete all tldraw shapes that are in any step
+      if (editor) {
+        const allTldrawIds = steps
+          .flatMap(s => s.shapeIds)
+          .filter(id => id.includes(':'));
+        if (allTldrawIds.length > 0) {
+          editor.deleteShapes(allTldrawIds as any);
+        }
+      }
       onStepsChange([]);
     }
-  }, [onStepsChange]);
+  }, [onStepsChange, steps, editor]);
+
+  // Manually add selected canvas elements to timeline
+  const addManually = useCallback(() => {
+    if (!editor) return;
+    const ids = editor.getSelectedShapeIds() as string[];
+    if (ids.length === 0) return;
+
+    const newStep: AnimationStep = {
+      id: `step-${Date.now()}`,
+      shapeIds: [...ids],
+      animation: 'appear' as AnimationType,
+      duration: 800,
+      label: `Step ${steps.length + 1}`,
+      action: 'exit' as StepAction, // Default to Erase for manual adds
+    };
+
+    onStepsChange([...steps, newStep]);
+  }, [editor, steps, onStepsChange]);
+
+  // Click card → select shapes on canvas and pan to show them
+  const handleCardClick = useCallback((step: AnimationStep) => {
+    if (!editor || isLocked) return;
+    const tldrawIds = step.shapeIds.filter(id => id.includes(':'));
+    if (tldrawIds.length > 0) {
+      editor.select(...tldrawIds as any);
+    }
+    // If camera is locked for this step, jump to saved position
+    if (step.cameraPosition) {
+      editor.setCamera(step.cameraPosition, { force: true, animation: { duration: 300 } });
+    } else if (tldrawIds.length > 0) {
+      // No camera lock — center on the shapes
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const id of tldrawIds) {
+        const bounds = editor.getShapePageBounds(id as any);
+        if (!bounds) continue;
+        minX = Math.min(minX, bounds.x);
+        minY = Math.min(minY, bounds.y);
+        maxX = Math.max(maxX, bounds.x + bounds.w);
+        maxY = Math.max(maxY, bounds.y + bounds.h);
+      }
+      if (minX !== Infinity) {
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        editor.centerOnPoint({ x: centerX, y: centerY }, { animation: { duration: 300 } });
+      }
+    }
+  }, [editor, isLocked]);
+
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+    const el = e.currentTarget as HTMLElement;
+    setTimeout(() => el.style.opacity = '0.4', 0);
+  }, []);
+
+  const handleDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '1';
+    }
+    setDragIndex(null);
+    setDropIndex(null);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropIndex(index);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    const sourceIndex = dragIndex;
+    if (sourceIndex === null || sourceIndex === targetIndex) {
+      setDragIndex(null);
+      setDropIndex(null);
+      return;
+    }
+    const newSteps = [...steps];
+    const [moved] = newSteps.splice(sourceIndex, 1);
+    newSteps.splice(targetIndex, 0, moved);
+    onStepsChange(newSteps);
+    setDragIndex(null);
+    setDropIndex(null);
+  }, [dragIndex, steps, onStepsChange]);
 
   if (isLocked) {
-    // In locked mode, show minimal playback indicator
-    return (
-      <div className="flex-shrink-0 h-12 bg-[#0a1230] border-t border-[#1a2a5e] flex items-center px-4 gap-2">
-        <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Timeline</span>
-        <div className="flex-1 flex items-center gap-1 overflow-x-auto">
-          {steps.map((step, i) => {
-            const isActive = i === currentStep;
-            const isPast = i < currentStep;
-            return (
-              <div
-                key={step.id}
-                className={`flex-shrink-0 w-8 h-2 rounded-full transition-all ${
-                  isActive ? 'bg-blue-500 w-12' : isPast ? 'bg-blue-800' : 'bg-slate-700'
-                }`}
-              />
-            );
-          })}
-        </div>
-        <span className="text-[10px] text-slate-500">
-          {currentStep + 1} / {steps.length}
-        </span>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -217,17 +381,34 @@ export default function TimelineBar({
           <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Timeline</span>
           <span className="text-[10px] text-slate-600">{steps.length} steps</span>
         </div>
-        {steps.length > 0 && (
+        <div className="flex items-center gap-1.5">
           <button
-            onClick={clearAll}
-            className="text-[9px] text-red-400 hover:text-red-300 px-2 py-0.5 rounded border border-red-500/20 hover:bg-red-500/10"
+            onClick={addManually}
+            className="flex items-center gap-1 text-[9px] text-blue-400 hover:text-blue-300 px-2 py-0.5 rounded border border-blue-500/20 hover:bg-blue-500/10"
+            title="Add selected element(s) to timeline manually"
           >
-            Clear All
+            <Plus className="w-3 h-3" /> Add
           </button>
-        )}
+          <button
+            onClick={() => setMinimized(m => !m)}
+            className="p-0.5 rounded hover:bg-slate-700/50 text-slate-400 hover:text-slate-300"
+            title={minimized ? 'Expand timeline' : 'Minimize timeline'}
+          >
+            {minimized ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {steps.length > 0 && (
+            <button
+              onClick={clearAll}
+              className="text-[9px] text-red-400 hover:text-red-300 px-2 py-0.5 rounded border border-red-500/20 hover:bg-red-500/10"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Timeline track */}
+      {/* Timeline track — hidden when minimized */}
+      {!minimized && (
       <div
         ref={scrollRef}
         className="flex items-stretch gap-2 px-3 py-2 overflow-x-auto"
@@ -241,13 +422,31 @@ export default function TimelineBar({
           steps.map((step, index) => {
             const info = getShapeIcon(editor, step.shapeIds[0], diagramData);
             const extra = step.shapeIds.length > 1 ? `+${step.shapeIds.length - 1}` : '';
-            const action = step.action || 'enter';
             const hasCamera = !!step.cameraPosition;
+            const isSelected = step.shapeIds.some(id => selectedShapeIds.includes(id));
+            const action = step.action || 'enter';
+            const isManualCard = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
+            const isMultiShape = step.shapeIds.length > 1;
 
             return (
               <div
                 key={step.id}
-                className="flex-shrink-0 w-44 rounded-lg border border-slate-700/60 bg-slate-800/40 flex flex-col overflow-hidden hover:border-slate-600 transition-colors"
+                data-timeline-index={index}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                onClick={() => handleCardClick(step)}
+                className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
+                  dropIndex === index && dragIndex !== index
+                    ? 'border-blue-400 bg-blue-500/10'
+                    : isSelected
+                    ? 'border-amber-400 bg-amber-500/10'
+                    : isManualCard
+                    ? 'border-orange-700/60 bg-orange-900/20 hover:border-orange-600'
+                    : 'border-slate-700/60 bg-slate-800/40 hover:border-slate-600'
+                } ${dragIndex === index ? 'opacity-40' : ''}`}
               >
                 {/* Step header */}
                 <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-slate-700/40 bg-slate-800/60">
@@ -259,53 +458,134 @@ export default function TimelineBar({
 
                 {/* Controls */}
                 <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1">
-                  {/* Action + Animation */}
-                  <div className="flex items-center gap-1">
+                  {/* Animation/Action dropdown */}
+                  {isManualCard ? (
+                    // Manual card — show action dropdown (Erase/Move/Teleport/Swap)
                     <select
                       value={action}
                       onChange={(e) => updateStep(step.id, { action: e.target.value as StepAction })}
-                      className="flex-1 text-[9px] border border-slate-600/50 rounded px-1 py-0.5 bg-slate-800/50 text-slate-300"
+                      disabled={isMultiShape}
+                      className={`w-full text-[9px] border border-orange-600/50 rounded px-1 py-1 bg-slate-800/50 text-orange-300 ${isMultiShape ? 'opacity-60 cursor-not-allowed' : ''}`}
                     >
-                      {actionOptions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                      {isMultiShape ? (
+                        <option value="exit">Erase</option>
+                      ) : (
+                        MANUAL_ACTION_OPTIONS.map(a => (
+                          <option key={a.value} value={a.value}>{a.label}</option>
+                        ))
+                      )}
                     </select>
-                    {(action === 'enter' || action === 'exit') && (
-                      <select
-                        value={step.animation}
-                        onChange={(e) => updateStep(step.id, { animation: e.target.value as AnimationType })}
-                        className="flex-1 text-[9px] border border-slate-600/50 rounded px-1 py-0.5 bg-slate-800/50 text-slate-300"
+                  ) : (
+                    // Auto card — show animation dropdown
+                    <select
+                      value={step.action === 'blink' ? 'blink' : step.animation}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'blink') {
+                          updateStep(step.id, { action: 'blink', animation: 'appear' as AnimationType });
+                        } else {
+                          updateStep(step.id, { action: 'enter', animation: val as AnimationType });
+                        }
+                      }}
+                      className="w-full text-[9px] border border-slate-600/50 rounded px-1 py-1 bg-slate-800/50 text-slate-300"
+                    >
+                      {ANIMATION_OPTIONS.map(a => (
+                        <option key={a.value} value={a.value}>{a.label}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Camera: Lock + View Position */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); captureCamera(step.id); }}
+                      className={`flex items-center gap-0.5 px-1 py-1 rounded text-[8px] font-medium transition-all justify-center ${
+                        hasCamera
+                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                          : 'bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700'
+                      }`}
+                      title="Lock current camera view"
+                    >
+                      {hasCamera ? (
+                        <><Camera className="w-2.5 h-2.5" /> {Math.round(step.cameraPosition!.z * 100)}%</>
+                      ) : (
+                        <><CameraOff className="w-2.5 h-2.5" /> Lock</>
+                      )}
+                    </button>
+                    {hasCamera && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); viewPosition(step); }}
+                        className="flex items-center gap-0.5 px-1 py-1 rounded text-[8px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all"
+                        title="Jump to saved camera position"
                       >
-                        {animationTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                      </select>
+                        <Eye className="w-2.5 h-2.5" /> View
+                      </button>
+                    )}
+                    {hasCamera && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); clearCamera(step.id); }}
+                        className="p-0.5 rounded text-[8px] text-red-400/60 hover:text-red-400 hover:bg-red-500/10"
+                        title="Remove camera lock"
+                      >
+                        ✕
+                      </button>
                     )}
                   </div>
-
-                  {/* Camera lock button */}
-                  <button
-                    onClick={() => hasCamera ? clearCamera(step.id) : captureCamera(step.id)}
-                    className={`flex items-center gap-1 px-1.5 py-1 rounded text-[9px] font-medium transition-all w-full justify-center ${
-                      hasCamera
-                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                        : 'bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700'
-                    }`}
-                  >
-                    {hasCamera ? (
-                      <><Camera className="w-3 h-3" /> {Math.round(step.cameraPosition!.z * 100)}%</>
-                    ) : (
-                      <><CameraOff className="w-3 h-3" /> Lock Camera</>
-                    )}
-                  </button>
                 </div>
 
-                {/* Step footer — move/delete */}
-                <div className="flex items-center justify-between px-1.5 py-1 border-t border-slate-700/40 bg-slate-800/60">
-                  <div className="flex items-center gap-0.5">
-                    <button onClick={() => moveStep(index, 'left')} disabled={index === 0} className="p-0.5 rounded hover:bg-slate-700/50 disabled:opacity-20">
-                      <ChevronLeft className="w-3 h-3 text-slate-400" />
-                    </button>
-                    <button onClick={() => moveStep(index, 'right')} disabled={index === steps.length - 1} className="p-0.5 rounded hover:bg-slate-700/50 disabled:opacity-20">
-                      <ChevronRight className="w-3 h-3 text-slate-400" />
-                    </button>
-                  </div>
+                {/* Audio — collapsible */}
+                <div className="px-2 pb-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleAudioExpanded(step.id); }}
+                    className={`flex items-center gap-1 w-full px-1 py-0.5 rounded text-[8px] font-medium transition-all ${
+                      step.audio?.data ? 'text-emerald-300' : audioExpandedSteps.has(step.id) ? 'text-slate-300' : 'text-slate-500'
+                    } hover:bg-slate-700/30`}
+                  >
+                    {step.audio?.data ? <Volume2 className="w-2.5 h-2.5" /> : <VolumeX className="w-2.5 h-2.5" />}
+                    {step.audio?.data ? step.audio.fileName || 'Audio' : 'Audio'}
+                    <ChevronDown className={`w-2.5 h-2.5 ml-auto transition-transform ${audioExpandedSteps.has(step.id) ? 'rotate-180' : ''}`} />
+                  </button>
+                  {audioExpandedSteps.has(step.id) && (
+                    <div className="mt-1 space-y-1" onClick={(e) => e.stopPropagation()}>
+                      {step.audio?.data ? (
+                        <>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => previewAudio(step)} className="px-1 py-0.5 rounded text-[8px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">▶</button>
+                            <button onClick={() => { if (audioPreviewRef.current) { audioPreviewRef.current.pause(); audioPreviewRef.current = null; } }} className="px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-300 border border-slate-600/30">⏹</button>
+                            <button onClick={() => updateStep(step.id, { audio: undefined })} className="px-1 py-0.5 rounded text-[8px] text-red-400 border border-red-500/20">✕</button>
+                          </div>
+                          <div className="flex items-center gap-1 text-[8px] text-slate-500">
+                            <span>Start</span>
+                            <input type="number" value={step.audio.startTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, startTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
+                            <span>End</span>
+                            <input type="number" value={step.audio.endTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, endTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
+                            <span>s</span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[8px] text-slate-500">
+                            <label className="flex items-center gap-0.5 cursor-pointer">
+                              <input type="checkbox" checked={step.audio.loop} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, loop: e.target.checked } })} style={{ width: 8, height: 8 }} />
+                              Loop
+                            </label>
+                            <span>Vol</span>
+                            <input type="range" min={0} max={100} step={5} value={Math.round(step.audio.volume * 100)} onChange={(e) => { const v = Number(e.target.value) / 100; updateStep(step.id, { audio: { ...step.audio!, volume: v } }); if (audioPreviewGainRef.current) audioPreviewGainRef.current.gain.value = v; }} className="w-12 h-1" style={{ accentColor: '#10b981' }} />
+                            <span>{Math.round(step.audio.volume * 100)}%</span>
+                          </div>
+                        </>
+                      ) : step.audio && !step.audio.data ? (
+                        <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                          🔊 Re-add: {step.audio.fileName || 'audio'}
+                        </button>
+                      ) : (
+                        <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700">
+                          <VolumeX className="w-2.5 h-2.5" /> Add Audio
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Step footer — delete */}
+                <div className="flex items-center justify-end px-1.5 py-1 border-t border-slate-700/40 bg-slate-800/60">
                   <button onClick={() => removeStep(step.id)} className="p-0.5 rounded hover:bg-red-500/10">
                     <Trash2 className="w-3 h-3 text-red-400/60 hover:text-red-400" />
                   </button>
@@ -315,6 +595,9 @@ export default function TimelineBar({
           })
         )}
       </div>
+      )}
+      {/* Hidden audio file input */}
+      <input ref={audioFileRef} type="file" accept="audio/*" onChange={handleAudioUpload} style={{ display: 'none' }} />
     </div>
   );
 }
