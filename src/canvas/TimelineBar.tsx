@@ -439,6 +439,12 @@ export default function TimelineBar({
   }, [editor, isLocked, diagramData]);
 
   const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    // Don't start card drag when interacting with form controls (volume slider, inputs, etc.)
+    const tag = (e.target as HTMLElement).tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'button' || tag === 'label') {
+      e.preventDefault();
+      return;
+    }
     setDragIndex(index);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', String(index));
@@ -680,7 +686,7 @@ export default function TimelineBar({
                     <ChevronDown className={`w-2.5 h-2.5 ml-auto transition-transform ${audioExpandedSteps.has(step.id) ? 'rotate-180' : ''}`} />
                   </button>
                   {audioExpandedSteps.has(step.id) && (
-                    <div className="mt-1 space-y-1" onClick={(e) => e.stopPropagation()}>
+                    <div className="mt-1 space-y-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                       {step.audio?.data ? (
                         <>
                           <div className="flex items-center gap-1">
