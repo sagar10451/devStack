@@ -4,6 +4,46 @@ Interactive canvas-based notes platform with step-by-step animations, system des
 
 ---
 
+## Recent Changes (Aug 29–30, 2026)
+
+### Timeline Bar (new)
+- **Horizontal timeline** at the bottom of the canvas — replaces the old floating AnimationPanel
+- **Auto-add to timeline** — any shape, text, image, or RF node/edge added to the canvas automatically appears as a timeline card
+- **Drag to reorder** — drag cards left/right to change animation order
+- **Group / Ungroup** — checkbox-select multiple cards, click "Group (N)" to merge into one step (they appear together during presentation)
+- **Manual add** — select elements on canvas, click "+ Add" on timeline. Single element gives 4 action options (Erase, Move, Teleport, Swap); multi-select gives only Erase
+- **Camera lock per step** — "Lock Camera" button on each card saves the current viewport; "View Position" jumps back to that saved view
+- **Per-step audio** — collapsible audio dropdown on each card with upload, preview (▶/⏹), start/end time, loop, and volume slider
+- **Audio auto-stop** — preview audio stops when canvas locks/unlocks or when the audio dropdown collapses
+- **Volume slider fix** — dragging the volume slider no longer moves the card
+- **Draggable widget** — the entire timeline bar can be repositioned by dragging its header
+- **Clear All** — deletes all timeline cards and their corresponding shapes from the canvas
+
+### Timeline ↔ Canvas Sync
+- **Card click → canvas focus** — clicking a timeline card selects and centers the element on canvas (tldraw shapes AND RF nodes/edges)
+- **Canvas click → card highlight** — selecting any element on canvas (including RF nodes/edges) auto-scrolls and highlights the matching timeline card
+
+### Sidebar (Sub-Topic Tracker)
+- **Moved to 15% right sidebar** — absolute overlay so tldraw gets full canvas width
+- **Title selector** — click the heading to pick from: Outline, Scenes, Topics, Contents, Agenda, Chapter Breakdown, Progress
+- **Title locked during presentation** — dropdown disabled when canvas is locked
+
+### PNG Export
+- **Export as PNG** button (ImageDown icon) in the toolbar
+- Uses `html-to-image` instead of `html2canvas` — correctly captures SVG-based React Flow edges and nodes at 2x resolution
+
+### Branding
+- **Dynamic tab title** — browser tab shows "devStack by Sagar Kumar" or "ChapterBreakdown by Priyanka & Sagar" based on `VITE_PORTAL` env
+- **ChapterBreakdown subtitle** — updated to "by Priyanka & Sagar"
+- **Line colors** updated for the off-white canvas background (`#f0ede8`)
+- **Laser pointer icon** changed to pen SVG
+
+### Two Vercel Projects
+- **Portal separation** via `VITE_PORTAL` env variable — `devStack` and `chapterBreakdown` deploy as independent Vercel projects
+- **Portal picker on localhost** — both portals accessible; single portal on production
+
+---
+
 ## Features
 
 ### Canvas Editor (localhost only)
@@ -328,7 +368,8 @@ src/
     PublicMarkdownEditor.tsx — Markdown editor (split/edit/preview modes)
     PublicMarkdownViewer.tsx — Production markdown viewer with TOC sidebar
     AnimationPanel.tsx       — Animation steps panel
-    SubTopicTracker.tsx      — Sub-topic progress tracker
+    TimelineBar.tsx          — Horizontal timeline bar with drag-reorder, audio, grouping
+    SubTopicTracker.tsx      — Sub-topic progress tracker / sidebar
     DraggableWidget.tsx      — Reusable draggable wrapper
     stepAnimations.ts        — Animation execution engine
     animationEngine.ts       — Idle animation engine
