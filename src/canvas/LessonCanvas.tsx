@@ -521,30 +521,41 @@ export default function LessonCanvas({
   const knownPageIdsRef = useRef<Set<string>>(new Set());
   // Track recently duplicated page IDs so auto-add skips them
   const recentlyDuplicatedPagesRef = useRef<Set<string>>(new Set());
+  const pageCheckIntervalRef = useRef<number | null>(null);
 
+  // Backfill pageId on existing steps that don't have one (runs once on mount)
+  useEffect(() => {
+    if (!editor) return;
+    const pages = editor.getPages();
+    const firstPageId = pages[0]?.id as string;
+    if (!firstPageId) return;
+    setAnimationSteps(prev => {
+      const needsFix = prev.some(s => !s.pageId);
+      if (!needsFix) return prev;
+      return prev.map(s => s.pageId ? s : { ...s, pageId: firstPageId });
+    });
+    knownPageIdsRef.current = new Set(pages.map(p => p.id as string));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
+
+  // Poll for page changes (every 500ms) — simpler and more reliable than store listener
   useEffect(() => {
     if (!editor) return;
 
-    // Initialize known pages
-    const pages = editor.getPages();
-    knownPageIdsRef.current = new Set(pages.map(p => p.id as string));
-
-    // Backfill pageId on existing steps that don't have one
-    // Assign them to the first page
-    const firstPageId = pages[0]?.id as string;
-    if (firstPageId) {
-      setAnimationSteps(prev => {
-        const needsFix = prev.some(s => !s.pageId);
-        if (!needsFix) return prev;
-        return prev.map(s => s.pageId ? s : { ...s, pageId: firstPageId });
-      });
-    }
-
-    const handlePageChanges = () => {
+    pageCheckIntervalRef.current = window.setInterval(() => {
       const currentPages = editor.getPages();
       const currentPageIds = new Set(currentPages.map(p => p.id as string));
 
-      // Detect new pages (could be a duplicate)
+      // Skip if nothing changed
+      if (currentPageIds.size === knownPageIdsRef.current.size) {
+        let same = true;
+        for (const id of currentPageIds) {
+          if (!knownPageIdsRef.current.has(id)) { same = false; break; }
+        }
+        if (same) return;
+      }
+
+      // Detect new pages
       const newPageIds: string[] = [];
       for (const id of currentPageIds) {
         if (!knownPageIdsRef.current.has(id)) {
@@ -562,24 +573,23 @@ export default function LessonCanvas({
 
       knownPageIdsRef.current = currentPageIds;
 
-      // Handle page deletion — remove orphaned timeline cards
+      // Handle page deletion
       if (deletedPageIds.length > 0) {
         setAnimationSteps(prev => prev.filter(s => !deletedPageIds.includes(s.pageId || '')));
         setIsSaved(false);
       }
 
-      // Handle page duplication — auto-create timeline cards for the new page
+      // Handle page duplication
       if (newPageIds.length > 0) {
         for (const newPageId of newPageIds) {
-          // Get shapes on the new page
           const newPageShapeIds = new Set(
             [...editor.getPageShapeIds(newPageId as any)].map(id => id as string)
           );
-          if (newPageShapeIds.size === 0) continue; // Blank new page, nothing to copy
+          if (newPageShapeIds.size === 0) continue;
 
-          // Mark this page as recently duplicated so auto-add doesn't create extra steps
+          // Mark as recently duplicated so auto-add skips it
           recentlyDuplicatedPagesRef.current.add(newPageId);
-          setTimeout(() => recentlyDuplicatedPagesRef.current.delete(newPageId), 2000);
+          setTimeout(() => recentlyDuplicatedPagesRef.current.delete(newPageId), 3000);
 
           const allPages = editor.getPages();
           const newPageIndex = allPages.findIndex(p => (p.id as string) === newPageId);
@@ -590,11 +600,10 @@ export default function LessonCanvas({
 
           if (sourcePageId) {
             setAnimationSteps(prev => {
-              // Find source steps — match by pageId
               const sourceSteps = prev.filter(s => s.pageId === sourcePageId);
               if (sourceSteps.length === 0) return prev;
 
-              // Map source shape IDs to new page shape IDs by matching position/type
+              // Map source shape IDs → new shape IDs by type+position matching
               const sourceShapes = [...editor.getPageShapeIds(sourcePageId as any)]
                 .map(id => editor.getShape(id))
                 .filter(Boolean) as any[];
@@ -617,19 +626,16 @@ export default function LessonCanvas({
                 }
               }
 
-              // Create new steps for the duplicated page
+              // Only create steps for shapes that were in timeline steps (not all shapes on page)
               const duplicatedSteps: AnimationStep[] = sourceSteps.map((step, i) => ({
                 ...step,
                 id: `step-${Date.now()}-dup-${i}`,
                 pageId: newPageId,
                 shapeIds: step.shapeIds.map(sid => idMapping.get(sid) || sid),
-                // Clear camera position — user should set it fresh for the new page
                 cameraPosition: undefined,
-                // Clear audio — user re-adds if needed
                 audio: undefined,
               }));
 
-              // Insert after the source page's steps
               const lastSourceIndex = prev.map(s => s.pageId).lastIndexOf(sourcePageId!);
               const result = [...prev];
               result.splice(lastSourceIndex + 1, 0, ...duplicatedSteps);
@@ -639,10 +645,13 @@ export default function LessonCanvas({
           }
         }
       }
-    };
+    }, 500);
 
-    const unsub = editor.store.listen(handlePageChanges, { scope: 'document' });
-    return () => unsub();
+    return () => {
+      if (pageCheckIntervalRef.current) {
+        clearInterval(pageCheckIntervalRef.current);
+      }
+    };
   }, [editor]);
 
   const handleLabelsChange = useCallback((newLabels: SubTopicLabel[]) => {
