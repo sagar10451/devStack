@@ -893,8 +893,7 @@ export default function LessonCanvas({
   }, [editor, topicSlug, subtopicSlug, buildSaveData]);
 
   const handleExportPng = useCallback(async () => {
-    // Capture the full canvas area (tldraw + RF overlay) as PNG
-    const canvasArea = document.querySelector('.flex-1.relative.overflow-hidden > .absolute.inset-0') as HTMLElement;
+    const canvasArea = document.getElementById('canvas-export-area');
     if (!canvasArea) return;
     try {
       const html2canvas = (await import('html2canvas')).default;
@@ -1106,7 +1105,7 @@ export default function LessonCanvas({
       {/* ─── Canvas + Sidebar ─────────────────────────────────────── */}
       <div className="flex-1 relative overflow-hidden">
         {/* Canvas Area (full width — sidebar overlays) */}
-        <div className="absolute inset-0">
+        <div id="canvas-export-area" className="absolute inset-0">
         {/* tldraw canvas — always visible */}
         <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}>
           <CanvasEditor
