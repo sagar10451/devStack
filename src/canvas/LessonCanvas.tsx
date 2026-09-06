@@ -159,7 +159,7 @@ export default function LessonCanvas({
   const [rfPathType, setRfPathType] = useState(diagramData.pathType);
   const [rfArrowType, setRfArrowType] = useState(diagramData.arrowType);
   const [rfColor, setRfColor] = useState(diagramData.color);
-  const [, setRfSelectedNodeIds] = useState<string[]>([]);
+  const [rfSelectedNodeIds, setRfSelectedNodeIds] = useState<string[]>([]);
   const [rfSelectedEdgeIds, setRfSelectedEdgeIds] = useState<string[]>([]);
   const diagramWrapperRef = useRef<HTMLDivElement>(null);
   const moveOriginalPositionsRef = useRef<Record<string, MoveRecord[]>>({});
@@ -225,13 +225,14 @@ export default function LessonCanvas({
   useEffect(() => {
     if (!editor || isLocked) return;
     const updateSelection = () => {
-      const ids = editor.getSelectedShapeIds() as string[];
-      setSelectedShapeIds(ids);
+      const tldrawIds = editor.getSelectedShapeIds() as string[];
+      // Merge tldraw + RF selections so timeline cards highlight for both
+      setSelectedShapeIds([...tldrawIds, ...rfSelectedNodeIds, ...rfSelectedEdgeIds]);
     };
     updateSelection();
     const unsub = editor.store.listen(updateSelection, { scope: 'session' });
     return () => unsub();
-  }, [editor, isLocked]);
+  }, [editor, isLocked, rfSelectedNodeIds, rfSelectedEdgeIds]);
 
   const applyAnimationState = useCallback((_ed: Editor, steps: AnimationStep[], upToStep: number) => {
     if (steps.length === 0) return;

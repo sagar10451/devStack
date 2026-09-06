@@ -368,14 +368,30 @@ export default function TimelineBar({
   const handleCardClick = useCallback((step: AnimationStep) => {
     if (!editor || isLocked) return;
     const tldrawIds = step.shapeIds.filter(id => id.includes(':'));
+    const rfIds = step.shapeIds.filter(id => !id.includes(':'));
+
+    // Select tldraw shapes
     if (tldrawIds.length > 0) {
       editor.select(...tldrawIds as any);
     }
+
+    // Highlight RF nodes/edges by selecting them in React Flow DOM
+    if (rfIds.length > 0 && diagramData) {
+      // Add 'selected' class to RF elements for visual feedback
+      document.querySelectorAll('.react-flow__node.selected, .react-flow__edge.selected').forEach(el => {
+        el.classList.remove('selected');
+      });
+      for (const rfId of rfIds) {
+        const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement;
+        if (el) el.classList.add('selected');
+      }
+    }
+
     // If camera is locked for this step, jump to saved position
     if (step.cameraPosition) {
       editor.setCamera(step.cameraPosition, { force: true, animation: { duration: 300 } });
-    } else if (tldrawIds.length > 0) {
-      // No camera lock — center on the shapes
+    } else if (tldrawIds.length > 0 || rfIds.length > 0) {
+      // No camera lock — center on the shapes (tldraw + RF)
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const id of tldrawIds) {
         const bounds = editor.getShapePageBounds(id as any);
@@ -385,13 +401,42 @@ export default function TimelineBar({
         maxX = Math.max(maxX, bounds.x + bounds.w);
         maxY = Math.max(maxY, bounds.y + bounds.h);
       }
+      // Include RF node positions in bounding box
+      if (diagramData) {
+        for (const rfId of rfIds) {
+          const node = diagramData.nodes.find((n: any) => n.id === rfId);
+          if (node) {
+            const pos = node.position as { x: number; y: number };
+            const w = (node as any).measured?.width || (node as any).width || 130;
+            const h = (node as any).measured?.height || (node as any).height || 75;
+            minX = Math.min(minX, pos.x);
+            minY = Math.min(minY, pos.y);
+            maxX = Math.max(maxX, pos.x + w);
+            maxY = Math.max(maxY, pos.y + h);
+          }
+          // For edges, use the source and target node positions
+          const edge = diagramData.edges.find((e: any) => e.id === rfId);
+          if (edge) {
+            const src = diagramData.nodes.find((n: any) => n.id === edge.source);
+            const tgt = diagramData.nodes.find((n: any) => n.id === edge.target);
+            for (const nd of [src, tgt]) {
+              if (!nd) continue;
+              const pos = nd.position as { x: number; y: number };
+              minX = Math.min(minX, pos.x);
+              minY = Math.min(minY, pos.y);
+              maxX = Math.max(maxX, pos.x + 130);
+              maxY = Math.max(maxY, pos.y + 75);
+            }
+          }
+        }
+      }
       if (minX !== Infinity) {
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
         editor.centerOnPoint({ x: centerX, y: centerY }, { animation: { duration: 300 } });
       }
     }
-  }, [editor, isLocked]);
+  }, [editor, isLocked, diagramData]);
 
   const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
     setDragIndex(index);
