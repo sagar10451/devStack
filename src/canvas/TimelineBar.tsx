@@ -214,13 +214,31 @@ export default function TimelineBar({
   const audioPreviewGainRef = useRef<GainNode | null>(null);
   const [audioExpandedSteps, setAudioExpandedSteps] = useState<Set<string>>(new Set());
 
+  const stopAudioPreview = useCallback(() => {
+    if (audioPreviewRef.current) {
+      audioPreviewRef.current.pause();
+      audioPreviewRef.current = null;
+    }
+  }, []);
+
+  // Stop audio preview when canvas locks/unlocks
+  useEffect(() => {
+    stopAudioPreview();
+  }, [isLocked, stopAudioPreview]);
+
   const toggleAudioExpanded = useCallback((stepId: string) => {
     setAudioExpandedSteps(prev => {
       const next = new Set(prev);
-      if (next.has(stepId)) next.delete(stepId); else next.add(stepId);
+      if (next.has(stepId)) {
+        next.delete(stepId);
+        // Collapsing audio dropdown — stop preview
+        stopAudioPreview();
+      } else {
+        next.add(stepId);
+      }
       return next;
     });
-  }, []);
+  }, [stopAudioPreview]);
 
   const handleAudioUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -246,7 +264,7 @@ export default function TimelineBar({
 
   const previewAudio = useCallback((step: AnimationStep) => {
     if (!step.audio?.data) return;
-    if (audioPreviewRef.current) { audioPreviewRef.current.pause(); audioPreviewRef.current = null; }
+    stopAudioPreview();
     if (!audioPreviewCtxRef.current) audioPreviewCtxRef.current = new AudioContext();
     const ctx = audioPreviewCtxRef.current;
     const audio = new Audio(step.audio.data);
@@ -268,7 +286,7 @@ export default function TimelineBar({
       if (loop) { audio.currentTime = startTime; audio.play().catch(() => {}); } else { audioPreviewRef.current = null; }
     });
     audioPreviewRef.current = audio;
-  }, []);
+  }, [stopAudioPreview]);
 
   const clearAll = useCallback(() => {
     if (window.confirm('Delete all steps and shapes from canvas?')) {
@@ -691,7 +709,7 @@ export default function TimelineBar({
                         <>
                           <div className="flex items-center gap-1">
                             <button onClick={() => previewAudio(step)} className="px-1 py-0.5 rounded text-[8px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">▶</button>
-                            <button onClick={() => { if (audioPreviewRef.current) { audioPreviewRef.current.pause(); audioPreviewRef.current = null; } }} className="px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-300 border border-slate-600/30">⏹</button>
+                            <button onClick={() => stopAudioPreview()} className="px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-300 border border-slate-600/30">⏹</button>
                             <button onClick={() => updateStep(step.id, { audio: undefined })} className="px-1 py-0.5 rounded text-[8px] text-red-400 border border-red-500/20">✕</button>
                           </div>
                           <div className="flex items-center gap-1 text-[8px] text-slate-500">
