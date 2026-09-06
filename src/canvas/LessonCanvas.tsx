@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot } from 'tldraw';
 import type { Editor } from 'tldraw';
-import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, Download, Upload, Palette, Boxes, Code2, FileText, Eye } from 'lucide-react';
+import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
@@ -892,6 +892,28 @@ export default function LessonCanvas({
     URL.revokeObjectURL(url);
   }, [editor, topicSlug, subtopicSlug, buildSaveData]);
 
+  const handleExportPng = useCallback(async () => {
+    // Capture the full canvas area (tldraw + RF overlay) as PNG
+    const canvasArea = document.querySelector('.flex-1.relative.overflow-hidden > .absolute.inset-0') as HTMLElement;
+    if (!canvasArea) return;
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(canvasArea, {
+        backgroundColor: '#f0ede8',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `canvas-${topicSlug}-${subtopicSlug}.png`;
+      a.click();
+    } catch (err) {
+      console.error('PNG export failed:', err);
+    }
+  }, [topicSlug, subtopicSlug]);
+
   const handleImport = useCallback(() => {
     const input = window.document.createElement('input');
     input.type = 'file';
@@ -986,6 +1008,9 @@ export default function LessonCanvas({
             <>
               <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Export as JSON">
                 <Download className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Export as PNG">
+                <ImageDown className="w-3.5 h-3.5" />
               </button>
               <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
