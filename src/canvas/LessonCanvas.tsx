@@ -414,6 +414,9 @@ export default function LessonCanvas({
 
       const pageId = editor.getCurrentPageId() as string;
 
+      // Skip if this page was recently duplicated — the page copy listener handles it
+      if (recentlyDuplicatedPagesRef.current.has(pageId)) return;
+
       // Auto-add each new shape as a step, tagged with current page
       const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
         id: `step-${Date.now()}-${i}`,
@@ -516,6 +519,8 @@ export default function LessonCanvas({
 
   // ─── Page copy/delete listeners ───────────────────────────────────────────
   const knownPageIdsRef = useRef<Set<string>>(new Set());
+  // Track recently duplicated page IDs so auto-add skips them
+  const recentlyDuplicatedPagesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!editor) return;
@@ -523,6 +528,17 @@ export default function LessonCanvas({
     // Initialize known pages
     const pages = editor.getPages();
     knownPageIdsRef.current = new Set(pages.map(p => p.id as string));
+
+    // Backfill pageId on existing steps that don't have one
+    // Assign them to the first page
+    const firstPageId = pages[0]?.id as string;
+    if (firstPageId) {
+      setAnimationSteps(prev => {
+        const needsFix = prev.some(s => !s.pageId);
+        if (!needsFix) return prev;
+        return prev.map(s => s.pageId ? s : { ...s, pageId: firstPageId });
+      });
+    }
 
     const handlePageChanges = () => {
       const currentPages = editor.getPages();
@@ -561,14 +577,12 @@ export default function LessonCanvas({
           );
           if (newPageShapeIds.size === 0) continue; // Blank new page, nothing to copy
 
-          // Find which existing page's steps match these shapes (by shape type/position similarity)
-          // For duplicated pages, shape IDs are NEW but the shapes are copies.
-          // We create new steps matching the order of the source page's steps.
-          // The source page is the page that was current before duplication.
-          // Since duplicatePage switches to the new page, the previous page is the source.
+          // Mark this page as recently duplicated so auto-add doesn't create extra steps
+          recentlyDuplicatedPagesRef.current.add(newPageId);
+          setTimeout(() => recentlyDuplicatedPagesRef.current.delete(newPageId), 2000);
+
           const allPages = editor.getPages();
           const newPageIndex = allPages.findIndex(p => (p.id as string) === newPageId);
-          // Source is typically the page just before the new one in order
           let sourcePageId: string | null = null;
           if (newPageIndex > 0) {
             sourcePageId = allPages[newPageIndex - 1].id as string;
@@ -576,7 +590,8 @@ export default function LessonCanvas({
 
           if (sourcePageId) {
             setAnimationSteps(prev => {
-              const sourceSteps = prev.filter(s => (s.pageId || '') === sourcePageId);
+              // Find source steps — match by pageId
+              const sourceSteps = prev.filter(s => s.pageId === sourcePageId);
               if (sourceSteps.length === 0) return prev;
 
               // Map source shape IDs to new page shape IDs by matching position/type
@@ -587,18 +602,18 @@ export default function LessonCanvas({
                 .map(id => editor.getShape(id))
                 .filter(Boolean) as any[];
 
-              // Build a mapping: source shape ID → new shape ID (by matching type + position)
               const idMapping = new Map<string, string>();
+              const usedNewIds = new Set<string>();
               for (const srcShape of sourceShapes) {
                 const match = newShapes.find((ns: any) =>
                   ns.type === srcShape.type &&
                   Math.abs(ns.x - srcShape.x) < 1 &&
                   Math.abs(ns.y - srcShape.y) < 1 &&
-                  !idMapping.has(ns.id as string) &&
-                  ![...idMapping.values()].includes(ns.id as string)
+                  !usedNewIds.has(ns.id as string)
                 );
                 if (match) {
                   idMapping.set(srcShape.id as string, match.id as string);
+                  usedNewIds.add(match.id as string);
                 }
               }
 
