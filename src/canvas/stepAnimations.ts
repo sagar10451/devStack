@@ -268,6 +268,13 @@ export function applyZoomToShapes(
 
   // If we have a captured camera position, use it directly
   if (capturedCamera) {
+    // Skip if camera is already close to the captured position (prevents micro-nudge)
+    const dx = Math.abs(cam.x - capturedCamera.x);
+    const dy = Math.abs(cam.y - capturedCamera.y);
+    const dz = Math.abs(cam.z - capturedCamera.z);
+    if (dx < 5 && dy < 5 && dz < 0.05) {
+      return savedCamera;
+    }
     editor.setCamera(capturedCamera, {
       force: true,
       animation: { duration: Math.max(duration, 300), easing: (t: number) => 1 - Math.pow(1 - t, 3) },

@@ -44,8 +44,8 @@ export const sites: Record<string, SiteConfig> = {
     basePath: PORTAL_ENV === 'chapterBreakdown' ? '' : '/chapterBreakdown',
     brandName: 'Chapter',
     brandAccent: 'Breakdown',
-    brandSubtitle: 'by Sagar Kumar',
-    watermark: 'Chapter Breakdown by Sagar Kumar',
+    brandSubtitle: 'by Priyanka & Sagar',
+    watermark: 'Chapter Breakdown by Priyanka & Sagar',
     youtubeUrl: 'https://youtube.com',
   },
 };

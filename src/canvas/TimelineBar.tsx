@@ -147,6 +147,7 @@ export default function TimelineBar({
   const [minimized, setMinimized] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
 
   // Auto-scroll timeline to selected card
   useEffect(() => {
@@ -284,6 +285,67 @@ export default function TimelineBar({
     }
   }, [onStepsChange, steps, editor]);
 
+  // Toggle card selection for grouping (Cmd+Click or Ctrl+Click)
+  const toggleCardSelection = useCallback((stepId: string, e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey) {
+      e.stopPropagation();
+      setSelectedCardIds(prev => {
+        const next = new Set(prev);
+        if (next.has(stepId)) next.delete(stepId); else next.add(stepId);
+        return next;
+      });
+    } else {
+      setSelectedCardIds(new Set());
+    }
+  }, []);
+
+  // Group selected cards into one
+  const groupSelectedCards = useCallback(() => {
+    if (selectedCardIds.size < 2) return;
+    const selectedSteps = steps.filter(s => selectedCardIds.has(s.id));
+    if (selectedSteps.length < 2) return;
+
+    // Merge all shape IDs into the first selected step
+    const mergedShapeIds = selectedSteps.flatMap(s => s.shapeIds);
+    const firstStep = selectedSteps[0];
+    const mergedStep: AnimationStep = {
+      ...firstStep,
+      shapeIds: [...new Set(mergedShapeIds)], // deduplicate
+    };
+
+    // Replace first selected step with merged, remove the rest
+    const idsToRemove = new Set(selectedSteps.slice(1).map(s => s.id));
+    const newSteps = steps
+      .map(s => s.id === firstStep.id ? mergedStep : s)
+      .filter(s => !idsToRemove.has(s.id));
+
+    onStepsChange(newSteps);
+    setSelectedCardIds(new Set());
+  }, [selectedCardIds, steps, onStepsChange]);
+
+  // Ungroup a card back into individual cards
+  const ungroupCard = useCallback((stepId: string) => {
+    const step = steps.find(s => s.id === stepId);
+    if (!step || step.shapeIds.length <= 1) return;
+
+    // Create individual steps for each shape
+    const individualSteps: AnimationStep[] = step.shapeIds.map((shapeId, i) => ({
+      id: `step-${Date.now()}-${i}`,
+      shapeIds: [shapeId],
+      animation: step.animation,
+      duration: step.duration,
+      label: `Step`,
+      action: step.action,
+      cameraPosition: i === 0 ? step.cameraPosition : undefined, // only first keeps camera
+    }));
+
+    // Replace the grouped step with individual steps
+    const stepIndex = steps.findIndex(s => s.id === stepId);
+    const newSteps = [...steps];
+    newSteps.splice(stepIndex, 1, ...individualSteps);
+    onStepsChange(newSteps);
+  }, [steps, onStepsChange]);
+
   // Manually add selected canvas elements to timeline
   const addManually = useCallback(() => {
     if (!editor) return;
@@ -375,13 +437,21 @@ export default function TimelineBar({
 
   return (
     <div className="flex-shrink-0 bg-[#0a1230] border-t border-[#1a2a5e]">
-      {/* Timeline header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800">
+      {/* Timeline header — drag handle */}
+      <div data-drag-handle className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800 cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Timeline</span>
           <span className="text-[10px] text-slate-600">{steps.length} steps</span>
         </div>
         <div className="flex items-center gap-1.5">
+          {selectedCardIds.size >= 2 && (
+            <button
+              onClick={groupSelectedCards}
+              className="flex items-center gap-1 text-[9px] text-emerald-400 hover:text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20 hover:bg-emerald-500/10"
+            >
+              Group ({selectedCardIds.size})
+            </button>
+          )}
           <button
             onClick={addManually}
             className="flex items-center gap-1 text-[9px] text-blue-400 hover:text-blue-300 px-2 py-0.5 rounded border border-blue-500/20 hover:bg-blue-500/10"
@@ -437,9 +507,14 @@ export default function TimelineBar({
                 onDragEnd={handleDragEnd}
                 onDragOver={(e) => handleDragOver(e, index)}
                 onDrop={(e) => handleDrop(e, index)}
-                onClick={() => handleCardClick(step)}
+                onClick={(e) => {
+                  toggleCardSelection(step.id, e);
+                  if (!e.metaKey && !e.ctrlKey) handleCardClick(step);
+                }}
                 className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
-                  dropIndex === index && dragIndex !== index
+                  selectedCardIds.has(step.id)
+                    ? 'border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/50'
+                    : dropIndex === index && dragIndex !== index
                     ? 'border-blue-400 bg-blue-500/10'
                     : isSelected
                     ? 'border-amber-400 bg-amber-500/10'
@@ -450,6 +525,20 @@ export default function TimelineBar({
               >
                 {/* Step header */}
                 <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-slate-700/40 bg-slate-800/60">
+                  <input
+                    type="checkbox"
+                    checked={selectedCardIds.has(step.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      setSelectedCardIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(step.id)) next.delete(step.id); else next.add(step.id);
+                        return next;
+                      });
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-3 h-3 flex-shrink-0 accent-emerald-500 cursor-pointer"
+                  />
                   <span className="text-[9px] font-bold text-slate-500">{(index + 1).toString().padStart(2, '0')}</span>
                   <span className="text-slate-400">{info.icon}</span>
                   <span className="text-[10px] font-medium text-slate-300 truncate flex-1">{info.label}</span>
@@ -584,9 +673,18 @@ export default function TimelineBar({
                   )}
                 </div>
 
-                {/* Step footer — delete */}
-                <div className="flex items-center justify-end px-1.5 py-1 border-t border-slate-700/40 bg-slate-800/60">
-                  <button onClick={() => removeStep(step.id)} className="p-0.5 rounded hover:bg-red-500/10">
+                {/* Step footer — delete + ungroup */}
+                <div className="flex items-center justify-between px-1.5 py-1 border-t border-slate-700/40 bg-slate-800/60">
+                  {step.shapeIds.length > 1 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); ungroupCard(step.id); }}
+                      className="text-[8px] text-blue-400/60 hover:text-blue-400 px-1 py-0.5 rounded hover:bg-blue-500/10"
+                    >
+                      Ungroup
+                    </button>
+                  )}
+                  <div className="flex-1" />
+                  <button onClick={(e) => { e.stopPropagation(); removeStep(step.id); }} className="p-0.5 rounded hover:bg-red-500/10">
                     <Trash2 className="w-3 h-3 text-red-400/60 hover:text-red-400" />
                   </button>
                 </div>

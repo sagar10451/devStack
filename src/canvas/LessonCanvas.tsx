@@ -236,7 +236,6 @@ export default function LessonCanvas({
   const applyAnimationState = useCallback((_ed: Editor, steps: AnimationStep[], upToStep: number) => {
     if (steps.length === 0) return;
 
-    // Use CSS visibility instead of tldraw opacity — avoids store changes that cause reflows
     const visibilitySteps = steps.filter(s => (s.action || 'enter') !== 'none');
 
     // Hide all tldraw animated shapes via CSS
@@ -271,20 +270,15 @@ export default function LessonCanvas({
       if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
     });
 
-    // Show/hide up to the given step based on action type
+    // Show/hide up to the given step
     for (let i = 0; i <= upToStep && i < steps.length; i++) {
       const stepAction = steps[i].action || 'enter';
-
-      // None steps don't affect visibility — skip
       if (stepAction === 'none') continue;
 
       if (stepAction === 'exit') {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
-          if (el) {
-            el.style.visibility = 'hidden';
-            el.style.opacity = '0';
-          }
+          if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
@@ -293,10 +287,7 @@ export default function LessonCanvas({
       } else if (stepAction === 'swap') {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
-          if (el) {
-            el.style.visibility = 'visible';
-            el.style.opacity = '1';
-          }
+          if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
@@ -304,23 +295,16 @@ export default function LessonCanvas({
         });
         (steps[i].exitShapeIds || []).filter(isTldrawId).forEach(shapeId => {
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
-          if (el) {
-            el.style.visibility = 'hidden';
-            el.style.opacity = '0';
-          }
+          if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
         });
         (steps[i].exitShapeIds || []).filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
           if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
         });
       } else {
-        // Enter, blink, move, teleport: shapes should be VISIBLE
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
-          if (el) {
-            el.style.visibility = 'visible';
-            el.style.opacity = '1';
-          }
+          if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
@@ -444,6 +428,50 @@ export default function LessonCanvas({
     const unsub = editor.store.listen(detectNewShapes, { scope: 'document' });
     return () => unsub();
   }, [editor, isLocked, animationSteps]);
+
+  // ─── Auto-add new RF nodes/edges to timeline ──────────────────────────────
+  const knownRfIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (isLocked) return;
+
+    // Get current RF node and edge IDs
+    const currentRfIds = new Set([
+      ...(diagramData.nodes as any[]).map((n: any) => n.id as string),
+      ...(diagramData.edges as any[]).map((e: any) => e.id as string),
+    ]);
+
+    // Find new IDs
+    const newRfIds: string[] = [];
+    for (const id of currentRfIds) {
+      if (!knownRfIdsRef.current.has(id)) {
+        newRfIds.push(id);
+      }
+    }
+
+    // Update known set
+    knownRfIdsRef.current = currentRfIds;
+
+    if (newRfIds.length === 0) return;
+
+    // Check if already in a step
+    const existingStepShapeIds = new Set(animationSteps.flatMap(s => s.shapeIds));
+    const trulyNew = newRfIds.filter(id => !existingStepShapeIds.has(id));
+    if (trulyNew.length === 0) return;
+
+    // Auto-add each new RF element as a step
+    const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
+      id: `step-${Date.now()}-rf-${i}`,
+      shapeIds: [id],
+      animation: 'appear' as AnimationType,
+      duration: 800,
+      label: `Step ${animationSteps.length + i + 1}`,
+      action: 'enter' as StepAction,
+    }));
+
+    setAnimationSteps(prev => [...prev, ...newSteps]);
+    setIsSaved(false);
+  }, [diagramData, isLocked, animationSteps]);
 
   const handleLabelsChange = useCallback((newLabels: SubTopicLabel[]) => {
     setSubTopicLabels(newLabels);
@@ -680,7 +708,6 @@ export default function LessonCanvas({
   const goNext = useCallback(() => {
     if (!editor || !isLocked) return;
     if (currentStep >= animationSteps.length - 1) return;
-    // Stop any in-progress camera animation to prevent overlap
     editor.stopCameraAnimation();
     const nextStep = currentStep + 1;
     const step = animationSteps[nextStep];
@@ -688,11 +715,9 @@ export default function LessonCanvas({
 
     switch (action) {
       case 'none': {
-        // No animation, no show/hide — camera capture (if any) handled below
         break;
       }
       case 'enter': {
-        // Show shapes with animation
         applyAnimationState(editor, animationSteps, nextStep);
         applyStepAnimation(step.shapeIds, step.animation, step.duration);
         step.shapeIds.forEach(shapeId => {
@@ -704,14 +729,12 @@ export default function LessonCanvas({
         break;
       }
       case 'exit': {
-        // Hide shapes with exit animation, then update state
         applyExitAnimation(step.shapeIds, step.animation, step.duration, () => {
           applyAnimationState(editor, animationSteps, nextStep);
         });
         break;
       }
       case 'blink': {
-        // Flash shapes in place
         applyBlinkAnimation(step.shapeIds, step.duration);
         break;
       }
@@ -730,21 +753,18 @@ export default function LessonCanvas({
         break;
       }
       case 'swap': {
-        // applyAnimationState handles showing enter shapes and hiding exit shapes
         applyAnimationState(editor, animationSteps, nextStep);
-        // Animate the entering shapes
         applyStepAnimation(step.shapeIds, step.animation, step.duration);
         break;
       }
       default: {
-        // Unknown action — treat as enter
         applyAnimationState(editor, animationSteps, nextStep);
         applyStepAnimation(step.shapeIds, step.animation, step.duration);
         break;
       }
     }
 
-    // Camera movement — if this step has a captured camera position, zoom to it
+    // Camera movement — skip if already at the captured position
     if (step.cameraPosition) {
       const savedCam = applyZoomToShapes(step.shapeIds, step.duration, editor, step.cameraPosition);
       if (savedCam) {
@@ -752,14 +772,8 @@ export default function LessonCanvas({
       }
     }
 
-    // Play step audio if attached
     playStepAudio(step);
-
     setCurrentStep(nextStep);
-    // If step has no camera lock and element is off-screen, nudge to show it
-    if (!step.cameraPosition) {
-      setTimeout(() => ensureShapesVisible(step.shapeIds), 500);
-    }
   }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio]);
 
   const goPrevious = useCallback(() => {
@@ -1193,6 +1207,22 @@ export default function LessonCanvas({
         {isPresenting && isLocked && presentationTool === 'laser' && <LaserPointer />}
       </div>
 
+      {/* Timeline — draggable overlay, default at bottom */}
+      {!isLocked && (
+        <DraggableWidget defaultPosition={{ x: 0, y: window.innerHeight - 250 }} zIndex={35}>
+          <div className="rounded-xl overflow-hidden shadow-2xl border border-[#1a2a5e]" style={{ width: 'calc(85vw - 20px)' }}>
+            <TimelineBar
+              steps={animationSteps}
+              onStepsChange={handleStepsChange}
+              editor={editor}
+              isLocked={isLocked}
+              diagramData={diagramData}
+              selectedShapeIds={selectedShapeIds}
+            />
+          </div>
+        </DraggableWidget>
+      )}
+
       {/* Sub Topic Sidebar (overlays right side) */}
       <div className="absolute top-0 right-0 bottom-0 w-[15%] min-w-[180px] border-l border-[#1a2a5e] bg-[#0a1230] flex flex-col overflow-hidden z-30">
         <SubTopicTracker
@@ -1208,15 +1238,6 @@ export default function LessonCanvas({
       </div>
       </div>
 
-      {/* Timeline bottom bar */}
-      <TimelineBar
-        steps={animationSteps}
-        onStepsChange={handleStepsChange}
-        editor={editor}
-        isLocked={isLocked}
-        diagramData={diagramData}
-        selectedShapeIds={selectedShapeIds}
-      />
       </>
       )}
     </div>
