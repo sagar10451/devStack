@@ -506,6 +506,16 @@ export default function LessonCanvas({
     if (!editor) return;
     const saveTimeout = setTimeout(() => {
       const data = buildSaveData();
+
+      // Guard: don't save if tldraw has no shapes but timeline has steps
+      // This prevents HMR/idle resets from wiping saved canvas data
+      const doc = data.snapshot as any;
+      const recordCount = doc?.document ? Object.keys(doc.document).length : 0;
+      if (recordCount <= 2 && data.animationSteps && data.animationSteps.length > 0) {
+        // Snapshot looks empty (only schema + metadata records) but steps exist — skip save
+        return;
+      }
+
       // Strip audio base64 data before saving — keep only config
       if (data.animationSteps) {
         data.animationSteps = data.animationSteps.map((s: any) => {
