@@ -166,6 +166,7 @@ export default function LessonCanvas({
   const zoomSavedCamerasRef = useRef<Record<string, { x: number; y: number; z: number }>>({});
   const presentationStartCameraRef = useRef<{ x: number; y: number; z: number } | null>(null);
   const editingCameraRef = useRef<{ x: number; y: number; z: number } | null>(null);
+  const editingPageIdRef = useRef<string | null>(null);
   const stepAudioRef = useRef<HTMLAudioElement | null>(null);
   const stepAudioTimerRef = useRef<number | null>(null);
 
@@ -338,6 +339,7 @@ export default function LessonCanvas({
     if (!editor || isLocked) return;
 
     const cleanup = () => {
+      const currentPageId = editor.getCurrentPageId() as string;
       const existingShapeIds = new Set(
         editor.getCurrentPageShapeIds() as Set<string>
       );
@@ -346,13 +348,18 @@ export default function LessonCanvas({
       const rfEdgeIds = new Set(diagramData.edges.map((e: any) => e.id as string));
 
       const cleanedSteps = animationSteps
-        .map(step => ({
-          ...step,
-          shapeIds: step.shapeIds.filter(id => {
-            if (isRfId(id)) return rfNodeIds.has(id) || rfEdgeIds.has(id);
-            return existingShapeIds.has(id);
-          }),
-        }))
+        .map(step => {
+          // Only clean steps belonging to the current page
+          // Leave other pages' steps untouched
+          if ((step.pageId || '') !== currentPageId) return step;
+          return {
+            ...step,
+            shapeIds: step.shapeIds.filter(id => {
+              if (isRfId(id)) return rfNodeIds.has(id) || rfEdgeIds.has(id);
+              return existingShapeIds.has(id);
+            }),
+          };
+        })
         .filter(step => step.shapeIds.length > 0);
 
       if (cleanedSteps.length !== animationSteps.length) {
@@ -383,11 +390,13 @@ export default function LessonCanvas({
 
   // ─── Auto-add new shapes to timeline ─────────────────────────────────────
   const knownShapeIdsRef = useRef<Set<string>>(new Set());
+  const animationStepsRef = useRef(animationSteps);
+  animationStepsRef.current = animationSteps;
 
   useEffect(() => {
     if (!editor || isLocked) return;
 
-    // Initialize known shapes
+    // Initialize known shapes for the current page
     const allShapes = editor.getCurrentPageShapes();
     knownShapeIdsRef.current = new Set(allShapes.map(s => s.id as string));
 
@@ -407,17 +416,26 @@ export default function LessonCanvas({
 
       if (newIds.length === 0) return;
 
-      // Check if these shapes are already in a step
-      const existingStepShapeIds = new Set(animationSteps.flatMap(s => s.shapeIds));
+      // Use ref for fresh steps (avoids stale closure)
+      const currentSteps = animationStepsRef.current;
+      const existingStepShapeIds = new Set(currentSteps.flatMap(s => s.shapeIds));
       const trulyNew = newIds.filter(id => !existingStepShapeIds.has(id));
       if (trulyNew.length === 0) return;
 
       const pageId = editor.getCurrentPageId() as string;
 
-      // Skip if this page was recently duplicated — the page copy listener handles it
+      // Skip if this page was recently duplicated
       if (recentlyDuplicatedPagesRef.current.has(pageId)) return;
 
-      // Auto-add each new shape as a step, tagged with current page
+      // Skip if this page is new (not in knownPageIds) — it's a page duplication
+      if (!knownPageIdsRef.current.has(pageId)) {
+        recentlyDuplicatedPagesRef.current.add(pageId);
+        return;
+      }
+
+      // If many shapes appeared at once, likely a duplication that slipped through
+      if (trulyNew.length > 5) return;
+
       const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
         id: `step-${Date.now()}-${i}`,
         shapeIds: [id],
@@ -428,15 +446,13 @@ export default function LessonCanvas({
         pageId,
       }));
 
-      // Insert at end of current page's section (not at end of entire array)
+      // Insert at end of current page's section
       setAnimationSteps(prev => {
         const lastPageIndex = prev.map(s => s.pageId).lastIndexOf(pageId);
         if (lastPageIndex === -1) {
-          // No steps for this page yet — find insertion point by page order
           const pages = editor.getPages();
           const pageOrder = pages.map(p => p.id as string);
           const currentPageIdx = pageOrder.indexOf(pageId);
-          // Insert after the last step of any page that comes before this one
           let insertAt = 0;
           for (let i = prev.length - 1; i >= 0; i--) {
             const stepPageIdx = pageOrder.indexOf(prev[i].pageId || pageOrder[0]);
@@ -456,9 +472,21 @@ export default function LessonCanvas({
       setIsSaved(false);
     };
 
-    const unsub = editor.store.listen(detectNewShapes, { scope: 'document' });
-    return () => unsub();
-  }, [editor, isLocked, animationSteps]);
+    // Also re-initialize known shapes when the current page changes
+    const handlePageSwitch = () => {
+      const shapes = editor.getCurrentPageShapes();
+      knownShapeIdsRef.current = new Set(shapes.map(s => s.id as string));
+    };
+
+    const unsub = editor.store.listen(() => {
+      detectNewShapes();
+    }, { scope: 'document' });
+
+    // Also listen for page switches
+    const unsubSession = editor.store.listen(handlePageSwitch, { scope: 'session' });
+
+    return () => { unsub(); unsubSession(); };
+  }, [editor, isLocked]);
 
   // ─── Auto-add new RF nodes/edges to timeline ──────────────────────────────
   const knownRfIdsRef = useRef<Set<string>>(new Set());
@@ -485,8 +513,9 @@ export default function LessonCanvas({
 
     if (newRfIds.length === 0) return;
 
-    // Check if already in a step
-    const existingStepShapeIds = new Set(animationSteps.flatMap(s => s.shapeIds));
+    // Check if already in a step (use ref for fresh data)
+    const currentSteps = animationStepsRef.current;
+    const existingStepShapeIds = new Set(currentSteps.flatMap(s => s.shapeIds));
     const trulyNew = newRfIds.filter(id => !existingStepShapeIds.has(id));
     if (trulyNew.length === 0) return;
 
@@ -515,7 +544,7 @@ export default function LessonCanvas({
       return result;
     });
     setIsSaved(false);
-  }, [diagramData, isLocked, animationSteps, editor]);
+  }, [diagramData, isLocked, editor]);
 
   // ─── Page copy/delete listeners ───────────────────────────────────────────
   const knownPageIdsRef = useRef<Set<string>>(new Set());
@@ -687,15 +716,6 @@ export default function LessonCanvas({
     const saveTimeout = setTimeout(() => {
       const data = buildSaveData();
 
-      // Guard: don't save if tldraw has no shapes but timeline has steps
-      // This prevents HMR/idle resets from wiping saved canvas data
-      const doc = data.snapshot as any;
-      const recordCount = doc?.document ? Object.keys(doc.document).length : 0;
-      if (recordCount <= 2 && data.animationSteps && data.animationSteps.length > 0) {
-        // Snapshot looks empty (only schema + metadata records) but steps exist — skip save
-        return;
-      }
-
       // Strip audio base64 data before saving — keep only config
       if (data.animationSteps) {
         data.animationSteps = data.animationSteps.map((s: any) => {
@@ -709,6 +729,7 @@ export default function LessonCanvas({
       try {
         const json = JSON.stringify(data);
         localStorage.setItem(key, json);
+        console.log('[auto-save] Saved', data.animationSteps?.length, 'steps, snapshot keys:', Object.keys((data.snapshot as any)?.document || {}).length);
         setIsSaved(true);
         setStorageWarning(false);
       } catch {
@@ -819,6 +840,9 @@ export default function LessonCanvas({
       // Stop any playing audio
       stopStepAudio();
       // Restore camera to original editing position when unlocking
+      if (editingPageIdRef.current && (editor.getCurrentPageId() as string) !== editingPageIdRef.current) {
+        editor.setCurrentPage(editingPageIdRef.current as any);
+      }
       if (editingCameraRef.current) {
         editor.setCamera(editingCameraRef.current, { force: true });
       }
@@ -836,7 +860,17 @@ export default function LessonCanvas({
       // Save exact editing camera — restored on unlock and used as presentation start
       const cam = editor.getCamera();
       editingCameraRef.current = { x: cam.x, y: cam.y, z: cam.z };
+      editingPageIdRef.current = editor.getCurrentPageId() as string;
       presentationStartCameraRef.current = { x: cam.x, y: cam.y, z: cam.z };
+
+      // Switch to the first step's page so presentation starts from the beginning
+      if (animationSteps.length > 0 && animationSteps[0].pageId) {
+        const firstStepPageId = animationSteps[0].pageId;
+        if ((editor.getCurrentPageId() as string) !== firstStepPageId) {
+          editor.setCurrentPage(firstStepPageId as any);
+        }
+      }
+
       setCurrentStep(-1);
       applyAnimationState(editor, animationSteps, -1);
       // Re-apply after a frame to catch RF elements that might not be in DOM yet
@@ -904,67 +938,112 @@ export default function LessonCanvas({
     const step = animationSteps[nextStep];
     const action = step.action || 'enter';
 
-    switch (action) {
-      case 'none': {
-        break;
-      }
-      case 'enter': {
-        applyAnimationState(editor, animationSteps, nextStep);
-        applyStepAnimation(step.shapeIds, step.animation, step.duration);
-        step.shapeIds.forEach(shapeId => {
-          const config = shapeAnimations[shapeId];
-          if (config?.idle && config.idle !== 'none') {
-            applyIdleAnimation(shapeId, config.idle);
-          }
+    // Switch page if the next step belongs to a different page
+    if (step.pageId && (editor.getCurrentPageId() as string) !== step.pageId) {
+      // Pre-hide all shapes that will be on the new page by preparing CSS
+      // Get all steps for the target page and hide their shapes BEFORE switching
+      const targetPageSteps = animationSteps.filter(s => s.pageId === step.pageId);
+      const allTargetShapeIds = targetPageSteps.flatMap(s => s.shapeIds);
+      
+      // Create a style element that hides all target page shapes
+      const hideStyle = document.createElement('style');
+      hideStyle.id = 'page-switch-hide';
+      hideStyle.textContent = allTargetShapeIds
+        .map(id => id.includes(':') 
+          ? `[data-shape-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`
+          : `[data-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`)
+        .join('\n');
+      document.head.appendChild(hideStyle);
+
+      editor.setCameraOptions({ isLocked: false });
+      editor.setCurrentPage(step.pageId as any);
+
+      // Now apply proper animation state and remove the blanket hide
+      requestAnimationFrame(() => {
+        applyAnimationState(editor, animationSteps, nextStep - 1);
+        // Remove blanket hide — applyAnimationState has set correct per-shape visibility
+        hideStyle.remove();
+        
+        requestAnimationFrame(() => {
+          runStepAction();
+          editor.setCameraOptions({ isLocked: true });
+          handleCamera();
+          playStepAudio(step);
+          setCurrentStep(nextStep);
         });
-        break;
-      }
-      case 'exit': {
-        applyExitAnimation(step.shapeIds, step.animation, step.duration, () => {
-          applyAnimationState(editor, animationSteps, nextStep);
-        });
-        break;
-      }
-      case 'blink': {
-        applyBlinkAnimation(step.shapeIds, step.duration);
-        break;
-      }
-      case 'move': {
-        if (step.targetPosition) {
-          const records = applyMoveAnimation(step.shapeIds, step.targetPosition, step.duration, editor);
-          moveOriginalPositionsRef.current[step.id] = records;
-        }
-        break;
-      }
-      case 'teleport': {
-        if (step.targetPosition) {
-          const records = applyTeleportAnimation(step.shapeIds, step.targetPosition, step.duration, editor);
-          moveOriginalPositionsRef.current[step.id] = records;
-        }
-        break;
-      }
-      case 'swap': {
-        applyAnimationState(editor, animationSteps, nextStep);
-        applyStepAnimation(step.shapeIds, step.animation, step.duration);
-        break;
-      }
-      default: {
-        applyAnimationState(editor, animationSteps, nextStep);
-        applyStepAnimation(step.shapeIds, step.animation, step.duration);
-        break;
-      }
+      });
+      return;
     }
 
-    // Camera movement — skip if already at the captured position
-    if (step.cameraPosition) {
-      const savedCam = applyZoomToShapes(step.shapeIds, step.duration, editor, step.cameraPosition);
-      if (savedCam) {
-        zoomSavedCamerasRef.current[step.id] = savedCam;
-      }
-    }
-
+    runStepAction();
+    handleCamera();
     playStepAudio(step);
     setCurrentStep(nextStep);
+
+    function runStepAction() {
+      switch (action) {
+        case 'none': break;
+        case 'enter': {
+          applyAnimationState(editor!, animationSteps, nextStep);
+          // Skip CSS animation if animation is 'none' — shape just appears instantly
+          if (step.animation !== 'none') {
+            applyStepAnimation(step.shapeIds, step.animation, step.duration);
+          }
+          step.shapeIds.forEach(shapeId => {
+            const config = shapeAnimations[shapeId];
+            if (config?.idle && config.idle !== 'none') {
+              applyIdleAnimation(shapeId, config.idle);
+            }
+          });
+          break;
+        }
+        case 'exit': {
+          applyExitAnimation(step.shapeIds, step.animation, step.duration, () => {
+            applyAnimationState(editor!, animationSteps, nextStep);
+          });
+          break;
+        }
+        case 'blink': {
+          applyBlinkAnimation(step.shapeIds, step.duration);
+          break;
+        }
+        case 'move': {
+          if (step.targetPosition) {
+            const records = applyMoveAnimation(step.shapeIds, step.targetPosition, step.duration, editor!);
+            moveOriginalPositionsRef.current[step.id] = records;
+          }
+          break;
+        }
+        case 'teleport': {
+          if (step.targetPosition) {
+            const records = applyTeleportAnimation(step.shapeIds, step.targetPosition, step.duration, editor!);
+            moveOriginalPositionsRef.current[step.id] = records;
+          }
+          break;
+        }
+        case 'swap': {
+          applyAnimationState(editor!, animationSteps, nextStep);
+          applyStepAnimation(step.shapeIds, step.animation, step.duration);
+          break;
+        }
+        default: {
+          applyAnimationState(editor!, animationSteps, nextStep);
+          applyStepAnimation(step.shapeIds, step.animation, step.duration);
+          break;
+        }
+      }
+    }
+
+    function handleCamera() {
+      // Camera movement — skip if already at the captured position
+      if (step.cameraPosition) {
+        const savedCam = applyZoomToShapes(step.shapeIds, step.duration, editor!, step.cameraPosition);
+        if (savedCam) {
+          zoomSavedCamerasRef.current[step.id] = savedCam;
+        }
+      }
+    }
+
   }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio]);
 
   const goPrevious = useCallback(() => {
@@ -977,6 +1056,16 @@ export default function LessonCanvas({
 
     const step = animationSteps[currentStep];
     const action = step.action || 'enter';
+
+    // Switch page if going back to a step on a different page
+    const targetPageId = currentStep === 0
+      ? animationSteps[0].pageId
+      : animationSteps[currentStep - 1]?.pageId || step.pageId;
+    if (targetPageId && (editor.getCurrentPageId() as string) !== targetPageId) {
+      editor.setCameraOptions({ isLocked: false });
+      editor.setCurrentPage(targetPageId as any);
+      editor.setCameraOptions({ isLocked: true });
+    }
 
     // Rewind move/teleport clones for this step
     if ((action === 'move' || action === 'teleport') && moveOriginalPositionsRef.current[step.id]) {

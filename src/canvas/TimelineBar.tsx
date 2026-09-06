@@ -26,6 +26,8 @@ interface TimelineBarProps {
 }
 
 const ANIMATION_OPTIONS: { value: string; label: string; group: string }[] = [
+  // Instant
+  { value: 'none', label: 'None (instant)', group: 'Instant' },
   // Entrance
   { value: 'appear', label: 'Appear', group: 'Entrance' },
   { value: 'flyInLeft', label: 'Fly Left', group: 'Entrance' },
@@ -146,32 +148,6 @@ function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: Diag
     case 'md-block': return { icon: <Square className={cls} />, label: 'Markdown' };
     default: return { icon: <Square className={cls} />, label: shape.type };
   }
-}
-
-// ─── Helper: get page-ordered groups from steps ──────────────────────────────
-function getPageGroups(steps: AnimationStep[], editor: Editor | null): { pageId: string; pageName: string; startIndex: number; count: number }[] {
-  if (steps.length === 0) return [];
-  const pages = editor ? editor.getPages() : [];
-  const pageNameMap = new Map<string, string>();
-  pages.forEach((p, i) => pageNameMap.set(p.id as string, p.name || `Page ${i + 1}`));
-
-  const groups: { pageId: string; pageName: string; startIndex: number; count: number }[] = [];
-  let currentPageId = '';
-  for (let i = 0; i < steps.length; i++) {
-    const pid = steps[i].pageId || 'page:page';
-    if (pid !== currentPageId) {
-      currentPageId = pid;
-      groups.push({
-        pageId: pid,
-        pageName: pageNameMap.get(pid) || 'Page 1',
-        startIndex: i,
-        count: 1,
-      });
-    } else {
-      groups[groups.length - 1].count++;
-    }
-  }
-  return groups;
 }
 
 export default function TimelineBar({
@@ -553,20 +529,30 @@ export default function TimelineBar({
     return null;
   }
 
-  // ─── Compute page groups for rendering ──────────────────────────────────
-  const pageGroups = getPageGroups(steps, editor);
-  const pages = editor ? editor.getPages() : [];
-  const pageIds = pages.map(p => p.id as string);
-  const hasMultiplePages = pages.length > 1;
+  // ─── Track current page ID (re-renders on page switch) ─────────────────
+  const [currentPageId, setCurrentPageId] = useState<string>(() =>
+    editor ? editor.getCurrentPageId() as string : 'page:page'
+  );
 
-  // Build per-page local index for each step
-  const pageLocalIndices: number[] = [];
-  const pageCounters: Record<string, number> = {};
-  for (const step of steps) {
-    const pid = step.pageId || 'page:page';
-    pageCounters[pid] = (pageCounters[pid] || 0) + 1;
-    pageLocalIndices.push(pageCounters[pid]);
-  }
+  useEffect(() => {
+    if (!editor) return;
+    // Poll for page switch (tldraw doesn't expose a simple page-change event)
+    const interval = setInterval(() => {
+      const pid = editor.getCurrentPageId() as string;
+      setCurrentPageId(prev => prev !== pid ? pid : prev);
+    }, 200);
+    return () => clearInterval(interval);
+  }, [editor]);
+
+  // ─── Filter steps to current page ──────────────────────────────────────
+  const currentPageSteps = steps.filter(s => (s.pageId || 'page:page') === currentPageId);
+  const pages = editor ? editor.getPages() : [];
+  const currentPage = pages.find(p => (p.id as string) === currentPageId);
+  const currentPageName = currentPage?.name || 'Page 1';
+  const hasMultiplePages = pages.length > 1;
+  const pageIds = pages.map(p => p.id as string);
+  const pageColorIdx = pageIds.indexOf(currentPageId) % PAGE_COLORS.length;
+  const pageColor = PAGE_COLORS[Math.max(0, pageColorIdx)];
 
   return (
     <div className="flex-shrink-0 bg-[#0a1230] border-t border-[#1a2a5e]">
@@ -574,8 +560,13 @@ export default function TimelineBar({
       <div data-drag-handle className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800 cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Timeline</span>
-          <span className="text-[10px] text-slate-600">{steps.length} steps</span>
-          {hasMultiplePages && <span className="text-[10px] text-slate-600">· {pages.length} pages</span>}
+          {hasMultiplePages && (
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${pageColor.label} ${pageColor.text}`}>
+              {currentPageName}
+            </span>
+          )}
+          <span className="text-[10px] text-slate-600">{currentPageSteps.length} steps</span>
+          {hasMultiplePages && <span className="text-[10px] text-slate-600">· {steps.length} total</span>}
         </div>
         <div className="flex items-center gap-1.5">
           {selectedCardIds.size >= 2 && (
@@ -618,13 +609,13 @@ export default function TimelineBar({
         className="flex items-stretch gap-0 px-3 py-2 overflow-x-auto"
         style={{ minHeight: 100 }}
       >
-        {steps.length === 0 ? (
+        {currentPageSteps.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-[11px] text-slate-600">Add elements to the canvas — they appear here automatically</p>
           </div>
         ) : (
           <>
-            {steps.map((step, index) => {
+            {currentPageSteps.map((step, pageLocalIndex) => {
               const info = getShapeIcon(editor, step.shapeIds[0], diagramData);
               const extra = step.shapeIds.length > 1 ? `+${step.shapeIds.length - 1}` : '';
               const hasCamera = !!step.cameraPosition;
@@ -632,34 +623,18 @@ export default function TimelineBar({
               const action = step.action || 'enter';
               const isManualCard = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
               const isMultiShape = step.shapeIds.length > 1;
-              const pageLocalIndex = pageLocalIndices[index];
-              const pid = step.pageId || 'page:page';
-              const pageColorIdx = pageIds.indexOf(pid) % PAGE_COLORS.length;
-              const pageColor = PAGE_COLORS[Math.max(0, pageColorIdx)];
+              const displayNum = pageLocalIndex + 1;
               const isMoveMenuOpen = moveMenuStepId === step.id;
-
-              // Check if this is the first card of a new page section
-              const isFirstOfPage = index === 0 || (steps[index - 1].pageId || 'page:page') !== pid;
+              // Find the global index for data-timeline-index (used by auto-scroll)
+              const globalIndex = steps.findIndex(s => s.id === step.id);
 
               return (
-                <div key={step.id} className="flex items-stretch" data-timeline-index={index}>
-                  {/* Page separator */}
-                  {isFirstOfPage && hasMultiplePages && (
-                    <div className="flex flex-col items-center justify-center px-1.5 flex-shrink-0">
-                      <div className={`w-px flex-1 ${pageColor.border.replace('border-', 'bg-')}`} />
-                      <span className={`text-[7px] font-bold px-1.5 py-0.5 rounded-full ${pageColor.label} ${pageColor.text} whitespace-nowrap my-1`}>
-                        {pageGroups.find(g => g.pageId === pid)?.pageName || 'Page'}
-                      </span>
-                      <div className={`w-px flex-1 ${pageColor.border.replace('border-', 'bg-')}`} />
-                    </div>
-                  )}
-
+                <div key={step.id} className="flex items-stretch" data-timeline-index={globalIndex}>
                   {/* Card */}
                   <div
                     onClick={(e) => {
                       toggleCardSelection(step.id, e);
                       if (!e.metaKey && !e.ctrlKey) handleCardClick(step);
-                      // Close move menu if clicking another card
                       if (moveMenuStepId && moveMenuStepId !== step.id) setMoveMenuStepId(null);
                     }}
                     className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all cursor-pointer mx-1 ${
@@ -669,8 +644,6 @@ export default function TimelineBar({
                         ? 'border-amber-400 bg-amber-500/10'
                         : isManualCard
                         ? 'border-orange-700/60 bg-orange-900/20 hover:border-orange-600'
-                        : hasMultiplePages
-                        ? `${pageColor.border} ${pageColor.bg} hover:border-slate-500`
                         : 'border-slate-700/60 bg-slate-800/40 hover:border-slate-600'
                     }`}
                   >
@@ -690,8 +663,8 @@ export default function TimelineBar({
                         onClick={(e) => e.stopPropagation()}
                         className="w-3 h-3 flex-shrink-0 accent-emerald-500 cursor-pointer"
                       />
-                      <span className={`text-[9px] font-bold ${hasMultiplePages ? pageColor.text : 'text-slate-500'}`}>
-                        {String(pageLocalIndex).padStart(2, '0')}
+                      <span className="text-[9px] font-bold text-slate-500">
+                        {String(displayNum).padStart(2, '0')}
                       </span>
                       <span className="text-slate-400">{info.icon}</span>
                       <span className="text-[10px] font-medium text-slate-300 truncate flex-1">{info.label}</span>
