@@ -1,14 +1,15 @@
 /**
- * TimelineBar — horizontal bottom bar showing animation steps as a timeline.
+ * TimelineBar — horizontal bottom bar showing animation steps as a page-grouped timeline.
  * Each step is a card showing shape info, action type, and camera lock button.
- * Shapes auto-added when created on canvas.
+ * Shapes auto-added when created on canvas, grouped by tldraw page.
+ * Cards are reordered via Move menu (no drag).
  */
 
 import { useCallback, useRef, useState, useEffect } from 'react';
 import {
   Trash2, Camera, CameraOff, ChevronDown, ChevronUp, Plus, Eye, Volume2, VolumeX,
   Type, Square, ArrowRight, Image, Pencil, Circle, Triangle, Star, Minus,
-  GitBranch, Cable,
+  GitBranch, Cable, MoveHorizontal,
 } from 'lucide-react';
 import type { AnimationStep, AnimationType, StepAction } from './types';
 import type { Editor } from 'tldraw';
@@ -57,6 +58,18 @@ const MANUAL_ACTION_OPTIONS: { value: StepAction; label: string }[] = [
   { value: 'move', label: 'Move' },
   { value: 'teleport', label: 'Teleport' },
   { value: 'swap', label: 'Swap' },
+];
+
+// ─── Page color palette for visual separators ────────────────────────────────
+const PAGE_COLORS = [
+  { border: 'border-blue-500/40', bg: 'bg-blue-500/8', text: 'text-blue-400', label: 'bg-blue-500/20' },
+  { border: 'border-emerald-500/40', bg: 'bg-emerald-500/8', text: 'text-emerald-400', label: 'bg-emerald-500/20' },
+  { border: 'border-purple-500/40', bg: 'bg-purple-500/8', text: 'text-purple-400', label: 'bg-purple-500/20' },
+  { border: 'border-amber-500/40', bg: 'bg-amber-500/8', text: 'text-amber-400', label: 'bg-amber-500/20' },
+  { border: 'border-rose-500/40', bg: 'bg-rose-500/8', text: 'text-rose-400', label: 'bg-rose-500/20' },
+  { border: 'border-cyan-500/40', bg: 'bg-cyan-500/8', text: 'text-cyan-400', label: 'bg-cyan-500/20' },
+  { border: 'border-orange-500/40', bg: 'bg-orange-500/8', text: 'text-orange-400', label: 'bg-orange-500/20' },
+  { border: 'border-indigo-500/40', bg: 'bg-indigo-500/8', text: 'text-indigo-400', label: 'bg-indigo-500/20' },
 ];
 
 function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: DiagramData): { icon: React.ReactNode; label: string } {
@@ -135,6 +148,32 @@ function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: Diag
   }
 }
 
+// ─── Helper: get page-ordered groups from steps ──────────────────────────────
+function getPageGroups(steps: AnimationStep[], editor: Editor | null): { pageId: string; pageName: string; startIndex: number; count: number }[] {
+  if (steps.length === 0) return [];
+  const pages = editor ? editor.getPages() : [];
+  const pageNameMap = new Map<string, string>();
+  pages.forEach((p, i) => pageNameMap.set(p.id as string, p.name || `Page ${i + 1}`));
+
+  const groups: { pageId: string; pageName: string; startIndex: number; count: number }[] = [];
+  let currentPageId = '';
+  for (let i = 0; i < steps.length; i++) {
+    const pid = steps[i].pageId || 'page:page';
+    if (pid !== currentPageId) {
+      currentPageId = pid;
+      groups.push({
+        pageId: pid,
+        pageName: pageNameMap.get(pid) || 'Page 1',
+        startIndex: i,
+        count: 1,
+      });
+    } else {
+      groups[groups.length - 1].count++;
+    }
+  }
+  return groups;
+}
+
 export default function TimelineBar({
   steps,
   onStepsChange,
@@ -145,9 +184,10 @@ export default function TimelineBar({
 }: TimelineBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [minimized, setMinimized] = useState(false);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
+  const [moveMenuStepId, setMoveMenuStepId] = useState<string | null>(null);
+  const [moveInput, setMoveInput] = useState('');
+  const [moveMode, setMoveMode] = useState<'after' | 'before'>('after');
 
   // Auto-scroll timeline to selected card
   useEffect(() => {
@@ -161,7 +201,6 @@ export default function TimelineBar({
     const cardWidth = card.offsetWidth;
     const containerLeft = container.scrollLeft;
     const containerWidth = container.clientWidth;
-    // If card is outside visible area, scroll to center it
     if (cardLeft < containerLeft || cardLeft + cardWidth > containerLeft + containerWidth) {
       container.scrollTo({
         left: cardLeft - containerWidth / 2 + cardWidth / 2,
@@ -179,7 +218,6 @@ export default function TimelineBar({
     if (step && editor) {
       const action = step.action || 'enter';
       const isManual = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
-      // Only delete shapes from canvas for auto-added (entrance) cards
       if (!isManual) {
         const tldrawIds = step.shapeIds.filter(sid => sid.includes(':'));
         if (tldrawIds.length > 0) {
@@ -200,7 +238,6 @@ export default function TimelineBar({
     updateStep(stepId, { cameraPosition: undefined });
   }, [updateStep]);
 
-  // Jump canvas to the saved camera position for this step
   const viewPosition = useCallback((step: AnimationStep) => {
     if (!editor || !step.cameraPosition) return;
     editor.setCamera(step.cameraPosition, { force: true, animation: { duration: 300 } });
@@ -221,7 +258,6 @@ export default function TimelineBar({
     }
   }, []);
 
-  // Stop audio preview when canvas locks/unlocks
   useEffect(() => {
     stopAudioPreview();
   }, [isLocked, stopAudioPreview]);
@@ -231,7 +267,6 @@ export default function TimelineBar({
       const next = new Set(prev);
       if (next.has(stepId)) {
         next.delete(stepId);
-        // Collapsing audio dropdown — stop preview
         stopAudioPreview();
       } else {
         next.add(stepId);
@@ -290,7 +325,6 @@ export default function TimelineBar({
 
   const clearAll = useCallback(() => {
     if (window.confirm('Delete all steps and shapes from canvas?')) {
-      // Delete all tldraw shapes that are in any step
       if (editor) {
         const allTldrawIds = steps
           .flatMap(s => s.shapeIds)
@@ -303,7 +337,7 @@ export default function TimelineBar({
     }
   }, [onStepsChange, steps, editor]);
 
-  // Toggle card selection for grouping (Cmd+Click or Ctrl+Click)
+  // Toggle card selection for grouping
   const toggleCardSelection = useCallback((stepId: string, e: React.MouseEvent) => {
     if (e.metaKey || e.ctrlKey) {
       e.stopPropagation();
@@ -317,36 +351,27 @@ export default function TimelineBar({
     }
   }, []);
 
-  // Group selected cards into one
   const groupSelectedCards = useCallback(() => {
     if (selectedCardIds.size < 2) return;
     const selectedSteps = steps.filter(s => selectedCardIds.has(s.id));
     if (selectedSteps.length < 2) return;
-
-    // Merge all shape IDs into the first selected step
     const mergedShapeIds = selectedSteps.flatMap(s => s.shapeIds);
     const firstStep = selectedSteps[0];
     const mergedStep: AnimationStep = {
       ...firstStep,
-      shapeIds: [...new Set(mergedShapeIds)], // deduplicate
+      shapeIds: [...new Set(mergedShapeIds)],
     };
-
-    // Replace first selected step with merged, remove the rest
     const idsToRemove = new Set(selectedSteps.slice(1).map(s => s.id));
     const newSteps = steps
       .map(s => s.id === firstStep.id ? mergedStep : s)
       .filter(s => !idsToRemove.has(s.id));
-
     onStepsChange(newSteps);
     setSelectedCardIds(new Set());
   }, [selectedCardIds, steps, onStepsChange]);
 
-  // Ungroup a card back into individual cards
   const ungroupCard = useCallback((stepId: string) => {
     const step = steps.find(s => s.id === stepId);
     if (!step || step.shapeIds.length <= 1) return;
-
-    // Create individual steps for each shape
     const individualSteps: AnimationStep[] = step.shapeIds.map((shapeId, i) => ({
       id: `step-${Date.now()}-${i}`,
       shapeIds: [shapeId],
@@ -354,10 +379,9 @@ export default function TimelineBar({
       duration: step.duration,
       label: `Step`,
       action: step.action,
-      cameraPosition: i === 0 ? step.cameraPosition : undefined, // only first keeps camera
+      pageId: step.pageId,
+      cameraPosition: i === 0 ? step.cameraPosition : undefined,
     }));
-
-    // Replace the grouped step with individual steps
     const stepIndex = steps.findIndex(s => s.id === stepId);
     const newSteps = [...steps];
     newSteps.splice(stepIndex, 1, ...individualSteps);
@@ -369,18 +393,94 @@ export default function TimelineBar({
     if (!editor) return;
     const ids = editor.getSelectedShapeIds() as string[];
     if (ids.length === 0) return;
+    const pageId = editor.getCurrentPageId() as string;
 
     const newStep: AnimationStep = {
       id: `step-${Date.now()}`,
       shapeIds: [...ids],
       animation: 'appear' as AnimationType,
       duration: 800,
-      label: `Step ${steps.length + 1}`,
-      action: 'exit' as StepAction, // Default to Erase for manual adds
+      label: `Step`,
+      action: 'exit' as StepAction,
+      pageId,
     };
 
-    onStepsChange([...steps, newStep]);
+    // Insert at end of current page's section
+    const lastPageIndex = steps.map(s => s.pageId).lastIndexOf(pageId);
+    if (lastPageIndex === -1) {
+      onStepsChange([...steps, newStep]);
+    } else {
+      const result = [...steps];
+      result.splice(lastPageIndex + 1, 0, newStep);
+      onStepsChange(result);
+    }
   }, [editor, steps, onStepsChange]);
+
+  // ─── Move operations (replace drag) ─────────────────────────────────────
+  const getPageBounds = useCallback((stepId: string): { pageId: string; pageStart: number; pageEnd: number } | null => {
+    const step = steps.find(s => s.id === stepId);
+    if (!step) return null;
+    const pid = step.pageId || 'page:page';
+    let pageStart = -1;
+    let pageEnd = -1;
+    for (let i = 0; i < steps.length; i++) {
+      if ((steps[i].pageId || 'page:page') === pid) {
+        if (pageStart === -1) pageStart = i;
+        pageEnd = i;
+      }
+    }
+    return pageStart >= 0 ? { pageId: pid, pageStart, pageEnd } : null;
+  }, [steps]);
+
+  const moveToStart = useCallback((stepId: string) => {
+    const bounds = getPageBounds(stepId);
+    if (!bounds) return;
+    const currentIndex = steps.findIndex(s => s.id === stepId);
+    if (currentIndex === bounds.pageStart) return; // already at start
+    const newSteps = [...steps];
+    const [moved] = newSteps.splice(currentIndex, 1);
+    newSteps.splice(bounds.pageStart, 0, moved);
+    onStepsChange(newSteps);
+    setMoveMenuStepId(null);
+  }, [steps, onStepsChange, getPageBounds]);
+
+  const moveToEnd = useCallback((stepId: string) => {
+    const bounds = getPageBounds(stepId);
+    if (!bounds) return;
+    const currentIndex = steps.findIndex(s => s.id === stepId);
+    if (currentIndex === bounds.pageEnd) return; // already at end
+    const newSteps = [...steps];
+    const [moved] = newSteps.splice(currentIndex, 1);
+    // After splice, pageEnd might shift by -1 if current was before pageEnd
+    const adjustedEnd = currentIndex < bounds.pageEnd ? bounds.pageEnd - 1 : bounds.pageEnd;
+    newSteps.splice(adjustedEnd + 1, 0, moved);
+    onStepsChange(newSteps);
+    setMoveMenuStepId(null);
+  }, [steps, onStepsChange, getPageBounds]);
+
+  const moveToPosition = useCallback((stepId: string, position: number, mode: 'after' | 'before') => {
+    const bounds = getPageBounds(stepId);
+    if (!bounds) return;
+    const currentIndex = steps.findIndex(s => s.id === stepId);
+    // position is 1-based within the page
+    const pageSteps = steps.filter(s => (s.pageId || 'page:page') === bounds.pageId);
+    if (position < 1 || position > pageSteps.length) return;
+    const currentPageLocalIndex = pageSteps.findIndex(s => s.id === stepId);
+    if (position === currentPageLocalIndex + 1) return; // same position
+
+    // Find the target step's global index
+    const targetStepId = pageSteps[position - 1].id;
+    const newSteps = [...steps];
+    const [moved] = newSteps.splice(currentIndex, 1);
+    // Recalculate target index after removal
+    let insertAt = newSteps.findIndex(s => s.id === targetStepId);
+    if (insertAt === -1) insertAt = 0;
+    if (mode === 'after') insertAt += 1;
+    newSteps.splice(insertAt, 0, moved);
+    onStepsChange(newSteps);
+    setMoveMenuStepId(null);
+    setMoveInput('');
+  }, [steps, onStepsChange, getPageBounds]);
 
   // Click card → select shapes on canvas and pan to show them
   const handleCardClick = useCallback((step: AnimationStep) => {
@@ -388,14 +488,11 @@ export default function TimelineBar({
     const tldrawIds = step.shapeIds.filter(id => id.includes(':'));
     const rfIds = step.shapeIds.filter(id => !id.includes(':'));
 
-    // Select tldraw shapes
     if (tldrawIds.length > 0) {
       editor.select(...tldrawIds as any);
     }
 
-    // Highlight RF nodes/edges by selecting them in React Flow DOM
     if (rfIds.length > 0 && diagramData) {
-      // Add 'selected' class to RF elements for visual feedback
       document.querySelectorAll('.react-flow__node.selected, .react-flow__edge.selected').forEach(el => {
         el.classList.remove('selected');
       });
@@ -405,11 +502,9 @@ export default function TimelineBar({
       }
     }
 
-    // If camera is locked for this step, jump to saved position
     if (step.cameraPosition) {
       editor.setCamera(step.cameraPosition, { force: true, animation: { duration: 300 } });
     } else if (tldrawIds.length > 0 || rfIds.length > 0) {
-      // No camera lock — center on the shapes (tldraw + RF)
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const id of tldrawIds) {
         const bounds = editor.getShapePageBounds(id as any);
@@ -419,7 +514,6 @@ export default function TimelineBar({
         maxX = Math.max(maxX, bounds.x + bounds.w);
         maxY = Math.max(maxY, bounds.y + bounds.h);
       }
-      // Include RF node positions in bounding box
       if (diagramData) {
         for (const rfId of rfIds) {
           const node = diagramData.nodes.find((n: any) => n.id === rfId);
@@ -432,7 +526,6 @@ export default function TimelineBar({
             maxX = Math.max(maxX, pos.x + w);
             maxY = Math.max(maxY, pos.y + h);
           }
-          // For edges, use the source and target node positions
           const edge = diagramData.edges.find((e: any) => e.id === rfId);
           if (edge) {
             const src = diagramData.nodes.find((n: any) => n.id === edge.source);
@@ -456,52 +549,23 @@ export default function TimelineBar({
     }
   }, [editor, isLocked, diagramData]);
 
-  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
-    // Don't start card drag when interacting with form controls (volume slider, inputs, etc.)
-    const tag = (e.target as HTMLElement).tagName?.toLowerCase();
-    if (tag === 'input' || tag === 'select' || tag === 'button' || tag === 'label') {
-      e.preventDefault();
-      return;
-    }
-    setDragIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(index));
-    const el = e.currentTarget as HTMLElement;
-    setTimeout(() => el.style.opacity = '0.4', 0);
-  }, []);
-
-  const handleDragEnd = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '1';
-    }
-    setDragIndex(null);
-    setDropIndex(null);
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDropIndex(index);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent, targetIndex: number) => {
-    e.preventDefault();
-    const sourceIndex = dragIndex;
-    if (sourceIndex === null || sourceIndex === targetIndex) {
-      setDragIndex(null);
-      setDropIndex(null);
-      return;
-    }
-    const newSteps = [...steps];
-    const [moved] = newSteps.splice(sourceIndex, 1);
-    newSteps.splice(targetIndex, 0, moved);
-    onStepsChange(newSteps);
-    setDragIndex(null);
-    setDropIndex(null);
-  }, [dragIndex, steps, onStepsChange]);
-
   if (isLocked) {
     return null;
+  }
+
+  // ─── Compute page groups for rendering ──────────────────────────────────
+  const pageGroups = getPageGroups(steps, editor);
+  const pages = editor ? editor.getPages() : [];
+  const pageIds = pages.map(p => p.id as string);
+  const hasMultiplePages = pages.length > 1;
+
+  // Build per-page local index for each step
+  const pageLocalIndices: number[] = [];
+  const pageCounters: Record<string, number> = {};
+  for (const step of steps) {
+    const pid = step.pageId || 'page:page';
+    pageCounters[pid] = (pageCounters[pid] || 0) + 1;
+    pageLocalIndices.push(pageCounters[pid]);
   }
 
   return (
@@ -511,6 +575,7 @@ export default function TimelineBar({
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Timeline</span>
           <span className="text-[10px] text-slate-600">{steps.length} steps</span>
+          {hasMultiplePages && <span className="text-[10px] text-slate-600">· {pages.length} pages</span>}
         </div>
         <div className="flex items-center gap-1.5">
           {selectedCardIds.size >= 2 && (
@@ -546,11 +611,11 @@ export default function TimelineBar({
         </div>
       </div>
 
-      {/* Timeline track — hidden when minimized */}
+      {/* Timeline track */}
       {!minimized && (
       <div
         ref={scrollRef}
-        className="flex items-stretch gap-2 px-3 py-2 overflow-x-auto"
+        className="flex items-stretch gap-0 px-3 py-2 overflow-x-auto"
         style={{ minHeight: 100 }}
       >
         {steps.length === 0 ? (
@@ -558,208 +623,291 @@ export default function TimelineBar({
             <p className="text-[11px] text-slate-600">Add elements to the canvas — they appear here automatically</p>
           </div>
         ) : (
-          steps.map((step, index) => {
-            const info = getShapeIcon(editor, step.shapeIds[0], diagramData);
-            const extra = step.shapeIds.length > 1 ? `+${step.shapeIds.length - 1}` : '';
-            const hasCamera = !!step.cameraPosition;
-            const isSelected = step.shapeIds.some(id => selectedShapeIds.includes(id));
-            const action = step.action || 'enter';
-            const isManualCard = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
-            const isMultiShape = step.shapeIds.length > 1;
+          <>
+            {steps.map((step, index) => {
+              const info = getShapeIcon(editor, step.shapeIds[0], diagramData);
+              const extra = step.shapeIds.length > 1 ? `+${step.shapeIds.length - 1}` : '';
+              const hasCamera = !!step.cameraPosition;
+              const isSelected = step.shapeIds.some(id => selectedShapeIds.includes(id));
+              const action = step.action || 'enter';
+              const isManualCard = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
+              const isMultiShape = step.shapeIds.length > 1;
+              const pageLocalIndex = pageLocalIndices[index];
+              const pid = step.pageId || 'page:page';
+              const pageColorIdx = pageIds.indexOf(pid) % PAGE_COLORS.length;
+              const pageColor = PAGE_COLORS[Math.max(0, pageColorIdx)];
+              const isMoveMenuOpen = moveMenuStepId === step.id;
 
-            return (
-              <div
-                key={step.id}
-                data-timeline-index={index}
-                draggable
-                onDragStart={(e) => handleDragStart(e, index)}
-                onDragEnd={handleDragEnd}
-                onDragOver={(e) => handleDragOver(e, index)}
-                onDrop={(e) => handleDrop(e, index)}
-                onClick={(e) => {
-                  toggleCardSelection(step.id, e);
-                  if (!e.metaKey && !e.ctrlKey) handleCardClick(step);
-                }}
-                className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all cursor-grab active:cursor-grabbing ${
-                  selectedCardIds.has(step.id)
-                    ? 'border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/50'
-                    : dropIndex === index && dragIndex !== index
-                    ? 'border-blue-400 bg-blue-500/10'
-                    : isSelected
-                    ? 'border-amber-400 bg-amber-500/10'
-                    : isManualCard
-                    ? 'border-orange-700/60 bg-orange-900/20 hover:border-orange-600'
-                    : 'border-slate-700/60 bg-slate-800/40 hover:border-slate-600'
-                } ${dragIndex === index ? 'opacity-40' : ''}`}
-              >
-                {/* Step header */}
-                <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-slate-700/40 bg-slate-800/60">
-                  <input
-                    type="checkbox"
-                    checked={selectedCardIds.has(step.id)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      setSelectedCardIds(prev => {
-                        const next = new Set(prev);
-                        if (next.has(step.id)) next.delete(step.id); else next.add(step.id);
-                        return next;
-                      });
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-3 h-3 flex-shrink-0 accent-emerald-500 cursor-pointer"
-                  />
-                  <span className="text-[9px] font-bold text-slate-500">{(index + 1).toString().padStart(2, '0')}</span>
-                  <span className="text-slate-400">{info.icon}</span>
-                  <span className="text-[10px] font-medium text-slate-300 truncate flex-1">{info.label}</span>
-                  {extra && <span className="text-[8px] text-slate-500">{extra}</span>}
-                </div>
+              // Check if this is the first card of a new page section
+              const isFirstOfPage = index === 0 || (steps[index - 1].pageId || 'page:page') !== pid;
 
-                {/* Controls */}
-                <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1">
-                  {/* Animation/Action dropdown */}
-                  {isManualCard ? (
-                    // Manual card — show action dropdown (Erase/Move/Teleport/Swap)
-                    <select
-                      value={action}
-                      onChange={(e) => updateStep(step.id, { action: e.target.value as StepAction })}
-                      disabled={isMultiShape}
-                      className={`w-full text-[9px] border border-orange-600/50 rounded px-1 py-1 bg-slate-800/50 text-orange-300 ${isMultiShape ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    >
-                      {isMultiShape ? (
-                        <option value="exit">Erase</option>
-                      ) : (
-                        MANUAL_ACTION_OPTIONS.map(a => (
-                          <option key={a.value} value={a.value}>{a.label}</option>
-                        ))
-                      )}
-                    </select>
-                  ) : (
-                    // Auto card — show animation dropdown
-                    <select
-                      value={step.action === 'blink' ? 'blink' : step.animation}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === 'blink') {
-                          updateStep(step.id, { action: 'blink', animation: 'appear' as AnimationType });
-                        } else {
-                          updateStep(step.id, { action: 'enter', animation: val as AnimationType });
-                        }
-                      }}
-                      className="w-full text-[9px] border border-slate-600/50 rounded px-1 py-1 bg-slate-800/50 text-slate-300"
-                    >
-                      {ANIMATION_OPTIONS.map(a => (
-                        <option key={a.value} value={a.value}>{a.label}</option>
-                      ))}
-                    </select>
+              return (
+                <div key={step.id} className="flex items-stretch" data-timeline-index={index}>
+                  {/* Page separator */}
+                  {isFirstOfPage && hasMultiplePages && (
+                    <div className="flex flex-col items-center justify-center px-1.5 flex-shrink-0">
+                      <div className={`w-px flex-1 ${pageColor.border.replace('border-', 'bg-')}`} />
+                      <span className={`text-[7px] font-bold px-1.5 py-0.5 rounded-full ${pageColor.label} ${pageColor.text} whitespace-nowrap my-1`}>
+                        {pageGroups.find(g => g.pageId === pid)?.pageName || 'Page'}
+                      </span>
+                      <div className={`w-px flex-1 ${pageColor.border.replace('border-', 'bg-')}`} />
+                    </div>
                   )}
 
-                  {/* Camera: Lock + View Position */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); captureCamera(step.id); }}
-                      className={`flex items-center gap-0.5 px-1 py-1 rounded text-[8px] font-medium transition-all justify-center ${
-                        hasCamera
-                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                          : 'bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700'
-                      }`}
-                      title="Lock current camera view"
-                    >
-                      {hasCamera ? (
-                        <><Camera className="w-2.5 h-2.5" /> {Math.round(step.cameraPosition!.z * 100)}%</>
+                  {/* Card */}
+                  <div
+                    onClick={(e) => {
+                      toggleCardSelection(step.id, e);
+                      if (!e.metaKey && !e.ctrlKey) handleCardClick(step);
+                      // Close move menu if clicking another card
+                      if (moveMenuStepId && moveMenuStepId !== step.id) setMoveMenuStepId(null);
+                    }}
+                    className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all cursor-pointer mx-1 ${
+                      selectedCardIds.has(step.id)
+                        ? 'border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/50'
+                        : isSelected
+                        ? 'border-amber-400 bg-amber-500/10'
+                        : isManualCard
+                        ? 'border-orange-700/60 bg-orange-900/20 hover:border-orange-600'
+                        : hasMultiplePages
+                        ? `${pageColor.border} ${pageColor.bg} hover:border-slate-500`
+                        : 'border-slate-700/60 bg-slate-800/40 hover:border-slate-600'
+                    }`}
+                  >
+                    {/* Step header */}
+                    <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-slate-700/40 bg-slate-800/60">
+                      <input
+                        type="checkbox"
+                        checked={selectedCardIds.has(step.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setSelectedCardIds(prev => {
+                            const next = new Set(prev);
+                            if (next.has(step.id)) next.delete(step.id); else next.add(step.id);
+                            return next;
+                          });
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-3 h-3 flex-shrink-0 accent-emerald-500 cursor-pointer"
+                      />
+                      <span className={`text-[9px] font-bold ${hasMultiplePages ? pageColor.text : 'text-slate-500'}`}>
+                        {String(pageLocalIndex).padStart(2, '0')}
+                      </span>
+                      <span className="text-slate-400">{info.icon}</span>
+                      <span className="text-[10px] font-medium text-slate-300 truncate flex-1">{info.label}</span>
+                      {extra && <span className="text-[8px] text-slate-500">{extra}</span>}
+                    </div>
+
+                    {/* Controls */}
+                    <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1">
+                      {/* Animation/Action dropdown */}
+                      {isManualCard ? (
+                        <select
+                          value={action}
+                          onChange={(e) => updateStep(step.id, { action: e.target.value as StepAction })}
+                          disabled={isMultiShape}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`w-full text-[9px] border border-orange-600/50 rounded px-1 py-1 bg-slate-800/50 text-orange-300 ${isMultiShape ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          {isMultiShape ? (
+                            <option value="exit">Erase</option>
+                          ) : (
+                            MANUAL_ACTION_OPTIONS.map(a => (
+                              <option key={a.value} value={a.value}>{a.label}</option>
+                            ))
+                          )}
+                        </select>
                       ) : (
-                        <><CameraOff className="w-2.5 h-2.5" /> Lock</>
+                        <select
+                          value={step.action === 'blink' ? 'blink' : step.animation}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === 'blink') {
+                              updateStep(step.id, { action: 'blink', animation: 'appear' as AnimationType });
+                            } else {
+                              updateStep(step.id, { action: 'enter', animation: val as AnimationType });
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full text-[9px] border border-slate-600/50 rounded px-1 py-1 bg-slate-800/50 text-slate-300"
+                        >
+                          {ANIMATION_OPTIONS.map(a => (
+                            <option key={a.value} value={a.value}>{a.label}</option>
+                          ))}
+                        </select>
                       )}
-                    </button>
-                    {hasCamera && (
+
+                      {/* Camera: Lock + View Position */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); captureCamera(step.id); }}
+                          className={`flex items-center gap-0.5 px-1 py-1 rounded text-[8px] font-medium transition-all justify-center ${
+                            hasCamera
+                              ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                              : 'bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700'
+                          }`}
+                          title="Lock current camera view"
+                        >
+                          {hasCamera ? (
+                            <><Camera className="w-2.5 h-2.5" /> {Math.round(step.cameraPosition!.z * 100)}%</>
+                          ) : (
+                            <><CameraOff className="w-2.5 h-2.5" /> Lock</>
+                          )}
+                        </button>
+                        {hasCamera && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); viewPosition(step); }}
+                            className="flex items-center gap-0.5 px-1 py-1 rounded text-[8px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all"
+                            title="Jump to saved camera position"
+                          >
+                            <Eye className="w-2.5 h-2.5" /> View
+                          </button>
+                        )}
+                        {hasCamera && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); clearCamera(step.id); }}
+                            className="p-0.5 rounded text-[8px] text-red-400/60 hover:text-red-400 hover:bg-red-500/10"
+                            title="Remove camera lock"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Audio — collapsible */}
+                    <div className="px-2 pb-1">
                       <button
-                        onClick={(e) => { e.stopPropagation(); viewPosition(step); }}
-                        className="flex items-center gap-0.5 px-1 py-1 rounded text-[8px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all"
-                        title="Jump to saved camera position"
+                        onClick={(e) => { e.stopPropagation(); toggleAudioExpanded(step.id); }}
+                        className={`flex items-center gap-1 w-full px-1 py-0.5 rounded text-[8px] font-medium transition-all ${
+                          step.audio?.data ? 'text-emerald-300' : audioExpandedSteps.has(step.id) ? 'text-slate-300' : 'text-slate-500'
+                        } hover:bg-slate-700/30`}
                       >
-                        <Eye className="w-2.5 h-2.5" /> View
+                        {step.audio?.data ? <Volume2 className="w-2.5 h-2.5" /> : <VolumeX className="w-2.5 h-2.5" />}
+                        {step.audio?.data ? step.audio.fileName || 'Audio' : 'Audio'}
+                        <ChevronDown className={`w-2.5 h-2.5 ml-auto transition-transform ${audioExpandedSteps.has(step.id) ? 'rotate-180' : ''}`} />
                       </button>
-                    )}
-                    {hasCamera && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); clearCamera(step.id); }}
-                        className="p-0.5 rounded text-[8px] text-red-400/60 hover:text-red-400 hover:bg-red-500/10"
-                        title="Remove camera lock"
-                      >
-                        ✕
+                      {audioExpandedSteps.has(step.id) && (
+                        <div className="mt-1 space-y-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                          {step.audio?.data ? (
+                            <>
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => previewAudio(step)} className="px-1 py-0.5 rounded text-[8px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">▶</button>
+                                <button onClick={() => stopAudioPreview()} className="px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-300 border border-slate-600/30">⏹</button>
+                                <button onClick={() => updateStep(step.id, { audio: undefined })} className="px-1 py-0.5 rounded text-[8px] text-red-400 border border-red-500/20">✕</button>
+                              </div>
+                              <div className="flex items-center gap-1 text-[8px] text-slate-500">
+                                <span>Start</span>
+                                <input type="number" value={step.audio.startTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, startTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
+                                <span>End</span>
+                                <input type="number" value={step.audio.endTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, endTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
+                                <span>s</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[8px] text-slate-500">
+                                <label className="flex items-center gap-0.5 cursor-pointer">
+                                  <input type="checkbox" checked={step.audio.loop} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, loop: e.target.checked } })} style={{ width: 8, height: 8 }} />
+                                  Loop
+                                </label>
+                                <span>Vol</span>
+                                <input type="range" min={0} max={100} step={5} value={Math.round(step.audio.volume * 100)} onChange={(e) => { const v = Number(e.target.value) / 100; updateStep(step.id, { audio: { ...step.audio!, volume: v } }); if (audioPreviewGainRef.current) audioPreviewGainRef.current.gain.value = v; }} className="w-12 h-1" style={{ accentColor: '#10b981' }} />
+                                <span>{Math.round(step.audio.volume * 100)}%</span>
+                              </div>
+                            </>
+                          ) : step.audio && !step.audio.data ? (
+                            <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                              🔊 Re-add: {step.audio.fileName || 'audio'}
+                            </button>
+                          ) : (
+                            <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700">
+                              <VolumeX className="w-2.5 h-2.5" /> Add Audio
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Step footer — move, delete, ungroup */}
+                    <div className="flex items-center justify-between px-1.5 py-1 border-t border-slate-700/40 bg-slate-800/60">
+                      <div className="flex items-center gap-1">
+                        {step.shapeIds.length > 1 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); ungroupCard(step.id); }}
+                            className="text-[8px] text-blue-400/60 hover:text-blue-400 px-1 py-0.5 rounded hover:bg-blue-500/10"
+                          >
+                            Ungroup
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setMoveMenuStepId(isMoveMenuOpen ? null : step.id); setMoveInput(''); }}
+                          className={`flex items-center gap-0.5 text-[8px] px-1 py-0.5 rounded transition-all ${
+                            isMoveMenuOpen ? 'text-blue-300 bg-blue-500/15 border border-blue-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/30'
+                          }`}
+                          title="Move card position"
+                        >
+                          <MoveHorizontal className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); removeStep(step.id); }} className="p-0.5 rounded hover:bg-red-500/10">
+                        <Trash2 className="w-3 h-3 text-red-400/60 hover:text-red-400" />
                       </button>
+                    </div>
+
+                    {/* Move menu — dropdown below footer */}
+                    {isMoveMenuOpen && (
+                      <div className="px-2 py-1.5 border-t border-blue-500/20 bg-slate-900/80 space-y-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => moveToStart(step.id)}
+                            className="flex-1 text-[8px] px-1 py-1 rounded bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600/30"
+                          >
+                            ⇤ Start
+                          </button>
+                          <button
+                            onClick={() => moveToEnd(step.id)}
+                            className="flex-1 text-[8px] px-1 py-1 rounded bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600/30"
+                          >
+                            End ⇥
+                          </button>
+                        </div>
+                        <div className="flex gap-1 items-center">
+                          <select
+                            value={moveMode}
+                            onChange={(e) => setMoveMode(e.target.value as 'after' | 'before')}
+                            className="text-[8px] border border-slate-600/50 rounded px-0.5 py-1 bg-slate-800/50 text-slate-300"
+                          >
+                            <option value="after">After #</option>
+                            <option value="before">Before #</option>
+                          </select>
+                          <input
+                            type="number"
+                            value={moveInput}
+                            onChange={(e) => setMoveInput(e.target.value)}
+                            placeholder="#"
+                            min={1}
+                            className="w-8 text-[8px] border border-slate-600/50 rounded px-0.5 py-1 text-center bg-slate-800/50 text-slate-300"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && moveInput) {
+                                moveToPosition(step.id, Number(moveInput), moveMode);
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              if (moveInput) moveToPosition(step.id, Number(moveInput), moveMode);
+                            }}
+                            disabled={!moveInput}
+                            className="text-[8px] px-1.5 py-1 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Go
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
-
-                {/* Audio — collapsible */}
-                <div className="px-2 pb-1">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleAudioExpanded(step.id); }}
-                    className={`flex items-center gap-1 w-full px-1 py-0.5 rounded text-[8px] font-medium transition-all ${
-                      step.audio?.data ? 'text-emerald-300' : audioExpandedSteps.has(step.id) ? 'text-slate-300' : 'text-slate-500'
-                    } hover:bg-slate-700/30`}
-                  >
-                    {step.audio?.data ? <Volume2 className="w-2.5 h-2.5" /> : <VolumeX className="w-2.5 h-2.5" />}
-                    {step.audio?.data ? step.audio.fileName || 'Audio' : 'Audio'}
-                    <ChevronDown className={`w-2.5 h-2.5 ml-auto transition-transform ${audioExpandedSteps.has(step.id) ? 'rotate-180' : ''}`} />
-                  </button>
-                  {audioExpandedSteps.has(step.id) && (
-                    <div className="mt-1 space-y-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-                      {step.audio?.data ? (
-                        <>
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => previewAudio(step)} className="px-1 py-0.5 rounded text-[8px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">▶</button>
-                            <button onClick={() => stopAudioPreview()} className="px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-300 border border-slate-600/30">⏹</button>
-                            <button onClick={() => updateStep(step.id, { audio: undefined })} className="px-1 py-0.5 rounded text-[8px] text-red-400 border border-red-500/20">✕</button>
-                          </div>
-                          <div className="flex items-center gap-1 text-[8px] text-slate-500">
-                            <span>Start</span>
-                            <input type="number" value={step.audio.startTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, startTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
-                            <span>End</span>
-                            <input type="number" value={step.audio.endTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, endTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
-                            <span>s</span>
-                          </div>
-                          <div className="flex items-center gap-1 text-[8px] text-slate-500">
-                            <label className="flex items-center gap-0.5 cursor-pointer">
-                              <input type="checkbox" checked={step.audio.loop} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, loop: e.target.checked } })} style={{ width: 8, height: 8 }} />
-                              Loop
-                            </label>
-                            <span>Vol</span>
-                            <input type="range" min={0} max={100} step={5} value={Math.round(step.audio.volume * 100)} onChange={(e) => { const v = Number(e.target.value) / 100; updateStep(step.id, { audio: { ...step.audio!, volume: v } }); if (audioPreviewGainRef.current) audioPreviewGainRef.current.gain.value = v; }} className="w-12 h-1" style={{ accentColor: '#10b981' }} />
-                            <span>{Math.round(step.audio.volume * 100)}%</span>
-                          </div>
-                        </>
-                      ) : step.audio && !step.audio.data ? (
-                        <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-amber-500/10 text-amber-300 border border-amber-500/30">
-                          🔊 Re-add: {step.audio.fileName || 'audio'}
-                        </button>
-                      ) : (
-                        <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700">
-                          <VolumeX className="w-2.5 h-2.5" /> Add Audio
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Step footer — delete + ungroup */}
-                <div className="flex items-center justify-between px-1.5 py-1 border-t border-slate-700/40 bg-slate-800/60">
-                  {step.shapeIds.length > 1 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); ungroupCard(step.id); }}
-                      className="text-[8px] text-blue-400/60 hover:text-blue-400 px-1 py-0.5 rounded hover:bg-blue-500/10"
-                    >
-                      Ungroup
-                    </button>
-                  )}
-                  <div className="flex-1" />
-                  <button onClick={(e) => { e.stopPropagation(); removeStep(step.id); }} className="p-0.5 rounded hover:bg-red-500/10">
-                    <Trash2 className="w-3 h-3 text-red-400/60 hover:text-red-400" />
-                  </button>
-                </div>
-              </div>
-            );
-          })
+              );
+            })}
+          </>
         )}
       </div>
       )}

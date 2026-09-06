@@ -412,17 +412,44 @@ export default function LessonCanvas({
       const trulyNew = newIds.filter(id => !existingStepShapeIds.has(id));
       if (trulyNew.length === 0) return;
 
-      // Auto-add each new shape as a step (no camera capture — user adds manually)
+      const pageId = editor.getCurrentPageId() as string;
+
+      // Auto-add each new shape as a step, tagged with current page
       const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
         id: `step-${Date.now()}-${i}`,
         shapeIds: [id],
         animation: 'appear' as AnimationType,
         duration: 800,
-        label: `Step ${animationSteps.length + i + 1}`,
+        label: `Step`,
         action: 'enter' as StepAction,
+        pageId,
       }));
 
-      setAnimationSteps(prev => [...prev, ...newSteps]);
+      // Insert at end of current page's section (not at end of entire array)
+      setAnimationSteps(prev => {
+        const lastPageIndex = prev.map(s => s.pageId).lastIndexOf(pageId);
+        if (lastPageIndex === -1) {
+          // No steps for this page yet — find insertion point by page order
+          const pages = editor.getPages();
+          const pageOrder = pages.map(p => p.id as string);
+          const currentPageIdx = pageOrder.indexOf(pageId);
+          // Insert after the last step of any page that comes before this one
+          let insertAt = 0;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const stepPageIdx = pageOrder.indexOf(prev[i].pageId || pageOrder[0]);
+            if (stepPageIdx < currentPageIdx) {
+              insertAt = i + 1;
+              break;
+            }
+          }
+          const result = [...prev];
+          result.splice(insertAt, 0, ...newSteps);
+          return result;
+        }
+        const result = [...prev];
+        result.splice(lastPageIndex + 1, 0, ...newSteps);
+        return result;
+      });
       setIsSaved(false);
     };
 
@@ -460,19 +487,148 @@ export default function LessonCanvas({
     const trulyNew = newRfIds.filter(id => !existingStepShapeIds.has(id));
     if (trulyNew.length === 0) return;
 
+    // RF elements belong to the current page (RF overlay is per-page)
+    const pageId = editor ? editor.getCurrentPageId() as string : 'page:page';
+
     // Auto-add each new RF element as a step
     const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
       id: `step-${Date.now()}-rf-${i}`,
       shapeIds: [id],
       animation: 'appear' as AnimationType,
       duration: 800,
-      label: `Step ${animationSteps.length + i + 1}`,
+      label: `Step`,
       action: 'enter' as StepAction,
+      pageId,
     }));
 
-    setAnimationSteps(prev => [...prev, ...newSteps]);
+    // Insert at end of current page's section
+    setAnimationSteps(prev => {
+      const lastPageIndex = prev.map(s => s.pageId).lastIndexOf(pageId);
+      if (lastPageIndex === -1) {
+        return [...prev, ...newSteps];
+      }
+      const result = [...prev];
+      result.splice(lastPageIndex + 1, 0, ...newSteps);
+      return result;
+    });
     setIsSaved(false);
-  }, [diagramData, isLocked, animationSteps]);
+  }, [diagramData, isLocked, animationSteps, editor]);
+
+  // ─── Page copy/delete listeners ───────────────────────────────────────────
+  const knownPageIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!editor) return;
+
+    // Initialize known pages
+    const pages = editor.getPages();
+    knownPageIdsRef.current = new Set(pages.map(p => p.id as string));
+
+    const handlePageChanges = () => {
+      const currentPages = editor.getPages();
+      const currentPageIds = new Set(currentPages.map(p => p.id as string));
+
+      // Detect new pages (could be a duplicate)
+      const newPageIds: string[] = [];
+      for (const id of currentPageIds) {
+        if (!knownPageIdsRef.current.has(id)) {
+          newPageIds.push(id);
+        }
+      }
+
+      // Detect deleted pages
+      const deletedPageIds: string[] = [];
+      for (const id of knownPageIdsRef.current) {
+        if (!currentPageIds.has(id)) {
+          deletedPageIds.push(id);
+        }
+      }
+
+      knownPageIdsRef.current = currentPageIds;
+
+      // Handle page deletion — remove orphaned timeline cards
+      if (deletedPageIds.length > 0) {
+        setAnimationSteps(prev => prev.filter(s => !deletedPageIds.includes(s.pageId || '')));
+        setIsSaved(false);
+      }
+
+      // Handle page duplication — auto-create timeline cards for the new page
+      if (newPageIds.length > 0) {
+        for (const newPageId of newPageIds) {
+          // Get shapes on the new page
+          const newPageShapeIds = new Set(
+            [...editor.getPageShapeIds(newPageId as any)].map(id => id as string)
+          );
+          if (newPageShapeIds.size === 0) continue; // Blank new page, nothing to copy
+
+          // Find which existing page's steps match these shapes (by shape type/position similarity)
+          // For duplicated pages, shape IDs are NEW but the shapes are copies.
+          // We create new steps matching the order of the source page's steps.
+          // The source page is the page that was current before duplication.
+          // Since duplicatePage switches to the new page, the previous page is the source.
+          const allPages = editor.getPages();
+          const newPageIndex = allPages.findIndex(p => (p.id as string) === newPageId);
+          // Source is typically the page just before the new one in order
+          let sourcePageId: string | null = null;
+          if (newPageIndex > 0) {
+            sourcePageId = allPages[newPageIndex - 1].id as string;
+          }
+
+          if (sourcePageId) {
+            setAnimationSteps(prev => {
+              const sourceSteps = prev.filter(s => (s.pageId || '') === sourcePageId);
+              if (sourceSteps.length === 0) return prev;
+
+              // Map source shape IDs to new page shape IDs by matching position/type
+              const sourceShapes = [...editor.getPageShapeIds(sourcePageId as any)]
+                .map(id => editor.getShape(id))
+                .filter(Boolean) as any[];
+              const newShapes = [...editor.getPageShapeIds(newPageId as any)]
+                .map(id => editor.getShape(id))
+                .filter(Boolean) as any[];
+
+              // Build a mapping: source shape ID → new shape ID (by matching type + position)
+              const idMapping = new Map<string, string>();
+              for (const srcShape of sourceShapes) {
+                const match = newShapes.find((ns: any) =>
+                  ns.type === srcShape.type &&
+                  Math.abs(ns.x - srcShape.x) < 1 &&
+                  Math.abs(ns.y - srcShape.y) < 1 &&
+                  !idMapping.has(ns.id as string) &&
+                  ![...idMapping.values()].includes(ns.id as string)
+                );
+                if (match) {
+                  idMapping.set(srcShape.id as string, match.id as string);
+                }
+              }
+
+              // Create new steps for the duplicated page
+              const duplicatedSteps: AnimationStep[] = sourceSteps.map((step, i) => ({
+                ...step,
+                id: `step-${Date.now()}-dup-${i}`,
+                pageId: newPageId,
+                shapeIds: step.shapeIds.map(sid => idMapping.get(sid) || sid),
+                // Clear camera position — user should set it fresh for the new page
+                cameraPosition: undefined,
+                // Clear audio — user re-adds if needed
+                audio: undefined,
+              }));
+
+              // Insert after the source page's steps
+              const lastSourceIndex = prev.map(s => s.pageId).lastIndexOf(sourcePageId!);
+              const result = [...prev];
+              result.splice(lastSourceIndex + 1, 0, ...duplicatedSteps);
+              return result;
+            });
+            setIsSaved(false);
+          }
+        }
+      }
+    };
+
+    const unsub = editor.store.listen(handlePageChanges, { scope: 'document' });
+    return () => unsub();
+  }, [editor]);
 
   const handleLabelsChange = useCallback((newLabels: SubTopicLabel[]) => {
     setSubTopicLabels(newLabels);

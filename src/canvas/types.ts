@@ -67,6 +67,8 @@ export interface AnimationStep {
   label: string;
   /** Action type — defaults to 'enter' for backward compatibility */
   action?: StepAction;
+  /** tldraw page ID this step belongs to (e.g. 'page:page1') */
+  pageId?: string;
   /** Target position for move/teleport actions */
   targetPosition?: { x: number; y: number };
   /** Original position to restore when rewinding move/teleport */
