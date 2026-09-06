@@ -15,7 +15,7 @@
     "@xyflow/react": "^12.11.5",
     "canvas-confetti": "^1.9.4",
     "framer-motion": "^13.1.1",
-    "html2canvas": "^1.4.1",
+    "html-to-image": "^1.11.11",
     "lucide-react": "^1.34.0",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.2.8",

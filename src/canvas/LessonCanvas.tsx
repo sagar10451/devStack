@@ -896,16 +896,23 @@ export default function LessonCanvas({
     const canvasArea = document.getElementById('canvas-export-area');
     if (!canvasArea) return;
     try {
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(canvasArea, {
+      const { toPng } = await import('html-to-image');
+      const dataUrl = await toPng(canvasArea, {
         backgroundColor: '#f0ede8',
-        scale: 2,
-        useCORS: true,
-        logging: false,
+        pixelRatio: 2,
+        // Exclude UI overlays like timeline, sidebar, drop zones from the screenshot
+        filter: (node: HTMLElement) => {
+          if (!(node instanceof HTMLElement)) return true;
+          const cl = node.classList;
+          // Keep tldraw canvas and RF overlay; skip floating UI widgets
+          if (cl?.contains('timeline-bar-widget')) return false;
+          if (cl?.contains('sub-topic-sidebar')) return false;
+          if (node.getAttribute('data-drag-handle') !== null && node.closest?.('.timeline-bar-widget')) return false;
+          return true;
+        },
       });
-      const url = canvas.toDataURL('image/png');
       const a = document.createElement('a');
-      a.href = url;
+      a.href = dataUrl;
       a.download = `canvas-${topicSlug}-${subtopicSlug}.png`;
       a.click();
     } catch (err) {
