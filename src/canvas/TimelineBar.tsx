@@ -19,6 +19,7 @@ import { getIconComponent } from './diagram/iconRegistry';
 interface TimelineBarProps {
   steps: AnimationStep[];
   onStepsChange: (steps: AnimationStep[]) => void;
+  onDeleteRfElements?: (ids: string[]) => void;
   editor: Editor | null;
   isLocked: boolean;
   diagramData?: DiagramData;
@@ -27,7 +28,7 @@ interface TimelineBarProps {
 
 const ANIMATION_OPTIONS: { value: string; label: string; group: string }[] = [
   // Instant
-  { value: 'none', label: 'None (instant)', group: 'Instant' },
+  { value: 'none', label: 'None (preload)', group: 'Instant' },
   // Entrance
   { value: 'appear', label: 'Appear', group: 'Entrance' },
   { value: 'flyInLeft', label: 'Fly Left', group: 'Entrance' },
@@ -153,6 +154,7 @@ function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: Diag
 export default function TimelineBar({
   steps,
   onStepsChange,
+  onDeleteRfElements,
   editor,
   isLocked,
   diagramData,
@@ -196,18 +198,22 @@ export default function TimelineBar({
       const isManual = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
       if (!isManual) {
         const tldrawIds = step.shapeIds.filter(sid => sid.includes(':'));
+        const rfIds = step.shapeIds.filter(sid => !sid.includes(':'));
         if (tldrawIds.length > 0) {
           editor.deleteShapes(tldrawIds as any);
+        }
+        if (rfIds.length > 0 && onDeleteRfElements) {
+          onDeleteRfElements(rfIds);
         }
       }
     }
     onStepsChange(steps.filter(s => s.id !== id));
-  }, [steps, onStepsChange, editor]);
+  }, [steps, onStepsChange, onDeleteRfElements, editor]);
 
   const captureCamera = useCallback((stepId: string) => {
     if (!editor) return;
     const cam = editor.getCamera();
-    updateStep(stepId, { cameraPosition: { x: cam.x, y: cam.y, z: cam.z } });
+    updateStep(stepId, { cameraPosition: { x: Math.round(cam.x), y: Math.round(cam.y), z: Math.round(cam.z * 100) / 100 } });
   }, [editor, updateStep]);
 
   const clearCamera = useCallback((stepId: string) => {
@@ -305,13 +311,19 @@ export default function TimelineBar({
         const allTldrawIds = steps
           .flatMap(s => s.shapeIds)
           .filter(id => id.includes(':'));
+        const allRfIds = steps
+          .flatMap(s => s.shapeIds)
+          .filter(id => !id.includes(':'));
         if (allTldrawIds.length > 0) {
           editor.deleteShapes(allTldrawIds as any);
+        }
+        if (allRfIds.length > 0 && onDeleteRfElements) {
+          onDeleteRfElements(allRfIds);
         }
       }
       onStepsChange([]);
     }
-  }, [onStepsChange, steps, editor]);
+  }, [onStepsChange, onDeleteRfElements, steps, editor]);
 
   // Toggle card selection for grouping
   const toggleCardSelection = useCallback((stepId: string, e: React.MouseEvent) => {
@@ -625,6 +637,7 @@ export default function TimelineBar({
               const isMultiShape = step.shapeIds.length > 1;
               const displayNum = pageLocalIndex + 1;
               const isMoveMenuOpen = moveMenuStepId === step.id;
+              const isPreloaded = step.animation === 'none' && (step.action || 'enter') === 'enter';
               // Find the global index for data-timeline-index (used by auto-scroll)
               const globalIndex = steps.findIndex(s => s.id === step.id);
 
@@ -666,6 +679,7 @@ export default function TimelineBar({
                       <span className="text-[9px] font-bold text-slate-500">
                         {String(displayNum).padStart(2, '0')}
                       </span>
+                      {isPreloaded && <span className="text-[8px]" title="Preloaded — visible on page load">📌</span>}
                       <span className="text-slate-400">{info.icon}</span>
                       <span className="text-[10px] font-medium text-slate-300 truncate flex-1">{info.label}</span>
                       {extra && <span className="text-[8px] text-slate-500">{extra}</span>}
@@ -747,6 +761,63 @@ export default function TimelineBar({
                         )}
                       </div>
                     </div>
+
+                    {/* Camera position inputs — collapsible, for all cards with camera */}
+                    {hasCamera && (
+                      <details className="mt-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                        <summary className="text-[7px] text-slate-600 cursor-pointer hover:text-slate-400 select-none">x y z</summary>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-[7px] text-slate-600">x</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            defaultValue={step.cameraPosition!.x}
+                            key={`${step.id}-x-${step.cameraPosition!.x}`}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value);
+                              if (!isNaN(v)) {
+                                updateStep(step.id, { cameraPosition: { ...step.cameraPosition!, x: v } });
+                                if (editor) editor.setCamera({ ...step.cameraPosition!, x: v }, { force: true, animation: { duration: 200 } });
+                              }
+                            }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
+                            className="w-14 text-[8px] border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-indigo-300"
+                          />
+                          <span className="text-[7px] text-slate-600">y</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            defaultValue={step.cameraPosition!.y}
+                            key={`${step.id}-y-${step.cameraPosition!.y}`}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value);
+                              if (!isNaN(v)) {
+                                updateStep(step.id, { cameraPosition: { ...step.cameraPosition!, y: v } });
+                                if (editor) editor.setCamera({ ...step.cameraPosition!, y: v }, { force: true, animation: { duration: 200 } });
+                              }
+                            }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
+                            className="w-14 text-[8px] border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-indigo-300"
+                          />
+                          <span className="text-[7px] text-slate-600">z</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            defaultValue={step.cameraPosition!.z}
+                            key={`${step.id}-z-${step.cameraPosition!.z}`}
+                            onBlur={(e) => {
+                              const v = Number(e.target.value);
+                              if (!isNaN(v) && v > 0) {
+                                updateStep(step.id, { cameraPosition: { ...step.cameraPosition!, z: v } });
+                                if (editor) editor.setCamera({ ...step.cameraPosition!, z: v }, { force: true, animation: { duration: 200 } });
+                              }
+                            }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
+                            className="w-12 text-[8px] border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-indigo-300"
+                          />
+                        </div>
+                      </details>
+                    )}
 
                     {/* Audio — collapsible */}
                     <div className="px-2 pb-1">

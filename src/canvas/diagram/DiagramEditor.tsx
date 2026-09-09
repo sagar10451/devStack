@@ -132,11 +132,21 @@ function FlowCanvas({
   const [reactFlowInstance, setReactFlowInstance] = useState<ReturnType<typeof Object> | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
+  // Sync internal state when diagramData changes externally (e.g. delete from timeline)
+  useEffect(() => {
+    setNodes(diagramData.nodes as any);
+  }, [diagramData.nodes, setNodes]);
+
+  useEffect(() => {
+    setEdges(diagramData.edges as any);
+  }, [diagramData.edges, setEdges]);
+
   // ─── Handle external node drops from LessonCanvas ───────────────────────
   useEffect(() => {
     if (!pendingNode) return;
     const { item, position } = pendingNode;
     const isContent = item.type === 'content';
+    const isNotes = item.type === 'notes';
     const newNode: Node = {
       id: getNodeId(),
       type: item.type,
@@ -149,6 +159,16 @@ function FlowCanvas({
             transparent: item.label.includes('transparent'),
             w: 350,
             h: 200,
+          }
+        : isNotes
+        ? {
+            label: item.label,
+            text: '',
+            bgColor: '#1e293b',
+            borderColor: '#334155',
+            textColor: '#e2e8f0',
+            w: 220,
+            h: 120,
           }
         : { label: item.label, icon: item.icon, bg: item.bg, border: item.border, sub: item.sub },
     };
@@ -312,6 +332,7 @@ function FlowCanvas({
 
       explicitSave();
       const isContent = item.type === 'content';
+      const isNotes = item.type === 'notes';
       const newNode: Node = {
         id: getNodeId(),
         type: item.type,
@@ -333,6 +354,16 @@ function FlowCanvas({
               showShadow: true,
               w: 200,
               h: 80,
+            }
+          : isNotes
+          ? {
+              label: item.label,
+              text: '',
+              bgColor: '#1e293b',
+              borderColor: '#334155',
+              textColor: '#e2e8f0',
+              w: 220,
+              h: 120,
             }
           : { label: item.label, icon: item.icon, bg: item.bg, border: item.border, sub: item.sub },
       };

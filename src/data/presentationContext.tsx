@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
-type PresentationTool = 'laser' | 'hand';
+type PresentationTool = 'pointer' | 'laser';
 
 interface PresentationContextValue {
   isPresenting: boolean;
@@ -12,22 +12,22 @@ interface PresentationContextValue {
 const PresentationContext = createContext<PresentationContextValue>({
   isPresenting: false,
   togglePresentation: () => {},
-  presentationTool: 'laser',
+  presentationTool: 'pointer',
   setPresentationTool: () => {},
 });
 
 export function PresentationProvider({ children }: { children: React.ReactNode }) {
   const [isPresenting, setIsPresenting] = useState(false);
-  const [presentationTool, setPresentationTool] = useState<PresentationTool>('laser');
+  const [presentationTool, setPresentationTool] = useState<PresentationTool>('pointer');
 
   const togglePresentation = useCallback(() => {
     if (!isPresenting) {
       document.documentElement.requestFullscreen().then(() => {
         setIsPresenting(true);
-        setPresentationTool('laser');
+        setPresentationTool('pointer');
       }).catch(() => {
         setIsPresenting(true);
-        setPresentationTool('laser');
+        setPresentationTool('pointer');
       });
     } else {
       if (document.fullscreenElement) {
@@ -49,12 +49,14 @@ export function PresentationProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     const el = document.documentElement;
-    el.classList.remove('presenting-mode', 'laser-active', 'hand-active');
+    el.classList.remove('presenting-mode', 'laser-active');
     if (isPresenting) {
       el.classList.add('presenting-mode');
-      el.classList.add(presentationTool === 'laser' ? 'laser-active' : 'hand-active');
+      if (presentationTool === 'laser') {
+        el.classList.add('laser-active');
+      }
     }
-    return () => el.classList.remove('presenting-mode', 'laser-active', 'hand-active');
+    return () => el.classList.remove('presenting-mode', 'laser-active');
   }, [isPresenting, presentationTool]);
 
   return (

@@ -205,12 +205,15 @@ export default function PublicMarkdownEditor({
   }), [topicSlug, subtopicSlug, subtopicTitle, content]);
 
   // Auto-save to localStorage
+  // Auto-save to disk via Vite plugin
   useEffect(() => {
     const saveTimeout = setTimeout(() => {
       const data = buildSaveData();
-      const key = `public-canvas-${siteId}-${topicSlug}-${subtopicSlug}`;
-      localStorage.setItem(key, JSON.stringify(data));
-      setIsSaved(true);
+      fetch('/__save-public-canvas-disk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
+      }).then(() => setIsSaved(true)).catch(() => {});
     }, 1500);
     return () => clearTimeout(saveTimeout);
   }, [content, siteId, topicSlug, subtopicSlug, buildSaveData]);
@@ -218,9 +221,11 @@ export default function PublicMarkdownEditor({
   // Manual save
   const handleSave = useCallback(() => {
     const data = buildSaveData();
-    const key = `public-canvas-${siteId}-${topicSlug}-${subtopicSlug}`;
-    localStorage.setItem(key, JSON.stringify(data));
-    setIsSaved(true);
+    fetch('/__save-public-canvas-disk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
+    }).then(() => setIsSaved(true)).catch(() => {});
   }, [siteId, topicSlug, subtopicSlug, buildSaveData]);
 
   // Export & Publish — save to project folder then push to GitHub

@@ -105,14 +105,167 @@ export function canvasApiPlugin(): Plugin {
 
       // Handle CORS preflight for all endpoints
       server.middlewares.use((req, res, next) => {
-        if (req.method === 'OPTIONS' && (req.url?.startsWith('/__save-public-canvas') || req.url?.startsWith('/__publish') || req.url?.startsWith('/__save-grid-config') || req.url?.startsWith('/__save-label-config'))) {
+        if (req.method === 'OPTIONS' && (req.url?.startsWith('/__'))) {
           res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Allow-Methods', 'POST');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE');
           res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
           res.end();
           return;
         }
         next();
+      });
+
+      // ─── Canvas save/load (disk-based, replaces localStorage) ──────────
+
+      // POST /__save-canvas — save lesson canvas JSON to disk
+      server.middlewares.use('/__save-canvas', (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { siteId, topicSlug, subtopicSlug, data } = JSON.parse(body);
+            const dir = join(process.cwd(), 'data', 'canvases', siteId, topicSlug);
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+            const filePath = join(dir, `${subtopicSlug}.json`);
+            writeFileSync(filePath, JSON.stringify(data), 'utf-8');
+            console.log(`[canvas-api] Saved canvas: ${filePath} (${Math.round(body.length / 1024)}KB)`);
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: true }));
+          } catch (err: any) {
+            console.error(`[canvas-api] Save error:`, err.message);
+            res.statusCode = 500;
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: false, error: err.message }));
+          }
+        });
+      });
+
+      // GET /__load-canvas?siteId=...&topicSlug=...&subtopicSlug=...
+      server.middlewares.use('/__load-canvas', (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        try {
+          const url = new URL(req.url || '', 'http://localhost');
+          const siteId = url.searchParams.get('siteId') || '';
+          const topicSlug = url.searchParams.get('topicSlug') || '';
+          const subtopicSlug = url.searchParams.get('subtopicSlug') || '';
+          const filePath = join(process.cwd(), 'data', 'canvases', siteId, topicSlug, `${subtopicSlug}.json`);
+          if (existsSync(filePath)) {
+            const content = readFileSync(filePath, 'utf-8');
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(content);
+          } else {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify(null));
+          }
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+
+      // DELETE /__delete-canvas — delete one topic's canvas file
+      server.middlewares.use('/__delete-canvas', (req, res) => {
+        if (req.method !== 'DELETE') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { siteId, topicSlug, subtopicSlug } = JSON.parse(body);
+            const filePath = join(process.cwd(), 'data', 'canvases', siteId, topicSlug, `${subtopicSlug}.json`);
+            if (existsSync(filePath)) {
+              const { unlinkSync } = require('fs');
+              unlinkSync(filePath);
+            }
+            // Also delete public canvas file
+            const publicPath = join(process.cwd(), 'data', 'canvases', siteId, topicSlug, `${subtopicSlug}-public.json`);
+            if (existsSync(publicPath)) {
+              const { unlinkSync } = require('fs');
+              unlinkSync(publicPath);
+            }
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: true }));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: false, error: err.message }));
+          }
+        });
+      });
+
+      // DELETE /__delete-all-canvases — delete all canvas files
+      server.middlewares.use('/__delete-all-canvases', (req, res) => {
+        if (req.method !== 'DELETE') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        try {
+          const canvasDir = join(process.cwd(), 'data', 'canvases');
+          if (existsSync(canvasDir)) {
+            const { rmSync } = require('fs');
+            rmSync(canvasDir, { recursive: true, force: true });
+          }
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ success: true }));
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
+
+      // ─── Public canvas save/load (disk-based) ──────────────────────────
+
+      // POST /__save-public-canvas-disk — save public markdown canvas to disk
+      server.middlewares.use('/__save-public-canvas-disk', (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { siteId, topicSlug, subtopicSlug, data } = JSON.parse(body);
+            const dir = join(process.cwd(), 'data', 'canvases', siteId, topicSlug);
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+            const filePath = join(dir, `${subtopicSlug}-public.json`);
+            writeFileSync(filePath, JSON.stringify(data), 'utf-8');
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: true }));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: false, error: err.message }));
+          }
+        });
+      });
+
+      // GET /__load-public-canvas?siteId=...&topicSlug=...&subtopicSlug=...
+      server.middlewares.use('/__load-public-canvas', (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        try {
+          const url = new URL(req.url || '', 'http://localhost');
+          const siteId = url.searchParams.get('siteId') || '';
+          const topicSlug = url.searchParams.get('topicSlug') || '';
+          const subtopicSlug = url.searchParams.get('subtopicSlug') || '';
+          const filePath = join(process.cwd(), 'data', 'canvases', siteId, topicSlug, `${subtopicSlug}-public.json`);
+          if (existsSync(filePath)) {
+            const content = readFileSync(filePath, 'utf-8');
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(content);
+          } else {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify(null));
+          }
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ error: err.message }));
+        }
       });
 
       // POST /__save-grid-config — updates gridConfig.ts with new column value

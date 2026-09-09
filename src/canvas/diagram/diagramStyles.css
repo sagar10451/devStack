@@ -118,6 +118,11 @@
   opacity: 1;
 }
 
+/* Hide resize handles when canvas is locked */
+.rf-locked .rf-resize-handle {
+  display: none !important;
+}
+
 /* ─── Handle styling ──────────────────────────────────────────────────────── */
 .rf-diagram-wrapper .react-flow__handle {
   width: 10px;
@@ -399,3 +404,66 @@
 .rf-locked .rf-md-placeholder {
   display: none !important;
 }
+
+/* ─── Notes Node ──────────────────────────────────────────────────────────── */
+.rf-notes-node {
+  transition: box-shadow 0.2s ease;
+}
+.rf-notes-node:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.rf-notes-node.rf-selected {
+  box-shadow: 0 0 0 2px #58a6ff, 0 4px 20px rgba(88, 166, 255, 0.25);
+}
+/* Only show resize handles + connection handles on hover/select */
+.rf-notes-node .rf-resize-handle { opacity: 0; }
+.rf-notes-node:hover .rf-resize-handle,
+.rf-notes-node.rf-selected .rf-resize-handle {
+  opacity: 1;
+}
+.rf-notes-node .react-flow__handle {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.rf-notes-node:hover .react-flow__handle,
+.rf-notes-node.rf-selected .react-flow__handle {
+  opacity: 1;
+  pointer-events: all;
+}
+/* Remove the default React Flow selection outline */
+.react-flow__node-notes.selected > .rf-notes-node {
+  outline: none !important;
+}
+.react-flow__node-notes.selected {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Hide notes node toolbar and handles when canvas is locked */
+.rf-locked .rf-notes-toolbar {
+  display: none !important;
+}
+.rf-locked .rf-notes-color-panel {
+  display: none !important;
+}
+.rf-locked .rf-notes-font-panel {
+  display: none !important;
+}
+/* Hide connection handles on notes node when locked */
+.rf-locked .react-flow__node-notes .react-flow__handle {
+  display: none !important;
+}
+/* Hide image remove button on notes node when locked */
+.rf-locked .rf-notes-node button {
+  display: none !important;
+}
+/* Remove React Flow's default selection outline on notes node */
+.react-flow__node-notes.selected,
+.react-flow__node-notes:focus,
+.react-flow__node-notes:focus-visible,
+.react-flow__node-notes.selected > div,
+.react-flow__node-notes.selected > .rf-notes-node {
+  outline: none !important;
+  box-shadow: none !important;
+}
+/* Only the blue glow from rf-notes-node.rf-selected is used */

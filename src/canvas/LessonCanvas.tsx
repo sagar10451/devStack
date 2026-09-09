@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot } from 'tldraw';
 import type { Editor } from 'tldraw';
-import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown } from 'lucide-react';
+import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
@@ -134,6 +134,7 @@ export default function LessonCanvas({
   const [showPublicCanvas, setShowPublicCanvas] = useState(false);
   const [publicCanvasData, setPublicCanvasData] = useState<PublicCanvasData | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const editorRef = useRef<Editor | null>(null);
   const [snapshot, setSnapshot] = useState<unknown>(initialData?.snapshot || null);
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
@@ -147,6 +148,12 @@ export default function LessonCanvas({
   const [pickingDestinationForStep, setPickingDestinationForStep] = useState<string | null>(null);
   const [pickOriginalPosition, setPickOriginalPosition] = useState<{ x: number; y: number } | null>(null);
   const [isSaved, setIsSaved] = useState(true);
+  const isDirtyRef = useRef(false);
+  // Helper: mark canvas as dirty (unsaved changes) — used by all change handlers
+  const markDirty = useCallback(() => {
+    isDirtyRef.current = true;
+    setIsSaved(false);
+  }, []);
   const [canvasReady, setCanvasReady] = useState(false);
   const [hideLockButton, setHideLockButton] = useState(false);
   const [tldrawCamera, setTldrawCamera] = useState<{ x: number; y: number; z: number } | null>(null);
@@ -177,7 +184,7 @@ export default function LessonCanvas({
 
   const handleDiagramChange = useCallback((data: DiagramData) => {
     setDiagramData(data);
-    setIsSaved(false);
+    markDirty();
   }, []);
 
   const handleRfFlip = useCallback(() => {
@@ -186,17 +193,20 @@ export default function LessonCanvas({
   }, []);
 
   // ─── Load public canvas data from localStorage ────────────────────────────
+  // ─── Load public canvas data from disk ────────────────────────────────────
   useEffect(() => {
-    const key = `public-canvas-${siteId}-${topicSlug}-${subtopicSlug}`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      try { setPublicCanvasData(JSON.parse(saved)); } catch { /* ignore */ }
-    }
+    fetch(`/__load-public-canvas?siteId=${encodeURIComponent(siteId)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(subtopicSlug)}`)
+      .then(res => res.json())
+      .then((data) => {
+        if (data && data.version) setPublicCanvasData(data);
+      })
+      .catch(() => { /* no public canvas data */ });
   }, [siteId, topicSlug, subtopicSlug]);
 
   // ─── tldraw callbacks ────────────────────────────────────────────────────
   const handleEditorReady = useCallback((ed: Editor) => {
     setEditor(ed);
+    editorRef.current = ed;
     setTimeout(() => {
       // Restore saved camera position
       if (initialData?.camera) {
@@ -240,9 +250,16 @@ export default function LessonCanvas({
 
     const visibilitySteps = steps.filter(s => (s.action || 'enter') !== 'none');
 
-    // Hide all tldraw animated shapes via CSS
+    // Collect shape IDs from "none" animation steps — these are preloaded, never hidden
+    const preloadedIds = new Set(
+      steps.filter(s => s.animation === 'none' && (s.action || 'enter') === 'enter')
+        .flatMap(s => s.shapeIds)
+    );
+
+    // Hide all tldraw animated shapes via CSS (except preloaded ones)
     const allAnimatedIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isTldrawId));
     allAnimatedIds.forEach(shapeId => {
+      if (preloadedIds.has(shapeId)) return; // preloaded — stay visible
       const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
       if (el) {
         el.style.visibility = 'hidden';
@@ -250,9 +267,10 @@ export default function LessonCanvas({
       }
     });
 
-    // Hide all RF animated elements via class
+    // Hide all RF animated elements via class (except preloaded ones)
     const allRfIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isRfId));
     allRfIds.forEach(rfId => {
+      if (preloadedIds.has(rfId)) return; // preloaded — stay visible
       const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
       if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
     });
@@ -326,12 +344,22 @@ export default function LessonCanvas({
 
   const handleSnapshotChange = useCallback((newSnapshot: unknown) => {
     setSnapshot(newSnapshot);
-    setIsSaved(false);
+    markDirty();
   }, []);
 
   const handleStepsChange = useCallback((newSteps: AnimationStep[]) => {
     setAnimationSteps(newSteps);
-    setIsSaved(false);
+    markDirty();
+  }, []);
+
+  // Delete RF nodes/edges from diagram data when removed from timeline
+  const handleDeleteRfElements = useCallback((ids: string[]) => {
+    setDiagramData(prev => ({
+      ...prev,
+      nodes: (prev.nodes as any[]).filter((n: any) => !ids.includes(n.id)),
+      edges: (prev.edges as any[]).filter((e: any) => !ids.includes(e.id)),
+    }));
+    markDirty();
   }, []);
 
   // Watch for deleted shapes and clean up animation steps + sub-topic ranges
@@ -380,7 +408,7 @@ export default function LessonCanvas({
           }
         }
         setShapeAnimations(cleanedAnims);
-        setIsSaved(false);
+        markDirty();
       }
     };
 
@@ -469,7 +497,7 @@ export default function LessonCanvas({
         result.splice(lastPageIndex + 1, 0, ...newSteps);
         return result;
       });
-      setIsSaved(false);
+      markDirty();
     };
 
     // Also re-initialize known shapes when the current page changes
@@ -543,7 +571,7 @@ export default function LessonCanvas({
       result.splice(lastPageIndex + 1, 0, ...newSteps);
       return result;
     });
-    setIsSaved(false);
+    markDirty();
   }, [diagramData, isLocked, editor]);
 
   // ─── Page copy/delete listeners ───────────────────────────────────────────
@@ -605,7 +633,7 @@ export default function LessonCanvas({
       // Handle page deletion
       if (deletedPageIds.length > 0) {
         setAnimationSteps(prev => prev.filter(s => !deletedPageIds.includes(s.pageId || '')));
-        setIsSaved(false);
+        markDirty();
       }
 
       // Handle page duplication
@@ -670,7 +698,7 @@ export default function LessonCanvas({
               result.splice(lastSourceIndex + 1, 0, ...duplicatedSteps);
               return result;
             });
-            setIsSaved(false);
+            markDirty();
           }
         }
       }
@@ -685,7 +713,7 @@ export default function LessonCanvas({
 
   const handleLabelsChange = useCallback((newLabels: SubTopicLabel[]) => {
     setSubTopicLabels(newLabels);
-    setIsSaved(false);
+    markDirty();
   }, []);
 
   // ─── Build save data helper ──────────────────────────────────────────────
@@ -708,38 +736,66 @@ export default function LessonCanvas({
     };
   }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, shapeAnimations, diagramData, initialData]);
 
-  const [storageWarning, setStorageWarning] = useState(false);
 
-  // Auto-save (strips audio data to keep localStorage small)
+  // Auto-save to disk via Vite plugin — interval-based for reliability
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const isSavingRef = useRef(false);
+  const subTopicLabelsRef = useRef(subTopicLabels);
+  subTopicLabelsRef.current = subTopicLabels;
+  const shapeAnimationsRef = useRef(shapeAnimations);
+  shapeAnimationsRef.current = shapeAnimations;
+  const diagramDataRef = useRef(diagramData);
+  diagramDataRef.current = diagramData;
+
   useEffect(() => {
-    if (!editor) return;
-    const saveTimeout = setTimeout(() => {
-      const data = buildSaveData();
+    // Run auto-save every 3 seconds via interval
+    const interval = window.setInterval(() => {
+      const ed = editorRef.current;
+      if (!ed || isSavingRef.current || !isDirtyRef.current) return;
+      isSavingRef.current = true;
+      isDirtyRef.current = false;
 
-      // Strip audio base64 data before saving — keep only config
+      const doc = getSnapshot(ed.store).document;
+      const cam = ed.getCamera();
+      const data: LessonCanvasData = {
+        version: 2,
+        meta: {
+          topicSlug, subtopicSlug, title: subtopicTitle,
+          createdAt: initialData?.meta.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        snapshot: { document: doc },
+        camera: cam ? { x: cam.x, y: cam.y, z: cam.z } : undefined,
+        animationSteps: animationStepsRef.current,
+        subTopicLabels: subTopicLabelsRef.current,
+        shapeAnimations: shapeAnimationsRef.current,
+        diagramData: diagramDataRef.current,
+      };
+
+      // Strip audio base64 data
       if (data.animationSteps) {
         data.animationSteps = data.animationSteps.map((s: any) => {
-          if (s.audio?.data) {
-            return { ...s, audio: { ...s.audio, data: '' } };
-          }
+          if (s.audio?.data) return { ...s, audio: { ...s.audio, data: '' } };
           return s;
         });
       }
-      const key = `lesson-canvas-${siteId}-${topicSlug}-${subtopicSlug}`;
-      try {
-        const json = JSON.stringify(data);
-        localStorage.setItem(key, json);
-        console.log('[auto-save] Saved', data.animationSteps?.length, 'steps, snapshot keys:', Object.keys((data.snapshot as any)?.document || {}).length);
-        setIsSaved(true);
-        setStorageWarning(false);
-      } catch {
-        // localStorage quota exceeded
-        setStorageWarning(true);
-        setIsSaved(false);
-      }
-    }, 1500);
-    return () => clearTimeout(saveTimeout);
-  }, [snapshot, animationSteps, subTopicLabels, shapeAnimations, diagramData, editor, siteId, topicSlug, subtopicSlug, buildSaveData]);
+
+      fetch('/__save-canvas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
+      }).then(() => {
+        // Don't update isSaved here — auto-save is silent, only manual save shows status
+      }).catch(() => {
+        markDirty();
+      }).finally(() => {
+        isSavingRef.current = false;
+      });
+    }, 3000);
+
+    autoSaveTimerRef.current = interval as any;
+    return () => clearInterval(interval);
+  }, [siteId, topicSlug, subtopicSlug, subtopicTitle, initialData]);
 
   // ─── Step audio helpers (Web Audio API for reliable volume control) ──────
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -934,7 +990,20 @@ export default function LessonCanvas({
     if (!editor || !isLocked) return;
     if (currentStep >= animationSteps.length - 1) return;
     editor.stopCameraAnimation();
-    const nextStep = currentStep + 1;
+    let nextStep = currentStep + 1;
+
+    // Auto-skip consecutive "none" animation steps (preloaded — already visible)
+    while (nextStep < animationSteps.length &&
+           animationSteps[nextStep].animation === 'none' &&
+           (animationSteps[nextStep].action || 'enter') === 'enter') {
+      nextStep++;
+    }
+    // If we skipped past the end, stay at the last step
+    if (nextStep >= animationSteps.length) {
+      setCurrentStep(animationSteps.length - 1);
+      return;
+    }
+
     const step = animationSteps[nextStep];
     const action = step.action || 'enter';
 
@@ -945,10 +1014,18 @@ export default function LessonCanvas({
       const targetPageSteps = animationSteps.filter(s => s.pageId === step.pageId);
       const allTargetShapeIds = targetPageSteps.flatMap(s => s.shapeIds);
       
-      // Create a style element that hides all target page shapes
+      // Preloaded shapes (animation === 'none') should NOT be hidden during page switch
+      const preloadedOnTarget = new Set(
+        targetPageSteps
+          .filter(s => s.animation === 'none' && (s.action || 'enter') === 'enter')
+          .flatMap(s => s.shapeIds)
+      );
+      
+      // Create a style element that hides non-preloaded target page shapes
       const hideStyle = document.createElement('style');
       hideStyle.id = 'page-switch-hide';
       hideStyle.textContent = allTargetShapeIds
+        .filter(id => !preloadedOnTarget.has(id))
         .map(id => id.includes(':') 
           ? `[data-shape-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`
           : `[data-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`)
@@ -1148,16 +1225,38 @@ export default function LessonCanvas({
         return s;
       });
     }
-    const key = `lesson-canvas-${siteId}-${topicSlug}-${subtopicSlug}`;
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
+    fetch('/__save-canvas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
+    }).then(() => {
       setIsSaved(true);
-      setStorageWarning(false);
-    } catch {
-      setStorageWarning(true);
-      setIsSaved(false);
-    }
+    }).catch(() => {
+      markDirty();
+    });
   }, [editor, siteId, topicSlug, subtopicSlug, buildSaveData]);
+
+  // Reset current topic's canvas (delete from disk + reload)
+  const handleResetCanvas = useCallback(() => {
+    if (!window.confirm(`Reset canvas for "${subtopicTitle}"?\n\nThis will delete all shapes, timeline, sub-topics, and saved data for this topic. This cannot be undone.`)) return;
+    fetch('/__delete-canvas', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId, topicSlug, subtopicSlug }),
+    }).finally(() => {
+      window.location.reload();
+    });
+  }, [siteId, topicSlug, subtopicSlug, subtopicTitle]);
+
+  // Clear all devStack app data (delete all canvas files from disk)
+  const handleClearAllAppData = useCallback(() => {
+    if (!window.confirm('Clear ALL devStack app data?\n\nThis will delete saved canvases for EVERY topic across all portals. This cannot be undone.')) return;
+    fetch('/__delete-all-canvases', {
+      method: 'DELETE',
+    }).finally(() => {
+      window.location.reload();
+    });
+  }, []);
 
   const handleExport = useCallback(() => {
     if (!editor) return;
@@ -1224,7 +1323,7 @@ export default function LessonCanvas({
             setRfArrowType((data.diagramData as DiagramData).arrowType);
             setRfColor((data.diagramData as DiagramData).color);
           }
-          setIsSaved(false);
+          markDirty();
         } catch (err) {
           console.error('Failed to import lesson:', err);
           alert('Invalid lesson file');
@@ -1266,7 +1365,7 @@ export default function LessonCanvas({
               <button onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-blue-900 hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                 <ChevronLeft className="w-3.5 h-3.5 text-blue-100" />
               </button>
-              <span className="text-blue-100 text-xs font-medium min-w-[40px] text-center">
+              <span className="text-blue-100 text-xs font-medium min-w-[40px] text-center" style={{ display: isPresenting ? 'none' : undefined }}>
                 {currentStep + 1} / {animationSteps.length}
               </span>
               <button onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-blue-900 hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
@@ -1275,8 +1374,8 @@ export default function LessonCanvas({
             </div>
           )}
 
-          {/* Lock/Unlock */}
-          {!hideLockButton && !isPresenting && (
+          {/* Lock/Unlock — hidden when presenting or public canvas is open */}
+          {!hideLockButton && !isPresenting && !showPublicCanvas && (
             <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${isLocked ? 'bg-blue-900 text-blue-100 hover:bg-blue-800 border border-blue-800' : 'bg-emerald-600 text-white hover:bg-emerald-600/30 border border-emerald-500/30'}`}>
               {isLocked ? <><Lock className="w-3.5 h-3.5" />Locked</> : <><Unlock className="w-3.5 h-3.5" />Unlocked</>}
             </button>
@@ -1300,6 +1399,12 @@ export default function LessonCanvas({
               </button>
               <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/60 text-red-200 hover:bg-red-800/60 transition-all" title="Reset this canvas">
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleClearAllAppData} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/40 text-red-300 hover:bg-red-800/40 transition-all" title="Clear all app data">
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             </>
           )}
@@ -1354,13 +1459,6 @@ export default function LessonCanvas({
         </div>
       </div>
 
-      {/* ─── Storage Warning ──────────────────────────────────────── */}
-      {storageWarning && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/15 border-b border-amber-500/30 flex-shrink-0">
-          <span className="text-amber-300 text-xs font-medium">⚠️ Canvas too large for auto-save. Export JSON (↓) to keep your work.</span>
-          <button onClick={() => setStorageWarning(false)} className="text-amber-400 text-xs hover:text-amber-200 ml-auto">✕</button>
-        </div>
-      )}
 
       {/* ─── Public Canvas OR Main Canvas ─────────────────────────── */}
       {showPublicCanvas ? (
@@ -1463,7 +1561,7 @@ export default function LessonCanvas({
                 editor.updateInstanceState({ isReadonly: true });
                 setPickingDestinationForStep(null);
                 setPickOriginalPosition(null);
-                setIsSaved(false);
+                markDirty();
               }}
               className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 rounded text-blue-100 text-xs font-semibold transition-colors"
             >
@@ -1525,6 +1623,7 @@ export default function LessonCanvas({
             <TimelineBar
               steps={animationSteps}
               onStepsChange={handleStepsChange}
+              onDeleteRfElements={handleDeleteRfElements}
               editor={editor}
               isLocked={isLocked}
               diagramData={diagramData}
@@ -1542,6 +1641,7 @@ export default function LessonCanvas({
           steps={animationSteps}
           isLocked={isLocked}
           currentStep={currentStep}
+          editor={editor}
           sidebar
           sidebarTitle={sidebarTitle}
           onSidebarTitleChange={setSidebarTitle}

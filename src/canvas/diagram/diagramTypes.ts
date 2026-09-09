@@ -92,6 +92,9 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
 
   // ── Content Nodes (markdown-capable, connectable with lines) ──
   { type: 'content', category: 'Content', label: 'Markdown', icon: '\uD83D\uDCDD', bg: 'transparent', border: 'transparent', sub: 'Rich text node' },
+
+  // ── Notes Nodes (simple text with customizable colors) ──
+  { type: 'notes', category: 'Content', label: 'Notes', icon: '\uD83D\uDCCB', bg: '#1e293b', border: '#334155', sub: 'Text note' },
 ];
 
 // ─── Edge catalogs ───────────────────────────────────────────────────────────

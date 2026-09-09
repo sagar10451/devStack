@@ -23,13 +23,16 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
 
   useEffect(() => {
     if (isLocalhost) {
-      // Localhost: load main canvas from localStorage
-      const key = `lesson-canvas-${site.id}-${topicSlug}-${subtopicSlug}`;
-      const saved = localStorage.getItem(key);
-      if (saved) {
-        try { setCanvasData(JSON.parse(saved)); } catch { /* ignore */ }
-      }
-      setLoaded(true);
+      // Localhost: load main canvas from disk via Vite plugin
+      fetch(`/__load-canvas?siteId=${encodeURIComponent(site.id)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(subtopicSlug)}`)
+        .then(res => res.json())
+        .then((data) => {
+          if (data && data.version) setCanvasData(data as LessonCanvasData);
+          setLoaded(true);
+        })
+        .catch(() => {
+          setLoaded(true);
+        });
     } else {
       // Production: fetch public-canvas.json (contains markdown content)
       const jsonPath = `/notes/${site.id}/${topicSlug}/${subtopicSlug}/public-canvas.json`;

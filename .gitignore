@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Canvas data (saved to disk by Vite plugin, not committed)
+data/canvases/

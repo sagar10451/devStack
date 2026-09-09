@@ -107,16 +107,21 @@ export interface DiagramData {
 }
 
 /**
- * A sub-topic is just a label + a range of step indices.
- * It does NOT contain steps — it references them by index range.
+ * A sub-topic is a label + a range of pages.
+ * Progress advances when all steps of a page complete.
+ * Backward compatible: startStep/endStep kept for migration but startPage/endPage are preferred.
  */
 export interface SubTopicLabel {
   id: string;
   title: string;
-  /** Index of first step (inclusive) in the flat animationSteps array */
+  /** @deprecated Use startPage instead */
   startStep: number;
-  /** Index of last step (inclusive) in the flat animationSteps array */
+  /** @deprecated Use endPage instead */
   endStep: number;
+  /** Index of first page (0-based) in the page order */
+  startPage?: number;
+  /** Index of last page (0-based, inclusive) in the page order */
+  endPage?: number;
 }
 
 export interface LessonCanvasData {

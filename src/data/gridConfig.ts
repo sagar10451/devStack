@@ -35,7 +35,7 @@ export const countLabels: Record<string, string> = {
   'root': 'Topics',
   '/devStack': 'Topics',
   '/java': 'Topics',
-  '/devStack/java': 'Topics',
+  '/devStack/java': 'Modules',
 };
 
 /**

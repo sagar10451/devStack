@@ -11,24 +11,20 @@ function PresentationToolToggle() {
   const { presentationTool, setPresentationTool } = usePresentation();
   return (
     <button
-      onClick={() => setPresentationTool(presentationTool === 'laser' ? 'hand' : 'laser')}
+      onClick={() => setPresentationTool(presentationTool === 'laser' ? 'pointer' : 'laser')}
       className={`w-9 h-9 flex items-center justify-center rounded-full transition-all ${
         presentationTool === 'laser'
-          ? 'bg-red-50 border-2 border-red-300 hover:bg-red-100'
-          : 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100'
+          ? 'bg-red-50 border-2 border-red-400 shadow-md shadow-red-200/50'
+          : 'bg-gray-50 border-2 border-gray-300 hover:bg-gray-100'
       }`}
-      title={presentationTool === 'laser' ? 'Switch to Hand' : 'Switch to Laser'}
+      title={presentationTool === 'laser' ? 'Switch to Pointer' : 'Activate Laser Pen'}
     >
-      {presentationTool === 'laser' ? (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600">
-          <path d="M12 19l7-7 3 3-7 7-3-3z" />
-          <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-          <path d="M2 2l7.586 7.586" />
-          <circle cx="11" cy="11" r="2" fill="#ef4444" stroke="none" />
-        </svg>
-      ) : (
-        <span className="text-base">✋</span>
-      )}
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={presentationTool === 'laser' ? 'text-red-600' : 'text-gray-500'}>
+        <path d="M12 19l7-7 3 3-7 7-3-3z" />
+        <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+        <path d="M2 2l7.586 7.586" />
+        <circle cx="11" cy="11" r="2" fill={presentationTool === 'laser' ? '#ef4444' : '#9ca3af'} stroke="none" />
+      </svg>
     </button>
   );
 }
