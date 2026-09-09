@@ -925,6 +925,11 @@ export default function LessonCanvas({
         if ((editor.getCurrentPageId() as string) !== firstStepPageId) {
           editor.setCurrentPage(firstStepPageId as any);
         }
+        // Set camera to first preloaded step's position immediately
+        const firstPreloaded = animationSteps.find(s => s.pageId === firstStepPageId && s.animation === 'none' && s.cameraPosition);
+        if (firstPreloaded?.cameraPosition) {
+          editor.setCamera(firstPreloaded.cameraPosition, { force: true });
+        }
       }
 
       setCurrentStep(-1);
@@ -1034,6 +1039,12 @@ export default function LessonCanvas({
 
       editor.setCameraOptions({ isLocked: false });
       editor.setCurrentPage(step.pageId as any);
+
+      // Set camera immediately after page switch — BEFORE any paint
+      // This prevents the flash of tldraw's internal per-page camera
+      if (step.cameraPosition) {
+        editor.setCamera(step.cameraPosition, { force: true });
+      }
 
       // Now apply proper animation state and remove the blanket hide
       requestAnimationFrame(() => {
