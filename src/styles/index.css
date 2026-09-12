@@ -802,3 +802,5 @@ a[href*="tldraw.dev"] {
     padding: 8px 10px;
   }
 }
+
+/* (paste frame styles handled via tldraw opacity) */

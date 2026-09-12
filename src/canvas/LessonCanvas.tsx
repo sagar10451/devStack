@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot, toRichText, createShapeId } from 'tldraw';
 import type { Editor } from 'tldraw';
-import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2 } from 'lucide-react';
+import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
@@ -140,12 +140,14 @@ export default function LessonCanvas({
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
   const [sidebarTitle, setSidebarTitle] = useState('Outline');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true); // true = show Pages, false = show Sub-topics
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [timelineFullyCollapsed, setTimelineFullyCollapsed] = useState(false); // true = show Pages, false = show Sub-topics
   const [shapeAnimations, setShapeAnimations] = useState<Record<string, ShapeAnimationConfig>>(initialData?.shapeAnimations || {});
   const [currentStep, setCurrentStep] = useState(-1);
   const [showAnimBar, setShowAnimBar] = useState(false);
   const [showLineConfig, setShowLineConfig] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
+  const [showTextBoundary, setShowTextBoundary] = useState(false);
   const [pendingNode, setPendingNode] = useState<{ item: any; position: { x: number; y: number } } | null>(null);
   const [pickingDestinationForStep, setPickingDestinationForStep] = useState<string | null>(null);
   const [pickOriginalPosition, setPickOriginalPosition] = useState<{ x: number; y: number } | null>(null);
@@ -421,6 +423,11 @@ export default function LessonCanvas({
   // ─── Auto-add new shapes to timeline ─────────────────────────────────────
   const knownShapeIdsRef = useRef<Set<string>>(new Set());
   const multiLinePasteRef = useRef(false);
+  // Track groups of text shapes pasted together for auto-reflow
+  const pasteGroupsRef = useRef<Map<string, string[]>>(new Map()); // groupId → [shapeId, ...]
+  const shapeHeightsRef = useRef<Map<string, number>>(new Map()); // shapeId → last known height
+  const pasteFrameRef = useRef<Map<string, { frameId: string; baseX: number; textWidth: number }>>(new Map()); // groupId → frame info
+  const pasteFrameIdsRef = useRef<Set<string>>(new Set()); // all frame shape IDs to exclude from timeline
   const animationStepsRef = useRef(animationSteps);
   animationStepsRef.current = animationSteps;
 
@@ -450,7 +457,7 @@ export default function LessonCanvas({
       // Use ref for fresh steps (avoids stale closure)
       const currentSteps = animationStepsRef.current;
       const existingStepShapeIds = new Set(currentSteps.flatMap(s => s.shapeIds));
-      const trulyNew = newIds.filter(id => !existingStepShapeIds.has(id));
+      const trulyNew = newIds.filter(id => !existingStepShapeIds.has(id) && !pasteFrameIdsRef.current.has(id));
       if (trulyNew.length === 0) return;
 
       const pageId = editor.getCurrentPageId() as string;
@@ -745,6 +752,7 @@ export default function LessonCanvas({
   // Auto-save to disk via Vite plugin — interval-based for reliability
   const autoSaveTimerRef = useRef<number | null>(null);
   const isSavingRef = useRef(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const subTopicLabelsRef = useRef(subTopicLabels);
   subTopicLabelsRef.current = subTopicLabels;
   const shapeAnimationsRef = useRef(shapeAnimations);
@@ -791,6 +799,7 @@ export default function LessonCanvas({
         body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
       }).then(() => {
         // Don't update isSaved here — auto-save is silent, only manual save shows status
+        setLastSavedAt(new Date());
       }).catch(() => {
         markDirty();
       }).finally(() => {
@@ -1335,10 +1344,12 @@ export default function LessonCanvas({
       const viewportCenter = editor.getViewportScreenCenter();
       const pagePoint = editor.screenToPage(viewportCenter);
 
-      const LINE_HEIGHT = 40;
       const INDENT_WIDTH = 30;
-      const startX = pagePoint.x - 150;
-      const startY = pagePoint.y - (finalLines.length * LINE_HEIGHT) / 2;
+      // Use 80% of viewport width for text, so lines match what you see on screen
+      const viewportBounds = editor.getViewportPageBounds();
+      const TEXT_WIDTH = Math.max(600, viewportBounds.w * 0.7);
+      const startX = pagePoint.x - TEXT_WIDTH / 2;
+      const startY = pagePoint.y - (finalLines.length * 30) / 2;
 
       const shapeIds: string[] = [];
 
@@ -1348,18 +1359,72 @@ export default function LessonCanvas({
           id,
           type: 'text',
           x: startX + (line.indent * INDENT_WIDTH),
-          y: startY + i * LINE_HEIGHT,
+          y: startY + i * 40,
           props: {
             richText: toRichText(line.text),
             size: 'm',
-            autoSize: true,
+            autoSize: false,
+            w: TEXT_WIDTH - (line.indent * INDENT_WIDTH),
           },
         });
         shapeIds.push(id);
       });
 
       if (shapeIds.length > 0) {
-        editor.select(...shapeIds as any);
+        // Register as a paste group for auto-reflow
+        const groupId = `paste-${Date.now()}`;
+        pasteGroupsRef.current.set(groupId, shapeIds.map(id => id as string));
+
+        // After tldraw measures the shapes, reposition and create container frame
+        setTimeout(() => {
+          const GAP = 10;
+          const FRAME_PADDING = 12;
+          let currentY = startY;
+
+          for (const sid of shapeIds) {
+            const shape = editor.getShape(sid as any) as any;
+            const bounds = editor.getShapePageBounds(sid as any);
+            if (!shape || !bounds) continue;
+            if (shape.y !== currentY) {
+              editor.updateShape({ id: shape.id, type: shape.type, y: currentY });
+            }
+            shapeHeightsRef.current.set(sid as string, bounds.h);
+            currentY += bounds.h + GAP;
+          }
+
+          // Calculate total height of all shapes
+          const totalHeight = currentY - startY - GAP;
+
+          // Create a container frame (rectangle) around all text shapes
+          const frameId = createShapeId();
+          editor.createShape({
+            id: frameId,
+            type: 'geo',
+            x: startX - FRAME_PADDING,
+            y: startY - FRAME_PADDING,
+            opacity: showTextBoundary ? 0.2 : 0,
+            props: {
+              geo: 'rectangle',
+              w: TEXT_WIDTH + FRAME_PADDING * 2,
+              h: totalHeight + FRAME_PADDING * 2,
+              fill: 'none',
+              color: 'grey',
+              dash: 'dashed',
+              size: 's',
+            },
+          });
+
+          // Store frame info
+          pasteFrameRef.current.set(groupId, {
+            frameId: frameId as string,
+            baseX: startX,
+            textWidth: TEXT_WIDTH,
+          });
+          pasteFrameIdsRef.current.add(frameId as string);
+
+          // Select only the frame so user can resize it
+          editor.select(frameId);
+        }, 200);
       }
     };
 
@@ -1367,6 +1432,232 @@ export default function LessonCanvas({
     window.addEventListener('paste', handlePaste, true);
     return () => window.removeEventListener('paste', handlePaste, true);
   }, [editor, isLocked]);
+
+  // ─── Auto-reflow paste groups when text shapes resize ───────────────────
+  useEffect(() => {
+    if (!editor || isLocked) return;
+    const GAP = 10;
+
+    const handleReflow = () => {
+      // Don't reflow while user is dragging/resizing
+      if (editor.getInstanceState().isChangingStyle) return;
+      const selectedIds = new Set(editor.getSelectedShapeIds().map(id => id as string));
+
+      for (const [groupId, shapeIds] of pasteGroupsRef.current.entries()) {
+        // Check if any shape in this group still exists
+        const existingIds = shapeIds.filter(sid => editor.getShape(sid as any));
+        if (existingIds.length === 0) {
+          pasteGroupsRef.current.delete(groupId);
+          continue;
+        }
+
+        // Skip if any shape in this group is currently selected (being dragged)
+        if (existingIds.some(sid => selectedIds.has(sid))) continue;
+
+        // Get shapes in their ORIGINAL paste order (not sorted by y — user may have moved them)
+        const shapesWithBounds = existingIds
+          .map(sid => {
+            const shape = editor.getShape(sid as any) as any;
+            const bounds = editor.getShapePageBounds(sid as any);
+            return shape && bounds ? { id: sid, shape, bounds } : null;
+          })
+          .filter(Boolean) as { id: string; shape: any; bounds: any }[];
+
+        if (shapesWithBounds.length < 2) continue;
+
+        // Only reflow if a shape's HEIGHT changed (not position)
+        let needsReflow = false;
+        for (const { id, bounds } of shapesWithBounds) {
+          const prevHeight = shapeHeightsRef.current.get(id);
+          if (prevHeight !== undefined && Math.abs(prevHeight - bounds.h) > 1) {
+            needsReflow = true;
+          }
+          shapeHeightsRef.current.set(id, bounds.h);
+        }
+
+        if (!needsReflow) continue;
+
+        // Reflow: position each shape below the previous one with consistent gap
+        for (let i = 1; i < shapesWithBounds.length; i++) {
+          const prev = shapesWithBounds[i - 1];
+          const curr = shapesWithBounds[i];
+          const expectedY = prev.bounds.y + prev.bounds.h + GAP;
+          if (Math.abs(curr.shape.y - expectedY) > 1) {
+            editor.updateShape({
+              id: curr.shape.id,
+              type: curr.shape.type,
+              y: expectedY,
+            });
+          }
+        }
+      }
+    };
+
+    const unsub = editor.store.listen(handleReflow, { scope: 'document' });
+    return () => unsub();
+  }, [editor, isLocked]);
+
+  // ─── Paste group width sync — resize all text shapes when one is resized ──
+  useEffect(() => {
+    if (!editor || isLocked) return;
+
+    const handleWidthSync = () => {
+      // Check if any selected shape belongs to a paste group
+      const selectedIds = new Set(editor.getSelectedShapeIds().map(id => id as string));
+      if (selectedIds.size !== 1) return;
+
+      const selectedId = [...selectedIds][0];
+      let groupId: string | null = null;
+      let groupShapeIds: string[] = [];
+
+      for (const [gid, sids] of pasteGroupsRef.current.entries()) {
+        if (sids.includes(selectedId)) {
+          groupId = gid;
+          groupShapeIds = sids;
+          break;
+        }
+      }
+      if (!groupId || groupShapeIds.length < 2) return;
+
+      // Get the resized shape's current width
+      const selectedShape = editor.getShape(selectedId as any) as any;
+      if (!selectedShape || selectedShape.type !== 'text') return;
+      const newWidth = selectedShape.props?.w;
+      if (!newWidth) return;
+
+      // Find this shape's indent level by comparing x positions
+      const firstShape = editor.getShape(groupShapeIds[0] as any) as any;
+      if (!firstShape) return;
+      const baseX = firstShape.x;
+      const selectedIndent = Math.round((selectedShape.x - baseX) / 30);
+
+      // Apply the same effective width to all shapes in the group (adjusting for indent)
+      const baseWidth = newWidth + selectedIndent * 30;
+      for (const sid of groupShapeIds) {
+        if (sid === selectedId) continue;
+        const shape = editor.getShape(sid as any) as any;
+        if (!shape || shape.type !== 'text') continue;
+        const indent = Math.round((shape.x - baseX) / 30);
+        const targetW = baseWidth - indent * 30;
+        if (targetW > 50 && Math.abs((shape.props?.w || 0) - targetW) > 5) {
+          editor.updateShape({
+            id: shape.id,
+            type: shape.type,
+            props: { ...shape.props, w: targetW },
+          });
+        }
+      }
+    };
+
+    const unsub = editor.store.listen(handleWidthSync, { scope: 'document' });
+    return () => unsub();
+  }, [editor, isLocked]);
+
+  // ─── Frame container resize → adjust all text shapes in paste group ─────
+  useEffect(() => {
+    if (!editor || isLocked) return;
+    const FRAME_PADDING = 12;
+    const INDENT_WIDTH = 30;
+    const GAP = 10;
+
+    // Track last known frame widths to detect changes
+    const lastFrameWidths = new Map<string, number>();
+
+    const handleFrameResize = () => {
+      for (const [groupId, frameInfo] of pasteFrameRef.current.entries()) {
+        const frame = editor.getShape(frameInfo.frameId as any) as any;
+        if (!frame) {
+          pasteFrameRef.current.delete(groupId);
+          continue;
+        }
+
+        const currentFrameW = frame.props?.w;
+        if (!currentFrameW) continue;
+
+        const lastW = lastFrameWidths.get(groupId) || (frameInfo.textWidth + FRAME_PADDING * 2);
+        if (Math.abs(currentFrameW - lastW) < 2) continue;
+        lastFrameWidths.set(groupId, currentFrameW);
+
+        const shapeIds = pasteGroupsRef.current.get(groupId);
+        if (!shapeIds || shapeIds.length === 0) continue;
+
+        // New text width based on frame width
+        const newTextWidth = currentFrameW - FRAME_PADDING * 2;
+        if (newTextWidth < 100) continue;
+
+        // Get the base X from the frame
+        const newBaseX = frame.x + FRAME_PADDING;
+
+        // Update each text shape's width and x position
+        for (const sid of shapeIds) {
+          const shape = editor.getShape(sid as any) as any;
+          if (!shape || shape.type !== 'text') continue;
+
+          const indent = Math.round((shape.x - frameInfo.baseX) / INDENT_WIDTH);
+          const clampedIndent = Math.max(0, indent);
+          const shapeW = newTextWidth - clampedIndent * INDENT_WIDTH;
+          if (shapeW < 50) continue;
+
+          const updates: any = { id: shape.id, type: shape.type };
+          if (Math.abs((shape.props?.w || 0) - shapeW) > 2) {
+            updates.props = { ...shape.props, w: shapeW };
+          }
+          updates.x = newBaseX + clampedIndent * INDENT_WIDTH;
+
+          editor.updateShape(updates);
+        }
+
+        // Update stored base X and text width
+        frameInfo.baseX = newBaseX;
+        frameInfo.textWidth = newTextWidth;
+
+        // Reflow vertically after width changes
+        setTimeout(() => {
+          const existingIds = shapeIds.filter(sid => editor.getShape(sid as any));
+          let currentY = frame.y + FRAME_PADDING;
+          let totalH = 0;
+
+          for (const sid of existingIds) {
+            const shape = editor.getShape(sid as any) as any;
+            const bounds = editor.getShapePageBounds(sid as any);
+            if (!shape || !bounds) continue;
+            if (Math.abs(shape.y - currentY) > 1) {
+              editor.updateShape({ id: shape.id, type: shape.type, y: currentY });
+            }
+            shapeHeightsRef.current.set(sid, bounds.h);
+            currentY += bounds.h + GAP;
+            totalH = currentY - (frame.y + FRAME_PADDING) - GAP;
+          }
+
+          // Update frame height to fit content
+          const newFrameH = totalH + FRAME_PADDING * 2;
+          if (Math.abs(frame.props.h - newFrameH) > 2) {
+            editor.updateShape({
+              id: frame.id,
+              type: frame.type,
+              props: { ...frame.props, h: newFrameH },
+            });
+          }
+        }, 100);
+      }
+    };
+
+    const unsub = editor.store.listen(handleFrameResize, { scope: 'document' });
+    return () => unsub();
+  }, [editor, isLocked]);
+
+  // ─── Toggle text boundary frames visibility ──────────────────────────────
+  useEffect(() => {
+    if (!editor) return;
+    for (const [, frameInfo] of pasteFrameRef.current.entries()) {
+      const frame = editor.getShape(frameInfo.frameId as any) as any;
+      if (!frame) continue;
+      const targetOpacity = showTextBoundary ? 0.2 : 0;
+      if (frame.opacity !== targetOpacity) {
+        editor.updateShape({ id: frame.id, type: frame.type, opacity: targetOpacity });
+      }
+    }
+  }, [editor, showTextBoundary]);
 
   // Warn before refresh if audio files are loaded in memory
   useEffect(() => {
@@ -1405,31 +1696,36 @@ export default function LessonCanvas({
   // Reset current topic's canvas (delete from disk + reload)
   const handleResetCanvas = useCallback(() => {
     if (!window.confirm(`Reset canvas for "${subtopicTitle}"?\n\nThis will delete all shapes, timeline, sub-topics, and saved data for this topic. This cannot be undone.`)) return;
-    // Stop auto-save from re-writing the file
+    // Stop auto-save
     if (autoSaveTimerRef.current) {
       clearInterval(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
     }
-    fetch('/__delete-canvas', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId, topicSlug, subtopicSlug }),
-    }).then(res => res.json()).then(data => {
-      console.log('[reset]', data);
-      window.location.reload();
-    }).catch(() => {
-      window.location.reload();
-    });
+    isDirtyRef.current = false;
+    // Delete synchronously via XMLHttpRequest (ensures completion before reload)
+    const xhr = new XMLHttpRequest();
+    xhr.open('DELETE', '/__delete-canvas', false); // synchronous
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.send(JSON.stringify({ siteId, topicSlug, subtopicSlug }));
+    console.log('[reset] response:', xhr.status, xhr.responseText);
+    window.location.reload();
   }, [siteId, topicSlug, subtopicSlug, subtopicTitle]);
 
   // Clear all devStack app data (delete all canvas files from disk)
   const handleClearAllAppData = useCallback(() => {
     if (!window.confirm('Clear ALL devStack app data?\n\nThis will delete saved canvases for EVERY topic across all portals. This cannot be undone.')) return;
-    fetch('/__delete-all-canvases', {
-      method: 'DELETE',
-    }).finally(() => {
-      window.location.reload();
-    });
+    // Stop auto-save
+    if (autoSaveTimerRef.current) {
+      clearInterval(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    isDirtyRef.current = false;
+    // Delete synchronously
+    const xhr = new XMLHttpRequest();
+    xhr.open('DELETE', '/__delete-all-canvases', false);
+    xhr.send();
+    console.log('[clear-all] response:', xhr.status, xhr.responseText);
+    window.location.reload();
   }, []);
 
   const handleExport = useCallback(() => {
@@ -1555,11 +1851,18 @@ export default function LessonCanvas({
             </button>
           )}
 
-          {/* Save */}
+          {/* Save + auto-save indicator */}
           {!isLocked && (
+            <>
             <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isSaved ? 'bg-blue-900 text-blue-300' : 'bg-blue-500 text-white hover:bg-blue-600'}`}>
               <Save className="w-3.5 h-3.5" />{isSaved ? 'Saved' : 'Save'}
             </button>
+            {lastSavedAt && (
+              <span className="text-[9px] text-emerald-500/70" title={`Last auto-saved: ${lastSavedAt.toLocaleTimeString()}`}>
+                {'● '}{lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
+            </>
           )}
 
           {/* Export / Import */}
@@ -1596,6 +1899,10 @@ export default function LessonCanvas({
               <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showNodes ? 'bg-emerald-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
                 <Boxes className="w-3 h-3" />
                 Nodes
+              </button>
+              <button onClick={() => setShowTextBoundary(!showTextBoundary)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showTextBoundary ? 'bg-amber-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Show/hide text paste boundaries">
+                <AlignJustify className="w-3 h-3" />
+                Boundary
               </button>
               <button
                 onClick={() => {
@@ -1788,10 +2095,31 @@ export default function LessonCanvas({
 
         {/* Laser pointer overlay — only in presentation mode with laser tool */}
         {isPresenting && isLocked && presentationTool === 'laser' && <LaserPointer />}
+
+        {/* Timeline pill — when fully collapsed, draggable anywhere on canvas */}
+        {!isLocked && timelineFullyCollapsed && (
+          <DraggableWidget defaultPosition={{ x: 16, y: 60 }} zIndex={35}>
+            <div
+              data-drag-handle
+              className="flex items-center gap-1.5 px-3 py-2 bg-[#0a1230] border border-[#1a2a5e] rounded-lg text-[10px] text-slate-400 hover:text-slate-200 hover:bg-[#0f1b3d] transition-all shadow-lg cursor-grab active:cursor-grabbing"
+              title="Click to expand timeline"
+              onMouseDown={(e) => { (e.currentTarget as any)._dragStartX = e.clientX; (e.currentTarget as any)._dragStartY = e.clientY; }}
+              onMouseUp={(e) => {
+                const dx = Math.abs(e.clientX - ((e.currentTarget as any)._dragStartX || 0));
+                const dy = Math.abs(e.clientY - ((e.currentTarget as any)._dragStartY || 0));
+                if (dx < 5 && dy < 5) setTimelineFullyCollapsed(false); // only expand on clean click, not drag
+              }}
+            >
+              <span className="text-slate-500 uppercase tracking-wider font-bold text-[9px]">Timeline</span>
+              <span className="text-slate-600">{animationSteps.length}</span>
+              <ChevronUp className="w-3 h-3" />
+            </div>
+          </DraggableWidget>
+        )}
       </div>
 
       {/* Timeline — draggable overlay, default at bottom */}
-      {!isLocked && (
+      {!isLocked && !timelineFullyCollapsed && (
         <DraggableWidget defaultPosition={{ x: 0, y: window.innerHeight - 250 }} zIndex={35}>
           <div className="rounded-xl overflow-hidden shadow-2xl border border-[#1a2a5e]" style={{ width: 'calc(85vw - 20px)' }}>
             <TimelineBar
@@ -1802,6 +2130,8 @@ export default function LessonCanvas({
               isLocked={isLocked}
               diagramData={diagramData}
               selectedShapeIds={selectedShapeIds}
+              fullyCollapsed={timelineFullyCollapsed}
+              onFullyCollapsedChange={setTimelineFullyCollapsed}
             />
           </div>
         </DraggableWidget>

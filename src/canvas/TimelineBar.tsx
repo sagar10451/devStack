@@ -9,7 +9,7 @@ import { useCallback, useRef, useState, useEffect } from 'react';
 import {
   Trash2, Camera, CameraOff, ChevronDown, ChevronUp, Plus, Eye, Volume2, VolumeX,
   Type, Square, ArrowRight, Image, Pencil, Circle, Triangle, Star, Minus,
-  GitBranch, Cable, MoveHorizontal,
+  GitBranch, Cable, MoveHorizontal, ChevronsLeft,
 } from 'lucide-react';
 import type { AnimationStep, AnimationType, StepAction } from './types';
 import type { Editor } from 'tldraw';
@@ -24,6 +24,8 @@ interface TimelineBarProps {
   isLocked: boolean;
   diagramData?: DiagramData;
   selectedShapeIds?: string[];
+  fullyCollapsed?: boolean;
+  onFullyCollapsedChange?: (v: boolean) => void;
 }
 
 const ANIMATION_OPTIONS: { value: string; label: string; group: string }[] = [
@@ -159,6 +161,8 @@ export default function TimelineBar({
   isLocked,
   diagramData,
   selectedShapeIds = [],
+  fullyCollapsed: _fullyCollapsed = false,
+  onFullyCollapsedChange,
 }: TimelineBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [minimized, setMinimized] = useState(false);
@@ -603,6 +607,15 @@ export default function TimelineBar({
           >
             {minimized ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+          {minimized && (
+            <button
+              onClick={() => onFullyCollapsedChange?.(true)}
+              className="p-0.5 rounded hover:bg-slate-700/50 text-slate-400 hover:text-slate-300"
+              title="Collapse to pill"
+            >
+              <ChevronsLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
           {steps.length > 0 && (
             <button
               onClick={clearAll}
