@@ -66,7 +66,13 @@ export default function PagePanel({ editor, isLocked, onShowTopics }: PagePanelP
 
   const duplicatePage = useCallback((pageId: string) => {
     if (!editor) return;
+    const totalBefore = editor.getPages().length;
     editor.duplicatePage(pageId as any);
+    // Rename the new page to "Page N+1" instead of "X Copy"
+    const newPage = editor.getCurrentPage();
+    if (newPage) {
+      editor.renamePage(newPage.id, `Page ${totalBefore + 1}`);
+    }
   }, [editor]);
 
   const startRename = useCallback((page: PageInfo) => {

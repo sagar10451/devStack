@@ -148,6 +148,7 @@ export default function LessonCanvas({
   const [showLineConfig, setShowLineConfig] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
   const [showTextBoundary, setShowTextBoundary] = useState(false);
+  const showTextBoundaryRef = useRef(false);
   const [pendingNode, setPendingNode] = useState<{ item: any; position: { x: number; y: number } } | null>(null);
   const [pickingDestinationForStep, setPickingDestinationForStep] = useState<string | null>(null);
   const [pickOriginalPosition, setPickOriginalPosition] = useState<{ x: number; y: number } | null>(null);
@@ -753,6 +754,7 @@ export default function LessonCanvas({
   const autoSaveTimerRef = useRef<number | null>(null);
   const isSavingRef = useRef(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [autoSaveHealthy, setAutoSaveHealthy] = useState(true);
   const subTopicLabelsRef = useRef(subTopicLabels);
   subTopicLabelsRef.current = subTopicLabels;
   const shapeAnimationsRef = useRef(shapeAnimations);
@@ -762,7 +764,7 @@ export default function LessonCanvas({
 
   useEffect(() => {
     // Run auto-save every 3 seconds via interval
-    const interval = window.setInterval(() => {
+    const interval = window.setInterval(async () => {
       const ed = editorRef.current;
       if (!ed || isSavingRef.current || !isDirtyRef.current) return;
       isSavingRef.current = true;
@@ -793,14 +795,36 @@ export default function LessonCanvas({
         });
       }
 
+      // Safety check: don't overwrite a rich canvas with an empty/reset state
+      // Count pages in the snapshot being saved
+      const storeEntries = Object.values((doc as any) || {});
+      const pageCount = storeEntries.filter((r: any) => r?.typeName === 'page').length;
+      const shapeCount = storeEntries.filter((r: any) => r?.typeName === 'shape').length;
+      const stepCount = data.animationSteps?.length || 0;
+
+      // If we have almost nothing, check what's on disk first
+      if (pageCount <= 1 && shapeCount <= 2 && stepCount <= 1) {
+        try {
+          const diskRes = await fetch(`/__load-canvas?siteId=${encodeURIComponent(siteId)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(subtopicSlug)}`);
+          const diskData = await diskRes.json();
+          if (diskData && diskData.animationSteps && diskData.animationSteps.length > stepCount + 5) {
+            // Disk has significantly more data — this is likely HMR/idle reset, skip save
+            console.warn('[auto-save] BLOCKED — would overwrite', diskData.animationSteps.length, 'steps with', stepCount);
+            isSavingRef.current = false;
+            return;
+          }
+        } catch { /* disk check failed, proceed with save */ }
+      }
+
       fetch('/__save-canvas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
       }).then(() => {
-        // Don't update isSaved here — auto-save is silent, only manual save shows status
         setLastSavedAt(new Date());
+        setAutoSaveHealthy(true);
       }).catch(() => {
+        setAutoSaveHealthy(false);
         markDirty();
       }).finally(() => {
         isSavingRef.current = false;
@@ -1378,7 +1402,6 @@ export default function LessonCanvas({
         // After tldraw measures the shapes, reposition and create container frame
         setTimeout(() => {
           const GAP = 10;
-          const FRAME_PADDING = 12;
           let currentY = startY;
 
           for (const sid of shapeIds) {
@@ -1392,38 +1415,15 @@ export default function LessonCanvas({
             currentY += bounds.h + GAP;
           }
 
-          // Calculate total height of all shapes
-          const totalHeight = currentY - startY - GAP;
-
-          // Create a container frame (rectangle) around all text shapes
-          const frameId = createShapeId();
-          editor.createShape({
-            id: frameId,
-            type: 'geo',
-            x: startX - FRAME_PADDING,
-            y: startY - FRAME_PADDING,
-            opacity: showTextBoundary ? 0.2 : 0,
-            props: {
-              geo: 'rectangle',
-              w: TEXT_WIDTH + FRAME_PADDING * 2,
-              h: totalHeight + FRAME_PADDING * 2,
-              fill: 'none',
-              color: 'grey',
-              dash: 'dashed',
-              size: 's',
-            },
-          });
-
-          // Store frame info
+          // Store paste group info for later frame creation (when Boundary toggle is ON)
           pasteFrameRef.current.set(groupId, {
-            frameId: frameId as string,
+            frameId: '', // no frame yet — created on demand
             baseX: startX,
             textWidth: TEXT_WIDTH,
           });
-          pasteFrameIdsRef.current.add(frameId as string);
 
-          // Select only the frame so user can resize it
-          editor.select(frameId);
+          // Select all text shapes
+          editor.select(...shapeIds as any);
         }, 200);
       }
     };
@@ -1439,6 +1439,8 @@ export default function LessonCanvas({
     const GAP = 10;
 
     const handleReflow = () => {
+      // Only reflow when Boundary mode is active
+      if (!showTextBoundaryRef.current) return;
       // Don't reflow while user is dragging/resizing
       if (editor.getInstanceState().isChangingStyle) return;
       const selectedIds = new Set(editor.getSelectedShapeIds().map(id => id as string));
@@ -1502,6 +1504,8 @@ export default function LessonCanvas({
     if (!editor || isLocked) return;
 
     const handleWidthSync = () => {
+      // Only sync when Boundary mode is active
+      if (!showTextBoundaryRef.current) return;
       // Check if any selected shape belongs to a paste group
       const selectedIds = new Set(editor.getSelectedShapeIds().map(id => id as string));
       if (selectedIds.size !== 1) return;
@@ -1564,6 +1568,8 @@ export default function LessonCanvas({
     const lastFrameWidths = new Map<string, number>();
 
     const handleFrameResize = () => {
+      // Only handle frame resize when Boundary mode is active
+      if (!showTextBoundaryRef.current) return;
       for (const [groupId, frameInfo] of pasteFrameRef.current.entries()) {
         const frame = editor.getShape(frameInfo.frameId as any) as any;
         if (!frame) {
@@ -1649,12 +1655,63 @@ export default function LessonCanvas({
   // ─── Toggle text boundary frames visibility ──────────────────────────────
   useEffect(() => {
     if (!editor) return;
-    for (const [, frameInfo] of pasteFrameRef.current.entries()) {
-      const frame = editor.getShape(frameInfo.frameId as any) as any;
-      if (!frame) continue;
-      const targetOpacity = showTextBoundary ? 0.2 : 0;
-      if (frame.opacity !== targetOpacity) {
-        editor.updateShape({ id: frame.id, type: frame.type, opacity: targetOpacity });
+
+    if (showTextBoundary) {
+      // Create frames for all paste groups that don't have one yet
+      const FRAME_PADDING = 12;
+      for (const [groupId, frameInfo] of pasteFrameRef.current.entries()) {
+        const shapeIds = pasteGroupsRef.current.get(groupId);
+        if (!shapeIds || shapeIds.length === 0) continue;
+
+        // Delete old frame if exists
+        if (frameInfo.frameId) {
+          const oldFrame = editor.getShape(frameInfo.frameId as any);
+          if (oldFrame) editor.deleteShapes([frameInfo.frameId as any]);
+        }
+
+        // Calculate bounds from existing shapes
+        let minX = Infinity, minY = Infinity, maxY = -Infinity;
+        for (const sid of shapeIds) {
+          const shape = editor.getShape(sid as any) as any;
+          const bounds = editor.getShapePageBounds(sid as any);
+          if (!shape || !bounds) continue;
+          minX = Math.min(minX, shape.x);
+          minY = Math.min(minY, shape.y);
+          maxY = Math.max(maxY, shape.y + bounds.h);
+        }
+        if (minX === Infinity) continue;
+
+        const frameId = createShapeId();
+        editor.createShape({
+          id: frameId,
+          type: 'geo',
+          x: minX - FRAME_PADDING,
+          y: minY - FRAME_PADDING,
+          opacity: 0.25,
+          props: {
+            geo: 'rectangle',
+            w: frameInfo.textWidth + FRAME_PADDING * 2,
+            h: (maxY - minY) + FRAME_PADDING * 2,
+            fill: 'none',
+            color: 'grey',
+            dash: 'dashed',
+            size: 's',
+          },
+        });
+
+        frameInfo.frameId = frameId as string;
+        frameInfo.baseX = minX;
+        pasteFrameIdsRef.current.add(frameId as string);
+      }
+    } else {
+      // Delete all frames
+      for (const [, frameInfo] of pasteFrameRef.current.entries()) {
+        if (frameInfo.frameId) {
+          const frame = editor.getShape(frameInfo.frameId as any);
+          if (frame) editor.deleteShapes([frameInfo.frameId as any]);
+          pasteFrameIdsRef.current.delete(frameInfo.frameId);
+          frameInfo.frameId = '';
+        }
       }
     }
   }, [editor, showTextBoundary]);
@@ -1857,10 +1914,11 @@ export default function LessonCanvas({
             <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isSaved ? 'bg-blue-900 text-blue-300' : 'bg-blue-500 text-white hover:bg-blue-600'}`}>
               <Save className="w-3.5 h-3.5" />{isSaved ? 'Saved' : 'Save'}
             </button>
-            {lastSavedAt && (
-              <span className="text-[9px] text-emerald-500/70" title={`Last auto-saved: ${lastSavedAt.toLocaleTimeString()}`}>
-                {'● '}{lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-              </span>
+            {lastSavedAt !== null && (
+              <span
+                className={`w-2 h-2 rounded-full ${autoSaveHealthy ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}
+                title={autoSaveHealthy ? 'Auto-save active' : 'Auto-save failed — save manually'}
+              />
             )}
             </>
           )}
@@ -1900,7 +1958,7 @@ export default function LessonCanvas({
                 <Boxes className="w-3 h-3" />
                 Nodes
               </button>
-              <button onClick={() => setShowTextBoundary(!showTextBoundary)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showTextBoundary ? 'bg-amber-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Show/hide text paste boundaries">
+              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showTextBoundary ? 'bg-amber-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Show/hide text paste boundaries">
                 <AlignJustify className="w-3 h-3" />
                 Boundary
               </button>
