@@ -8,7 +8,7 @@
  */
 
 import type { Plugin } from 'vite';
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
 
@@ -178,13 +178,11 @@ export function canvasApiPlugin(): Plugin {
             const { siteId, topicSlug, subtopicSlug } = JSON.parse(body);
             const filePath = join(process.cwd(), 'data', 'canvases', siteId, topicSlug, `${subtopicSlug}.json`);
             if (existsSync(filePath)) {
-              const { unlinkSync } = require('fs');
               unlinkSync(filePath);
             }
             // Also delete public canvas file
             const publicPath = join(process.cwd(), 'data', 'canvases', siteId, topicSlug, `${subtopicSlug}-public.json`);
             if (existsSync(publicPath)) {
-              const { unlinkSync } = require('fs');
               unlinkSync(publicPath);
             }
             res.setHeader('Content-Type', 'application/json');
@@ -204,7 +202,6 @@ export function canvasApiPlugin(): Plugin {
         try {
           const canvasDir = join(process.cwd(), 'data', 'canvases');
           if (existsSync(canvasDir)) {
-            const { rmSync } = require('fs');
             rmSync(canvasDir, { recursive: true, force: true });
           }
           res.setHeader('Content-Type', 'application/json');

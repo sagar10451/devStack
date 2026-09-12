@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getSnapshot, loadSnapshot } from 'tldraw';
+import { getSnapshot, loadSnapshot, toRichText, createShapeId } from 'tldraw';
 import type { Editor } from 'tldraw';
 import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -7,6 +7,7 @@ import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
 import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig } from './types';
 import SubTopicTracker from './SubTopicTracker';
+import PagePanel from './PagePanel';
 import { applyIdleAnimation } from './animationEngine';
 import { applyStepAnimation, clearStepAnimations, applyExitAnimation, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
 import type { MoveRecord } from './stepAnimations';
@@ -139,6 +140,7 @@ export default function LessonCanvas({
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
   const [sidebarTitle, setSidebarTitle] = useState('Outline');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true); // true = show Pages, false = show Sub-topics
   const [shapeAnimations, setShapeAnimations] = useState<Record<string, ShapeAnimationConfig>>(initialData?.shapeAnimations || {});
   const [currentStep, setCurrentStep] = useState(-1);
   const [showAnimBar, setShowAnimBar] = useState(false);
@@ -418,6 +420,7 @@ export default function LessonCanvas({
 
   // ─── Auto-add new shapes to timeline ─────────────────────────────────────
   const knownShapeIdsRef = useRef<Set<string>>(new Set());
+  const multiLinePasteRef = useRef(false);
   const animationStepsRef = useRef(animationSteps);
   animationStepsRef.current = animationSteps;
 
@@ -462,7 +465,9 @@ export default function LessonCanvas({
       }
 
       // If many shapes appeared at once, likely a duplication that slipped through
-      if (trulyNew.length > 5) return;
+      // But not if they were from a multi-line paste (tracked via ref)
+      if (trulyNew.length > 5 && !multiLinePasteRef.current) return;
+      multiLinePasteRef.current = false;
 
       const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
         id: `step-${Date.now()}-${i}`,
@@ -919,23 +924,41 @@ export default function LessonCanvas({
       editingPageIdRef.current = editor.getCurrentPageId() as string;
       presentationStartCameraRef.current = { x: cam.x, y: cam.y, z: cam.z };
 
+      // Sort animation steps by tldraw's page order (tab order)
+      // Steps within each page keep their relative order
+      const pageOrder = editor.getPages().map(p => p.id as string);
+      const pageIndexMap = new Map(pageOrder.map((pid, idx) => [pid, idx]));
+      const sortedSteps = [...animationSteps].sort((a, b) => {
+        const aPage = pageIndexMap.get(a.pageId || 'page:page') ?? 0;
+        const bPage = pageIndexMap.get(b.pageId || 'page:page') ?? 0;
+        if (aPage !== bPage) return aPage - bPage;
+        // Same page — preserve original order
+        return animationSteps.indexOf(a) - animationSteps.indexOf(b);
+      });
+      // Update steps if order changed
+      if (sortedSteps.some((s, i) => s.id !== animationSteps[i].id)) {
+        setAnimationSteps(sortedSteps);
+        animationStepsRef.current = sortedSteps;
+      }
+
       // Switch to the first step's page so presentation starts from the beginning
-      if (animationSteps.length > 0 && animationSteps[0].pageId) {
-        const firstStepPageId = animationSteps[0].pageId;
+      const stepsToUse = sortedSteps;
+      if (stepsToUse.length > 0 && stepsToUse[0].pageId) {
+        const firstStepPageId = stepsToUse[0].pageId;
         if ((editor.getCurrentPageId() as string) !== firstStepPageId) {
           editor.setCurrentPage(firstStepPageId as any);
         }
         // Set camera to first preloaded step's position immediately
-        const firstPreloaded = animationSteps.find(s => s.pageId === firstStepPageId && s.animation === 'none' && s.cameraPosition);
+        const firstPreloaded = stepsToUse.find(s => s.pageId === firstStepPageId && s.animation === 'none' && s.cameraPosition);
         if (firstPreloaded?.cameraPosition) {
           editor.setCamera(firstPreloaded.cameraPosition, { force: true });
         }
       }
 
       setCurrentStep(-1);
-      applyAnimationState(editor, animationSteps, -1);
+      applyAnimationState(editor, sortedSteps, -1);
       // Re-apply after a frame to catch RF elements that might not be in DOM yet
-      setTimeout(() => applyAnimationState(editor, animationSteps, -1), 100);
+      setTimeout(() => applyAnimationState(editor, sortedSteps, -1), 100);
       editor.updateInstanceState({ isReadonly: true });
       // Lock tldraw camera to prevent any internal shifts during presentation
       editor.setCameraOptions({ isLocked: true });
@@ -1213,6 +1236,138 @@ export default function LessonCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isLocked, goNext, goPrevious]);
 
+  // ─── Multi-line paste splitter ──────────────────────────────────────────
+  // When pasting text with multiple lines, create separate text shapes for each line
+  useEffect(() => {
+    if (!editor || isLocked) return;
+
+    const handlePaste = (e: ClipboardEvent) => {
+      // Only intercept when not editing a text shape (tldraw handles its own paste)
+      const editingShapeId = editor.getEditingShapeId();
+      if (editingShapeId) return; // Let tldraw handle paste inside text shapes
+
+      // Don't intercept if focus is on an input/textarea (e.g., timeline, sidebar)
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
+
+      const text = e.clipboardData?.getData('text/plain');
+      if (!text) return;
+
+      // Only split if there are multiple non-empty lines (real multi-line content)
+      const lines = text.split('\n').filter(line => line.trim().length > 0);
+      if (lines.length <= 1) return; // Single line or empty — let tldraw handle normally
+
+      // Also check: if clipboard has HTML or tldraw internal data, let tldraw handle it
+      // (user might be pasting shapes copied from tldraw itself)
+      const tldrawData = e.clipboardData?.getData('application/tldraw');
+      if (tldrawData) return; // tldraw internal copy-paste
+      const html = e.clipboardData?.getData('text/html');
+      if (html && html.includes('data-tldraw')) return;
+
+      // If HTML has list items, extract text with bullet prefixes and nesting depth
+      let finalLines: { text: string; indent: number }[] = lines.map(l => {
+        // Calculate indent from leading whitespace
+        const match = l.match(/^(\s*)/);
+        const leadingSpaces = match ? match[1].length : 0;
+        // Each tab = 1 level, every 2-4 spaces = 1 level
+        const tabCount = (match?.[1] || '').split('\t').length - 1;
+        const spaceIndent = Math.floor((leadingSpaces - tabCount) / 2);
+        const indent = tabCount + spaceIndent;
+        return { text: l.trimEnd(), indent: Math.min(indent, 4) };
+      });
+
+      if (html && (html.includes('<li') || html.includes('<ul') || html.includes('<ol'))) {
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, 'text/html');
+          const listItems = doc.querySelectorAll('li');
+
+          if (listItems.length > 0) {
+            const items: { text: string; indent: number }[] = [];
+            const orderedCounters: Record<number, number> = {};
+
+            listItems.forEach(li => {
+              // Google Docs uses aria-level for nesting depth (flat <li> list)
+              const ariaLevel = parseInt(li.getAttribute('aria-level') || '1', 10);
+              const depth = ariaLevel - 1; // 0-based
+
+              // Get direct text content
+              let directText = '';
+              for (const node of Array.from(li.childNodes)) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                  directText += node.textContent || '';
+                } else if (node.nodeType === Node.ELEMENT_NODE && !(node as Element).matches('ul, ol')) {
+                  directText += (node as Element).textContent || '';
+                }
+              }
+              directText = directText.trim();
+              if (!directText) return;
+
+              // Determine bullet style
+              const listStyle = li.style?.listStyleType || '';
+              const isOrdered = listStyle === 'decimal' || li.parentElement?.tagName === 'OL';
+
+              if (isOrdered) {
+                orderedCounters[depth] = (orderedCounters[depth] || 0) + 1;
+                const prefix = '  '.repeat(depth) + `${orderedCounters[depth]}. `;
+                items.push({ text: prefix + directText, indent: depth });
+              } else {
+                const bullet = depth === 0 ? '• ' : '  '.repeat(depth) + '◦ ';
+                items.push({ text: bullet + directText, indent: depth });
+              }
+            });
+
+            if (items.length > 0) {
+              finalLines = items;
+            }
+          }
+        } catch { /* fallback to plain text lines */ }
+      }
+
+      // Intercept the paste
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      // Flag so auto-add doesn't block these shapes (> 5 guard)
+      multiLinePasteRef.current = true;
+
+      // Get camera center as starting position
+      const viewportCenter = editor.getViewportScreenCenter();
+      const pagePoint = editor.screenToPage(viewportCenter);
+
+      const LINE_HEIGHT = 40;
+      const INDENT_WIDTH = 30;
+      const startX = pagePoint.x - 150;
+      const startY = pagePoint.y - (finalLines.length * LINE_HEIGHT) / 2;
+
+      const shapeIds: string[] = [];
+
+      finalLines.forEach((line, i) => {
+        const id = createShapeId();
+        editor.createShape({
+          id,
+          type: 'text',
+          x: startX + (line.indent * INDENT_WIDTH),
+          y: startY + i * LINE_HEIGHT,
+          props: {
+            richText: toRichText(line.text),
+            size: 'm',
+            autoSize: true,
+          },
+        });
+        shapeIds.push(id);
+      });
+
+      if (shapeIds.length > 0) {
+        editor.select(...shapeIds as any);
+      }
+    };
+
+    // Window capture phase — fires before tldraw's paste handler
+    window.addEventListener('paste', handlePaste, true);
+    return () => window.removeEventListener('paste', handlePaste, true);
+  }, [editor, isLocked]);
+
   // Warn before refresh if audio files are loaded in memory
   useEffect(() => {
     const hasAudioLoaded = animationSteps.some(s => s.audio?.data);
@@ -1250,11 +1405,19 @@ export default function LessonCanvas({
   // Reset current topic's canvas (delete from disk + reload)
   const handleResetCanvas = useCallback(() => {
     if (!window.confirm(`Reset canvas for "${subtopicTitle}"?\n\nThis will delete all shapes, timeline, sub-topics, and saved data for this topic. This cannot be undone.`)) return;
+    // Stop auto-save from re-writing the file
+    if (autoSaveTimerRef.current) {
+      clearInterval(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
     fetch('/__delete-canvas', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId, topicSlug, subtopicSlug }),
-    }).finally(() => {
+    }).then(res => res.json()).then(data => {
+      console.log('[reset]', data);
+      window.location.reload();
+    }).catch(() => {
       window.location.reload();
     });
   }, [siteId, topicSlug, subtopicSlug, subtopicTitle]);
@@ -1644,19 +1807,41 @@ export default function LessonCanvas({
         </DraggableWidget>
       )}
 
-      {/* Sub Topic Sidebar (overlays right side) */}
+      {/* Sidebar (overlays right side) — Pages panel when collapsed, Sub-topics when expanded */}
       <div className="absolute top-0 right-0 bottom-0 w-[15%] min-w-[180px] border-l border-[#1a2a5e] bg-[#0a1230] flex flex-col overflow-hidden z-30">
-        <SubTopicTracker
-          labels={subTopicLabels}
-          onLabelsChange={handleLabelsChange}
-          steps={animationSteps}
-          isLocked={isLocked}
-          currentStep={currentStep}
-          editor={editor}
-          sidebar
-          sidebarTitle={sidebarTitle}
-          onSidebarTitleChange={setSidebarTitle}
-        />
+        {isLocked ? (
+          // Locked: always show Sub-topics
+          <SubTopicTracker
+            labels={subTopicLabels}
+            onLabelsChange={handleLabelsChange}
+            steps={animationSteps}
+            isLocked={isLocked}
+            currentStep={currentStep}
+            editor={editor}
+            sidebar
+            sidebarTitle={sidebarTitle}
+            onSidebarTitleChange={setSidebarTitle}
+            collapsed={false}
+          />
+        ) : sidebarCollapsed ? (
+          // Unlocked + collapsed: show Pages panel
+          <PagePanel editor={editor} isLocked={isLocked} onShowTopics={() => setSidebarCollapsed(false)} />
+        ) : (
+          // Unlocked + expanded: show Sub-topics
+          <SubTopicTracker
+            labels={subTopicLabels}
+            onLabelsChange={handleLabelsChange}
+            steps={animationSteps}
+            isLocked={isLocked}
+            currentStep={currentStep}
+            editor={editor}
+            sidebar
+            sidebarTitle={sidebarTitle}
+            onSidebarTitleChange={setSidebarTitle}
+            collapsed={sidebarCollapsed}
+            onCollapsedChange={setSidebarCollapsed}
+          />
+        )}
       </div>
       </div>
 
