@@ -220,6 +220,21 @@ export default function TimelineBar({
     updateStep(stepId, { cameraPosition: { x: Math.round(cam.x), y: Math.round(cam.y), z: Math.round(cam.z * 100) / 100 } });
   }, [editor, updateStep]);
 
+  // Lock camera for ALL steps on the current page at once
+  const lockAllCameras = useCallback(() => {
+    if (!editor) return;
+    const cam = editor.getCamera();
+    const camPos = { x: Math.round(cam.x), y: Math.round(cam.y), z: Math.round(cam.z * 100) / 100 };
+    const pageId = editor.getCurrentPageId() as string;
+    const updatedSteps = steps.map(s => {
+      if ((s.pageId || 'page:page') === pageId) {
+        return { ...s, cameraPosition: camPos };
+      }
+      return s;
+    });
+    onStepsChange(updatedSteps);
+  }, [editor, steps, onStepsChange]);
+
   const clearCamera = useCallback((stepId: string) => {
     updateStep(stepId, { cameraPosition: undefined });
   }, [updateStep]);
@@ -599,6 +614,13 @@ export default function TimelineBar({
             title="Add selected element(s) to timeline manually"
           >
             <Plus className="w-3 h-3" /> Add
+          </button>
+          <button
+            onClick={lockAllCameras}
+            className="flex items-center gap-1 text-[9px] text-indigo-400 hover:text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/20 hover:bg-indigo-500/10"
+            title="Lock current camera for all steps on this page"
+          >
+            <Camera className="w-3 h-3" /> Lock All
           </button>
           <button
             onClick={() => setMinimized(m => !m)}

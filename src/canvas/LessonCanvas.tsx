@@ -380,14 +380,15 @@ export default function LessonCanvas({
       const rfNodeIds = new Set(diagramData.nodes.map((n: any) => n.id as string));
       const rfEdgeIds = new Set(diagramData.edges.map((e: any) => e.id as string));
 
-      const cleanedSteps = animationSteps
+      const currentSteps = animationStepsRef.current;
+      const cleanedSteps = currentSteps
         .map(step => {
           // Only clean steps belonging to the current page
-          // Leave other pages' steps untouched
           if ((step.pageId || '') !== currentPageId) return step;
           return {
             ...step,
             shapeIds: step.shapeIds.filter(id => {
+              if (pasteFrameIdsRef.current.has(id)) return true; // don't clean frame shapes
               if (isRfId(id)) return rfNodeIds.has(id) || rfEdgeIds.has(id);
               return existingShapeIds.has(id);
             }),
@@ -395,7 +396,7 @@ export default function LessonCanvas({
         })
         .filter(step => step.shapeIds.length > 0);
 
-      if (cleanedSteps.length !== animationSteps.length) {
+      if (cleanedSteps.length !== currentSteps.length) {
         setAnimationSteps(cleanedSteps);
 
         const maxStepIndex = cleanedSteps.length - 1;
@@ -419,7 +420,7 @@ export default function LessonCanvas({
 
     const unsub = editor.store.listen(cleanup, { scope: 'document' });
     return () => unsub();
-  }, [editor, isLocked, animationSteps, subTopicLabels, shapeAnimations, diagramData]);
+  }, [editor, isLocked, subTopicLabels, shapeAnimations, diagramData]);
 
   // ─── Auto-add new shapes to timeline ─────────────────────────────────────
   const knownShapeIdsRef = useRef<Set<string>>(new Set());
@@ -458,7 +459,14 @@ export default function LessonCanvas({
       // Use ref for fresh steps (avoids stale closure)
       const currentSteps = animationStepsRef.current;
       const existingStepShapeIds = new Set(currentSteps.flatMap(s => s.shapeIds));
-      const trulyNew = newIds.filter(id => !existingStepShapeIds.has(id) && !pasteFrameIdsRef.current.has(id));
+      const trulyNew = newIds.filter(id => {
+        if (existingStepShapeIds.has(id)) return false;
+        if (pasteFrameIdsRef.current.has(id)) return false;
+        // Exclude boundary frames by meta
+        const shape = editor.getShape(id as any) as any;
+        if (shape?.meta?.isPasteBoundary) return false;
+        return true;
+      });
       if (trulyNew.length === 0) return;
 
       const pageId = editor.getCurrentPageId() as string;
@@ -657,6 +665,18 @@ export default function LessonCanvas({
           );
           if (newPageShapeIds.size === 0) continue;
 
+          // Delete any boundary frames that got copied from the source page
+          const boundaryShapesToDelete: string[] = [];
+          for (const shapeId of newPageShapeIds) {
+            const shape = editor.getShape(shapeId as any) as any;
+            if (shape?.meta?.isPasteBoundary) {
+              boundaryShapesToDelete.push(shapeId);
+            }
+          }
+          if (boundaryShapesToDelete.length > 0) {
+            editor.deleteShapes(boundaryShapesToDelete as any);
+          }
+
           // Mark as recently duplicated so auto-add skips it
           recentlyDuplicatedPagesRef.current.add(newPageId);
           setTimeout(() => recentlyDuplicatedPagesRef.current.delete(newPageId), 3000);
@@ -676,10 +696,10 @@ export default function LessonCanvas({
               // Map source shape IDs → new shape IDs by type+position matching
               const sourceShapes = [...editor.getPageShapeIds(sourcePageId as any)]
                 .map(id => editor.getShape(id))
-                .filter(Boolean) as any[];
+                .filter((s: any) => s && !s.meta?.isPasteBoundary) as any[];
               const newShapes = [...editor.getPageShapeIds(newPageId as any)]
                 .map(id => editor.getShape(id))
-                .filter(Boolean) as any[];
+                .filter((s: any) => s && !s.meta?.isPasteBoundary) as any[];
 
               const idMapping = new Map<string, string>();
               const usedNewIds = new Set<string>();
@@ -702,8 +722,9 @@ export default function LessonCanvas({
                 id: `step-${Date.now()}-dup-${i}`,
                 pageId: newPageId,
                 shapeIds: step.shapeIds.map(sid => idMapping.get(sid) || sid),
-                cameraPosition: undefined,
-                audio: undefined,
+                // Keep cameraPosition and animation — same layout on new page
+                // Only clear audio data (memory-only, needs re-upload)
+                audio: step.audio ? { ...step.audio, data: '' } : undefined,
               }));
 
               const lastSourceIndex = prev.map(s => s.pageId).lastIndexOf(sourcePageId!);
@@ -1688,6 +1709,7 @@ export default function LessonCanvas({
           x: minX - FRAME_PADDING,
           y: minY - FRAME_PADDING,
           opacity: 0.25,
+          meta: { isPasteBoundary: true },
           props: {
             geo: 'rectangle',
             w: frameInfo.textWidth + FRAME_PADDING * 2,
@@ -1826,6 +1848,95 @@ export default function LessonCanvas({
     }
   }, [topicSlug, subtopicSlug]);
 
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  const handleExportPdf = useCallback(async () => {
+    if (!editor || isExportingPdf) return;
+    setIsExportingPdf(true);
+
+    try {
+      const { toPng } = await import('html-to-image');
+      const { jsPDF } = await import('jspdf');
+      const canvasArea = document.getElementById('canvas-export-area');
+      if (!canvasArea) { setIsExportingPdf(false); return; }
+
+      const pages = editor.getPages();
+      const originalPageId = editor.getCurrentPageId() as string;
+      const originalCam = editor.getCamera();
+
+      const imageFilter = (node: HTMLElement) => {
+        if (!(node instanceof HTMLElement)) return true;
+        const cl = node.classList;
+        if (cl?.contains('timeline-bar-widget')) return false;
+        if (cl?.contains('sub-topic-sidebar')) return false;
+        if (node.getAttribute('data-drag-handle') !== null && node.closest?.('.timeline-bar-widget')) return false;
+        return true;
+      };
+
+      // Capture each page
+      const pageImages: string[] = [];
+      for (const page of pages) {
+        const pageId = page.id as string;
+
+        // Switch to page
+        if (pageId !== (editor.getCurrentPageId() as string)) {
+          editor.setCurrentPage(pageId as any);
+        }
+
+        // Make all shapes visible (remove any animation hiding)
+        document.querySelectorAll('[data-shape-id]').forEach(el => {
+          (el as HTMLElement).style.visibility = '';
+          (el as HTMLElement).style.opacity = '';
+        });
+        document.querySelectorAll('.rf-anim-hidden').forEach(el => {
+          el.classList.remove('rf-anim-hidden');
+        });
+
+        // Wait for render
+        await new Promise(r => setTimeout(r, 500));
+
+        // Capture
+        const dataUrl = await toPng(canvasArea, {
+          backgroundColor: '#f0ede8',
+          pixelRatio: 2,
+          filter: imageFilter,
+        });
+        pageImages.push(dataUrl);
+      }
+
+      // Restore original page and camera
+      if ((editor.getCurrentPageId() as string) !== originalPageId) {
+        editor.setCurrentPage(originalPageId as any);
+      }
+      editor.setCamera(originalCam, { force: true });
+
+      // Build PDF
+      if (pageImages.length > 0) {
+        // Get canvas dimensions for PDF page size
+        const canvasRect = canvasArea.getBoundingClientRect();
+        const pdfWidth = canvasRect.width;
+        const pdfHeight = canvasRect.height;
+
+        const pdf = new jsPDF({
+          orientation: pdfWidth > pdfHeight ? 'landscape' : 'portrait',
+          unit: 'px',
+          format: [pdfWidth, pdfHeight],
+        });
+
+        for (let i = 0; i < pageImages.length; i++) {
+          if (i > 0) pdf.addPage([pdfWidth, pdfHeight], pdfWidth > pdfHeight ? 'landscape' : 'portrait');
+          pdf.addImage(pageImages[i], 'PNG', 0, 0, pdfWidth, pdfHeight);
+        }
+
+        pdf.save(`canvas-${topicSlug}-${subtopicSlug}.pdf`);
+      }
+    } catch (err) {
+      console.error('PDF export failed:', err);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }, [editor, isExportingPdf, topicSlug, subtopicSlug]);
+
   const handleImport = useCallback(() => {
     const input = window.document.createElement('input');
     input.type = 'file';
@@ -1931,6 +2042,9 @@ export default function LessonCanvas({
               </button>
               <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Export as PNG">
                 <ImageDown className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isExportingPdf ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PDF (all pages)">
+                <FileText className="w-3.5 h-3.5" />{isExportingPdf ? '...' : 'PDF'}
               </button>
               <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
