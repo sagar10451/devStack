@@ -13,6 +13,8 @@ interface DraggableWidgetProps {
   zIndex?: number;
   /** Optional class on the outer wrapper */
   className?: string;
+  /** Anchor to bottom of container — widget expands upward, always visible */
+  anchorBottom?: boolean;
 }
 
 export default function DraggableWidget({
@@ -20,8 +22,10 @@ export default function DraggableWidget({
   defaultPosition,
   zIndex = 40,
   className = '',
+  anchorBottom = false,
 }: DraggableWidgetProps) {
-  const [position, setPosition] = useState(defaultPosition || null);
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(defaultPosition || null);
+  const [hasBeenDragged, setHasBeenDragged] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
@@ -50,6 +54,7 @@ export default function DraggableWidget({
         x: dragRef.current.origX + dx,
         y: dragRef.current.origY + dy,
       });
+      setHasBeenDragged(true);
     };
 
     const handleMouseUp = () => {
@@ -62,14 +67,24 @@ export default function DraggableWidget({
     document.addEventListener('mouseup', handleMouseUp);
   }, []);
 
+  // Compute style based on anchor mode and drag state
+  const style: React.CSSProperties = { zIndex };
+
+  if (anchorBottom && !hasBeenDragged) {
+    // Not dragged yet — anchor to bottom
+    style.bottom = 8;
+    style.left = position?.x ?? 0;
+  } else if (position) {
+    // Has been dragged or non-anchor mode — use absolute position
+    style.left = position.x;
+    style.top = position.y;
+  }
+
   return (
     <div
       ref={containerRef}
       className={`absolute ${className}`}
-      style={{
-        ...(position ? { left: position.x, top: position.y } : {}),
-        zIndex,
-      }}
+      style={style}
       onMouseDown={handleMouseDown}
     >
       {children}

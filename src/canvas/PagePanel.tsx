@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { Plus, Trash2, Copy, FileText } from 'lucide-react';
+import { Plus, Trash2, Copy, FileText, ChevronUp, ChevronDown } from 'lucide-react';
 import type { Editor } from 'tldraw';
 
 interface PagePanelProps {
@@ -91,6 +91,41 @@ export default function PagePanel({ editor, isLocked, onShowTopics }: PagePanelP
     setEditingId(null);
     setEditName('');
   }, []);
+
+  // Rename all pages to sequential "Page 1", "Page 2", etc.
+  const renameAllSequential = useCallback(() => {
+    if (!editor) return;
+    const allPages = editor.getPages();
+    allPages.forEach((p, i) => {
+      const expectedName = `Page ${i + 1}`;
+      if (p.name !== expectedName) {
+        editor.renamePage(p.id, expectedName);
+      }
+    });
+  }, [editor]);
+
+  // Move a page up or down in the list
+  const movePage = useCallback((pageId: string, direction: 'up' | 'down') => {
+    if (!editor) return;
+    const allPages = editor.getPages();
+    const currentIdx = allPages.findIndex(p => (p.id as string) === pageId);
+    if (currentIdx === -1) return;
+    const targetIdx = direction === 'up' ? currentIdx - 1 : currentIdx + 1;
+    if (targetIdx < 0 || targetIdx >= allPages.length) return;
+
+    // Swap indices between the two pages
+    const currentPage = allPages[currentIdx];
+    const targetPage = allPages[targetIdx];
+
+    editor.run(() => {
+      (editor as any).markHistoryStoppingPoint?.('reorder pages');
+      editor.updatePage({ id: currentPage.id, index: (targetPage as any).index });
+      editor.updatePage({ id: targetPage.id, index: (currentPage as any).index });
+    });
+
+    // Rename all pages sequentially after reorder
+    setTimeout(() => renameAllSequential(), 50);
+  }, [editor, renameAllSequential]);
 
   if (isLocked) return null;
 
@@ -178,17 +213,28 @@ export default function PagePanel({ editor, isLocked, onShowTopics }: PagePanelP
             {/* Action buttons — always visible */}
             {editingId !== page.id && (
               <div className="flex items-center gap-1 mt-1.5">
+                {/* Move up/down */}
                 <button
-                  onClick={(e) => { e.stopPropagation(); startRename(page); }}
-                  className="text-[8px] text-cyan-400/60 hover:text-cyan-300 px-1.5 py-0.5 rounded hover:bg-cyan-500/10 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); movePage(page.id, 'up'); }}
+                  disabled={i === 0}
+                  className="text-[8px] text-slate-500 hover:text-slate-300 p-0.5 rounded hover:bg-slate-700/30 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                  title="Move up"
                 >
-                  Rename
+                  <ChevronUp className="w-2.5 h-2.5" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); movePage(page.id, 'down'); }}
+                  disabled={i === pages.length - 1}
+                  className="text-[8px] text-slate-500 hover:text-slate-300 p-0.5 rounded hover:bg-slate-700/30 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                  title="Move down"
+                >
+                  <ChevronDown className="w-2.5 h-2.5" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); duplicatePage(page.id); }}
                   className="text-[8px] text-blue-400/60 hover:text-blue-300 px-1.5 py-0.5 rounded hover:bg-blue-500/10 transition-colors flex items-center gap-0.5"
                 >
-                  <Copy className="w-2.5 h-2.5" /> Duplicate
+                  <Copy className="w-2.5 h-2.5" />
                 </button>
                 {pages.length > 1 && (
                   <button

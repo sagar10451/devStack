@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot, toRichText, createShapeId } from 'tldraw';
 import type { Editor } from 'tldraw';
-import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify } from 'lucide-react';
+import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify, PanelRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
@@ -149,6 +149,7 @@ export default function LessonCanvas({
   const [showNodes, setShowNodes] = useState(false);
   const [showTextBoundary, setShowTextBoundary] = useState(false);
   const showTextBoundaryRef = useRef(false);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [pendingNode, setPendingNode] = useState<{ item: any; position: { x: number; y: number } } | null>(null);
   const [pickingDestinationForStep, setPickingDestinationForStep] = useState<string | null>(null);
   const [pickOriginalPosition, setPickOriginalPosition] = useState<{ x: number; y: number } | null>(null);
@@ -1260,6 +1261,42 @@ export default function LessonCanvas({
     }
   }, [editor, isLocked, currentStep, animationSteps, applyAnimationState, stopStepAudio]);
 
+  // Jump to the first step of a specific page (for testing)
+  const jumpToPage = useCallback((pageId: string) => {
+    if (!editor || !isLocked) return;
+    stopStepAudio();
+
+    // Find the first step of this page
+    const targetStepIndex = animationSteps.findIndex(s => s.pageId === pageId);
+    if (targetStepIndex === -1) return;
+
+    // Switch to that page
+    editor.setCameraOptions({ isLocked: false });
+    editor.setCurrentPage(pageId as any);
+
+    // Set camera from the first step with a camera position on this page
+    const pageStep = animationSteps.find(s => s.pageId === pageId && s.cameraPosition);
+    if (pageStep?.cameraPosition) {
+      editor.setCamera(pageStep.cameraPosition, { force: true });
+    }
+
+    // Skip preloaded (none) steps at the start of this page
+    let startStep = targetStepIndex;
+    while (startStep < animationSteps.length &&
+           animationSteps[startStep].animation === 'none' &&
+           (animationSteps[startStep].action || 'enter') === 'enter' &&
+           animationSteps[startStep].pageId === pageId) {
+      startStep++;
+    }
+    // Go back one so the first non-preloaded step is the next to play
+    const jumpTo = Math.max(targetStepIndex - 1, startStep > targetStepIndex ? startStep - 1 : targetStepIndex - 1);
+
+    // Apply animation state up to just before the target
+    applyAnimationState(editor, animationSteps, jumpTo);
+    editor.setCameraOptions({ isLocked: true });
+    setCurrentStep(jumpTo);
+  }, [editor, isLocked, animationSteps, applyAnimationState, stopStepAudio]);
+
   // Keyboard
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1855,6 +1892,13 @@ export default function LessonCanvas({
     setIsExportingPdf(true);
 
     try {
+      // Enter fullscreen for full canvas capture
+      const wasFullscreen = !!document.fullscreenElement;
+      if (!wasFullscreen) {
+        try { await document.documentElement.requestFullscreen(); } catch { /* ignore */ }
+        await new Promise(r => setTimeout(r, 600)); // wait for fullscreen transition
+      }
+
       const { toPng } = await import('html-to-image');
       const { jsPDF } = await import('jspdf');
       const canvasArea = document.getElementById('canvas-export-area');
@@ -1870,17 +1914,33 @@ export default function LessonCanvas({
         if (cl?.contains('timeline-bar-widget')) return false;
         if (cl?.contains('sub-topic-sidebar')) return false;
         if (node.getAttribute('data-drag-handle') !== null && node.closest?.('.timeline-bar-widget')) return false;
+        // Hide tldraw UI panels (zoom, navigation, toolbar)
+        if (cl?.contains('tl-navigation-panel')) return false;
+        if (cl?.contains('tl-zoom-menu')) return false;
+        if (cl?.contains('tl-toolbar')) return false;
+        if (cl?.contains('tl-style-panel')) return false;
+        if (cl?.contains('tlui-navigation-panel')) return false;
+        if (cl?.contains('tlui-menu-zone')) return false;
+        // Generic: hide anything with tl-ui or tlui prefix that's a panel
+        if (node.className && typeof node.className === 'string' && (node.className.includes('tlui-navigation') || node.className.includes('tlui-toolbar') || node.className.includes('tlui-style-panel'))) return false;
         return true;
       };
 
       // Capture each page
       const pageImages: string[] = [];
+      const currentSteps = animationStepsRef.current;
       for (const page of pages) {
         const pageId = page.id as string;
 
         // Switch to page
         if (pageId !== (editor.getCurrentPageId() as string)) {
           editor.setCurrentPage(pageId as any);
+        }
+
+        // Restore camera from first step's locked camera for this page (preserves user's zoom)
+        const pageStep = currentSteps.find(s => s.pageId === pageId && s.cameraPosition);
+        if (pageStep?.cameraPosition) {
+          editor.setCamera(pageStep.cameraPosition, { force: true });
         }
 
         // Make all shapes visible (remove any animation hiding)
@@ -1898,10 +1958,24 @@ export default function LessonCanvas({
         // Capture
         const dataUrl = await toPng(canvasArea, {
           backgroundColor: '#f0ede8',
-          pixelRatio: 2,
+          pixelRatio: 1.5,
           filter: imageFilter,
         });
-        pageImages.push(dataUrl);
+        // Convert PNG to JPEG for smaller file size
+        const img = new Image();
+        await new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.src = dataUrl;
+        });
+        const jpegCanvas = document.createElement('canvas');
+        jpegCanvas.width = img.width;
+        jpegCanvas.height = img.height;
+        const ctx = jpegCanvas.getContext('2d')!;
+        ctx.fillStyle = '#f0ede8';
+        ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
+        ctx.drawImage(img, 0, 0);
+        const jpegUrl = jpegCanvas.toDataURL('image/jpeg', 0.92);
+        pageImages.push(jpegUrl);
       }
 
       // Restore original page and camera
@@ -1925,17 +1999,147 @@ export default function LessonCanvas({
 
         for (let i = 0; i < pageImages.length; i++) {
           if (i > 0) pdf.addPage([pdfWidth, pdfHeight], pdfWidth > pdfHeight ? 'landscape' : 'portrait');
-          pdf.addImage(pageImages[i], 'PNG', 0, 0, pdfWidth, pdfHeight);
+          pdf.addImage(pageImages[i], 'JPEG', 0, 0, pdfWidth, pdfHeight);
         }
 
         pdf.save(`canvas-${topicSlug}-${subtopicSlug}.pdf`);
       }
+
+      // Exit fullscreen if we entered it
+      if (!wasFullscreen && document.fullscreenElement) {
+        try { await document.exitFullscreen(); } catch { /* ignore */ }
+      }
     } catch (err) {
       console.error('PDF export failed:', err);
+      // Try to exit fullscreen on error
+      if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch { /* */ } }
     } finally {
       setIsExportingPdf(false);
     }
   }, [editor, isExportingPdf, topicSlug, subtopicSlug]);
+
+  const [isExportingPpt, setIsExportingPpt] = useState(false);
+
+  const handleExportPpt = useCallback(async () => {
+    if (!editor || isExportingPpt) return;
+    setIsExportingPpt(true);
+
+    try {
+      // Enter fullscreen for full canvas capture
+      const wasFullscreen = !!document.fullscreenElement;
+      if (!wasFullscreen) {
+        try { await document.documentElement.requestFullscreen(); } catch { /* ignore */ }
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      const { toPng } = await import('html-to-image');
+      const PptxGenJS = (await import('pptxgenjs')).default;
+      const canvasArea = document.getElementById('canvas-export-area');
+      if (!canvasArea) { setIsExportingPpt(false); return; }
+
+      const pages = editor.getPages();
+      const originalPageId = editor.getCurrentPageId() as string;
+      const originalCam = editor.getCamera();
+
+      const imageFilter = (node: HTMLElement) => {
+        if (!(node instanceof HTMLElement)) return true;
+        const cl = node.classList;
+        if (cl?.contains('timeline-bar-widget')) return false;
+        if (cl?.contains('sub-topic-sidebar')) return false;
+        if (node.getAttribute('data-drag-handle') !== null && node.closest?.('.timeline-bar-widget')) return false;
+        if (cl?.contains('tl-navigation-panel')) return false;
+        if (cl?.contains('tl-zoom-menu')) return false;
+        if (cl?.contains('tl-toolbar')) return false;
+        if (cl?.contains('tl-style-panel')) return false;
+        if (cl?.contains('tlui-navigation-panel')) return false;
+        if (cl?.contains('tlui-menu-zone')) return false;
+        if (node.className && typeof node.className === 'string' && (node.className.includes('tlui-navigation') || node.className.includes('tlui-toolbar') || node.className.includes('tlui-style-panel'))) return false;
+        return true;
+      };
+
+      // Capture each page
+      const pageImages: string[] = [];
+      const currentStepsPpt = animationStepsRef.current;
+      for (const page of pages) {
+        const pageId = page.id as string;
+        if (pageId !== (editor.getCurrentPageId() as string)) {
+          editor.setCurrentPage(pageId as any);
+        }
+        // Restore camera from first step's locked camera for this page
+        const pageStep = currentStepsPpt.find(s => s.pageId === pageId && s.cameraPosition);
+        if (pageStep?.cameraPosition) {
+          editor.setCamera(pageStep.cameraPosition, { force: true });
+        }
+        document.querySelectorAll('[data-shape-id]').forEach(el => {
+          (el as HTMLElement).style.visibility = '';
+          (el as HTMLElement).style.opacity = '';
+        });
+        document.querySelectorAll('.rf-anim-hidden').forEach(el => {
+          el.classList.remove('rf-anim-hidden');
+        });
+        await new Promise(r => setTimeout(r, 500));
+
+        const dataUrl = await toPng(canvasArea, {
+          backgroundColor: '#f0ede8',
+          pixelRatio: 1.5,
+          filter: imageFilter,
+        });
+        // Convert to JPEG for smaller size
+        const img = new Image();
+        await new Promise<void>((resolve) => { img.onload = () => resolve(); img.src = dataUrl; });
+        const jpegCanvas = document.createElement('canvas');
+        jpegCanvas.width = img.width;
+        jpegCanvas.height = img.height;
+        const ctx = jpegCanvas.getContext('2d')!;
+        ctx.fillStyle = '#f0ede8';
+        ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
+        ctx.drawImage(img, 0, 0);
+        const jpegUrl = jpegCanvas.toDataURL('image/jpeg', 0.92);
+        pageImages.push(jpegUrl);
+      }
+
+      // Restore original page and camera
+      if ((editor.getCurrentPageId() as string) !== originalPageId) {
+        editor.setCurrentPage(originalPageId as any);
+      }
+      editor.setCamera(originalCam, { force: true });
+
+      // Build PPTX
+      if (pageImages.length > 0) {
+        const canvasRect = canvasArea.getBoundingClientRect();
+        const aspectRatio = canvasRect.width / canvasRect.height;
+        const slideW = 10; // inches
+        const slideH = slideW / aspectRatio;
+
+        const pptx = new PptxGenJS();
+        pptx.defineLayout({ name: 'CUSTOM', width: slideW, height: slideH });
+        pptx.layout = 'CUSTOM';
+
+        for (const imgData of pageImages) {
+          const slide = pptx.addSlide();
+          slide.addImage({
+            data: imgData,
+            x: 0,
+            y: 0,
+            w: slideW,
+            h: slideH,
+          });
+        }
+
+        await pptx.writeFile({ fileName: `canvas-${topicSlug}-${subtopicSlug}.pptx` });
+      }
+
+      // Exit fullscreen if we entered it
+      if (!wasFullscreen && document.fullscreenElement) {
+        try { await document.exitFullscreen(); } catch { /* ignore */ }
+      }
+    } catch (err) {
+      console.error('PPT export failed:', err);
+      if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch { /* */ } }
+    } finally {
+      setIsExportingPpt(false);
+    }
+  }, [editor, isExportingPpt, topicSlug, subtopicSlug]);
 
   const handleImport = useCallback(() => {
     const input = window.document.createElement('input');
@@ -2009,6 +2213,22 @@ export default function LessonCanvas({
               <button onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-blue-900 hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                 <ChevronRight className="w-3.5 h-3.5 text-blue-100" />
               </button>
+              {/* Page jump — hidden in fullscreen presenting */}
+              {!isPresenting && editor && editor.getPages().length > 1 && (
+                <select
+                  value={currentStep >= 0 ? (animationSteps[currentStep]?.pageId || '') : ''}
+                  onChange={(e) => { if (e.target.value) jumpToPage(e.target.value); }}
+                  className="ml-1 text-[9px] bg-blue-900 text-blue-200 border border-blue-700 rounded px-1 py-1 outline-none cursor-pointer"
+                  title="Jump to page"
+                >
+                  <option value="" disabled>Jump to...</option>
+                  {editor.getPages().map((p, i) => (
+                    <option key={p.id as string} value={p.id as string}>
+                      {p.name || `Page ${i + 1}`}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
 
@@ -2046,6 +2266,9 @@ export default function LessonCanvas({
               <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isExportingPdf ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PDF (all pages)">
                 <FileText className="w-3.5 h-3.5" />{isExportingPdf ? '...' : 'PDF'}
               </button>
+              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isExportingPpt ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PowerPoint (all pages)">
+                <Boxes className="w-3.5 h-3.5" />{isExportingPpt ? '...' : 'PPT'}
+              </button>
               <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
               </button>
@@ -2075,6 +2298,9 @@ export default function LessonCanvas({
               <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showTextBoundary ? 'bg-amber-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Show/hide text paste boundaries">
                 <AlignJustify className="w-3 h-3" />
                 Boundary
+              </button>
+              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showSidebar ? 'bg-blue-900 text-blue-100 hover:bg-blue-800' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
+                <PanelRight className="w-3 h-3" />
               </button>
               <button
                 onClick={() => {
@@ -2290,9 +2516,9 @@ export default function LessonCanvas({
         )}
       </div>
 
-      {/* Timeline — draggable overlay, default at bottom */}
+      {/* Timeline — anchored to bottom, draggable */}
       {!isLocked && !timelineFullyCollapsed && (
-        <DraggableWidget defaultPosition={{ x: 0, y: window.innerHeight - 250 }} zIndex={35}>
+        <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
           <div className="rounded-xl overflow-hidden shadow-2xl border border-[#1a2a5e]" style={{ width: 'calc(85vw - 20px)' }}>
             <TimelineBar
               steps={animationSteps}
@@ -2310,6 +2536,7 @@ export default function LessonCanvas({
       )}
 
       {/* Sidebar (overlays right side) — Pages panel when collapsed, Sub-topics when expanded */}
+      {showSidebar && (
       <div className="absolute top-0 right-0 bottom-0 w-[15%] min-w-[180px] border-l border-[#1a2a5e] bg-[#0a1230] flex flex-col overflow-hidden z-30">
         {isLocked ? (
           // Locked: always show Sub-topics
@@ -2345,6 +2572,7 @@ export default function LessonCanvas({
           />
         )}
       </div>
+      )}
       </div>
 
       </>
