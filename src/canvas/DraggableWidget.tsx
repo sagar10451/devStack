@@ -72,7 +72,7 @@ export default function DraggableWidget({
 
   if (anchorBottom && !hasBeenDragged) {
     // Not dragged yet — anchor to bottom
-    style.bottom = 8;
+    style.bottom = 0;
     style.left = position?.x ?? 0;
   } else if (position) {
     // Has been dragged or non-anchor mode — use absolute position

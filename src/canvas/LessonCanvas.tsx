@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot, toRichText, createShapeId } from 'tldraw';
 import type { Editor } from 'tldraw';
-import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify, PanelRight } from 'lucide-react';
+import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify, PanelRight, FlipHorizontal2, Frame } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
@@ -9,7 +9,7 @@ import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCan
 import SubTopicTracker from './SubTopicTracker';
 import PagePanel from './PagePanel';
 import { applyIdleAnimation } from './animationEngine';
-import { applyStepAnimation, clearStepAnimations, applyExitAnimation, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
+import { applyStepAnimation, clearStepAnimations, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
 import type { MoveRecord } from './stepAnimations';
 import { usePresentation } from '../data/presentationContext';
 import LaserPointer from '../components/LaserPointer';
@@ -150,6 +150,13 @@ export default function LessonCanvas({
   const [showTextBoundary, setShowTextBoundary] = useState(false);
   const showTextBoundaryRef = useRef(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showGuideBorder, setShowGuideBorder] = useState(true);
+  const [guideResizeTick, setGuideResizeTick] = useState(0);
+  useEffect(() => {
+    const onResize = () => setGuideResizeTick(t => t + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [pendingNode, setPendingNode] = useState<{ item: any; position: { x: number; y: number } } | null>(null);
   const [pickingDestinationForStep, setPickingDestinationForStep] = useState<string | null>(null);
   const [pickOriginalPosition, setPickOriginalPosition] = useState<{ x: number; y: number } | null>(null);
@@ -1164,9 +1171,8 @@ export default function LessonCanvas({
           break;
         }
         case 'exit': {
-          applyExitAnimation(step.shapeIds, step.animation, step.duration, () => {
-            applyAnimationState(editor!, animationSteps, nextStep);
-          });
+          // Instant erase — no fade animation, just hide immediately
+          applyAnimationState(editor!, animationSteps, nextStep);
           break;
         }
         case 'blink': {
@@ -1270,31 +1276,43 @@ export default function LessonCanvas({
     const targetStepIndex = animationSteps.findIndex(s => s.pageId === pageId);
     if (targetStepIndex === -1) return;
 
-    // Switch to that page
+    // Pre-hide all shapes on the target page (same technique as page switch during presentation)
+    const targetPageSteps = animationSteps.filter(s => s.pageId === pageId);
+    const allTargetShapeIds = targetPageSteps.flatMap(s => s.shapeIds);
+    const preloadedOnTarget = new Set(
+      targetPageSteps
+        .filter(s => s.animation === 'none' && (s.action || 'enter') === 'enter')
+        .flatMap(s => s.shapeIds)
+    );
+
+    const hideStyle = document.createElement('style');
+    hideStyle.id = 'page-jump-hide';
+    hideStyle.textContent = allTargetShapeIds
+      .filter(id => !preloadedOnTarget.has(id))
+      .map(id => id.includes(':')
+        ? `[data-shape-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`
+        : `[data-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`)
+      .join('\n');
+    document.head.appendChild(hideStyle);
+
+    // Switch to page
     editor.setCameraOptions({ isLocked: false });
     editor.setCurrentPage(pageId as any);
 
-    // Set camera from the first step with a camera position on this page
+    // Set camera
     const pageStep = animationSteps.find(s => s.pageId === pageId && s.cameraPosition);
     if (pageStep?.cameraPosition) {
       editor.setCamera(pageStep.cameraPosition, { force: true });
     }
 
-    // Skip preloaded (none) steps at the start of this page
-    let startStep = targetStepIndex;
-    while (startStep < animationSteps.length &&
-           animationSteps[startStep].animation === 'none' &&
-           (animationSteps[startStep].action || 'enter') === 'enter' &&
-           animationSteps[startStep].pageId === pageId) {
-      startStep++;
-    }
-    // Go back one so the first non-preloaded step is the next to play
-    const jumpTo = Math.max(targetStepIndex - 1, startStep > targetStepIndex ? startStep - 1 : targetStepIndex - 1);
-
-    // Apply animation state up to just before the target
-    applyAnimationState(editor, animationSteps, jumpTo);
-    editor.setCameraOptions({ isLocked: true });
-    setCurrentStep(jumpTo);
+    requestAnimationFrame(() => {
+      // Apply animation state showing only preloaded elements on this page
+      // Use targetStepIndex - 1 but this only affects visible DOM (current page)
+      applyAnimationState(editor, animationSteps, targetStepIndex - 1);
+      hideStyle.remove();
+      editor.setCameraOptions({ isLocked: true });
+      setCurrentStep(targetStepIndex - 1);
+    });
   }, [editor, isLocked, animationSteps, applyAnimationState, stopStepAudio]);
 
   // Keyboard
@@ -1318,6 +1336,13 @@ export default function LessonCanvas({
         return;
       }
       if (e.shiftKey && e.key === ')') { e.preventDefault(); editor?.resetZoom(undefined, { force: true, animation: { duration: 300 } }); return; }
+      // Flip selected shapes horizontally (Shift+H)
+      if (!isLocked && e.shiftKey && e.key === 'H') {
+        e.preventDefault();
+        const ids = editor?.getSelectedShapeIds();
+        if (ids && ids.length > 0) editor?.flipShapes(ids, 'horizontal');
+        return;
+      }
       if (isLocked) {
         if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrevious(); }
@@ -2189,21 +2214,25 @@ export default function LessonCanvas({
   return (
     <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden`}>
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 py-3 bg-[#0f1b3d] border-b border-[#1a2a5e] flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Link to={backPath} className="flex items-center gap-1.5 text-blue-100 hover:text-blue-100 text-sm transition-colors">
+      <div className="flex items-center px-4 py-3 bg-[#0f1b3d] border-b border-[#1a2a5e] flex-shrink-0 min-w-0">
+        {/* Fixed left: Back + title */}
+        <div className="flex items-center gap-3 flex-shrink-0 mr-3" style={{ maxWidth: '280px' }}>
+          <Link to={backPath} className="flex items-center gap-1.5 text-blue-100 hover:text-blue-100 text-sm transition-colors whitespace-nowrap">
             <ArrowLeft className="w-3.5 h-3.5" />Back
           </Link>
-          <div className="w-px h-5 bg-blue-900" />
-          <span className="text-blue-200 text-sm">{topicTitle}</span>
-          <span className="text-blue-400 text-sm">/</span>
-          <span className="text-blue-100 text-sm font-medium">{subtopicTitle}</span>
+          <div className="w-px h-5 bg-blue-900 flex-shrink-0" />
+          <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+            <span className="text-blue-200 text-sm truncate">{topicTitle}</span>
+            <span className="text-blue-400 text-sm flex-shrink-0">/</span>
+            <span className="text-blue-100 text-sm font-medium truncate">{subtopicTitle}</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Scrollable right: all buttons */}
+        <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1" style={{ scrollbarWidth: 'thin', scrollbarColor: '#1e3a8a transparent' }}>
           {/* Step counter (locked) */}
           {isLocked && animationSteps.length > 0 && (
-            <div className={`flex items-center gap-1.5 ${!hideLockButton ? 'mr-2' : ''}`}>
+            <div className={`flex items-center gap-1.5 flex-shrink-0 ${!hideLockButton ? 'mr-2' : ''}`}>
               <button onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-blue-900 hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                 <ChevronLeft className="w-3.5 h-3.5 text-blue-100" />
               </button>
@@ -2234,7 +2263,7 @@ export default function LessonCanvas({
 
           {/* Lock/Unlock — hidden when presenting or public canvas is open */}
           {!hideLockButton && !isPresenting && !showPublicCanvas && (
-            <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${isLocked ? 'bg-blue-900 text-blue-100 hover:bg-blue-800 border border-blue-800' : 'bg-emerald-600 text-white hover:bg-emerald-600/30 border border-emerald-500/30'}`}>
+            <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isLocked ? 'bg-blue-900 text-blue-100 hover:bg-blue-800 border border-blue-800' : 'bg-emerald-600 text-white hover:bg-emerald-600/30 border border-emerald-500/30'}`}>
               {isLocked ? <><Lock className="w-3.5 h-3.5" />Locked</> : <><Unlock className="w-3.5 h-3.5" />Unlocked</>}
             </button>
           )}
@@ -2242,12 +2271,12 @@ export default function LessonCanvas({
           {/* Save + auto-save indicator */}
           {!isLocked && (
             <>
-            <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isSaved ? 'bg-blue-900 text-blue-300' : 'bg-blue-500 text-white hover:bg-blue-600'}`}>
+            <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-blue-900 text-blue-300' : 'bg-blue-500 text-white hover:bg-blue-600'}`}>
               <Save className="w-3.5 h-3.5" />{isSaved ? 'Saved' : 'Save'}
             </button>
             {lastSavedAt !== null && (
               <span
-                className={`w-2 h-2 rounded-full ${autoSaveHealthy ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}
+                className={`w-2 h-2 rounded-full flex-shrink-0 ${autoSaveHealthy ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}
                 title={autoSaveHealthy ? 'Auto-save active' : 'Auto-save failed — save manually'}
               />
             )}
@@ -2257,25 +2286,25 @@ export default function LessonCanvas({
           {/* Export / Import */}
           {!isLocked && (
             <>
-              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Export as JSON">
+              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0" title="Export as JSON">
                 <Download className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Export as PNG">
+              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0" title="Export as PNG">
                 <ImageDown className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isExportingPdf ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PDF (all pages)">
+              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PDF (all pages)">
                 <FileText className="w-3.5 h-3.5" />{isExportingPdf ? '...' : 'PDF'}
               </button>
-              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isExportingPpt ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PowerPoint (all pages)">
+              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPpt ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PowerPoint (all pages)">
                 <Boxes className="w-3.5 h-3.5" />{isExportingPpt ? '...' : 'PPT'}
               </button>
-              <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all" title="Import JSON">
+              <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/60 text-red-200 hover:bg-red-800/60 transition-all" title="Reset this canvas">
+              <button onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/60 text-red-200 hover:bg-red-800/60 transition-all flex-shrink-0" title="Reset this canvas">
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleClearAllAppData} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/40 text-red-300 hover:bg-red-800/40 transition-all" title="Clear all app data">
+              <button onClick={handleClearAllAppData} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/40 text-red-300 hover:bg-red-800/40 transition-all flex-shrink-0" title="Clear all app data">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </>
@@ -2284,22 +2313,22 @@ export default function LessonCanvas({
           {/* Panel toggle buttons (unlocked) */}
           {!isLocked && (
             <>
-              <button onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showLineConfig ? 'bg-cyan-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+              <button onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLineConfig ? 'bg-cyan-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
                 Lines
               </button>
-              <button onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showAnimBar ? 'bg-purple-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+              <button onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showAnimBar ? 'bg-purple-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
                 <Palette className="w-3 h-3" />
                 Colors
               </button>
-              <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showNodes ? 'bg-emerald-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+              <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
                 <Boxes className="w-3 h-3" />
                 Nodes
               </button>
-              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showTextBoundary ? 'bg-amber-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Show/hide text paste boundaries">
+              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showTextBoundary ? 'bg-amber-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Show/hide text paste boundaries">
                 <AlignJustify className="w-3 h-3" />
                 Boundary
               </button>
-              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showSidebar ? 'bg-blue-900 text-blue-100 hover:bg-blue-800' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
+              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-blue-900 text-blue-100 hover:bg-blue-800' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
                 <PanelRight className="w-3 h-3" />
               </button>
               <button
@@ -2309,7 +2338,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'code-block' as any, x: point.x - 250, y: point.y - 150 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
               >
                 <Code2 className="w-3 h-3" />
                 Code
@@ -2321,16 +2350,41 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'md-block' as any, x: point.x - 250, y: point.y - 175 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
               >
                 <FileText className="w-3 h-3" />
                 Markdown
+              </button>
+              {/* Flip selected shapes horizontally */}
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  const ids = editor.getSelectedShapeIds();
+                  if (ids.length > 0) {
+                    editor.markHistoryStoppingPoint('flip horizontal');
+                    editor.flipShapes(ids, 'horizontal');
+                  }
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+                title="Flip selected shapes horizontally"
+              >
+                <FlipHorizontal2 className="w-3 h-3" />
+                Flip
+              </button>
+              {/* Guide border toggle */}
+              <button
+                onClick={() => setShowGuideBorder(v => !v)}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuideBorder ? 'bg-orange-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
+                title="Show/hide presentation guide border (visible area at 75% zoom)"
+              >
+                <Frame className="w-3 h-3" />
+                Guide
               </button>
             </>
           )}
           {/* Public canvas toggle — hidden when presenting */}
           {!isPresenting && (
-            <button onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showPublicCanvas ? 'bg-emerald-600 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+            <button onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showPublicCanvas ? 'bg-emerald-600 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
               <Eye className="w-3 h-3" />
               Public
             </button>
@@ -2367,94 +2421,63 @@ export default function LessonCanvas({
       )}
 
       {/* ─── Canvas + Sidebar ─────────────────────────────────────── */}
-      <div className="flex-1 relative overflow-hidden">
-        {/* Canvas Area (full width — sidebar overlays) */}
-        <div id="canvas-export-area" className="absolute inset-0">
-        {/* tldraw canvas — always visible */}
-        <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}>
-          <CanvasEditor
-            snapshot={snapshot}
-            onEditorReady={handleEditorReady}
-            onSnapshotChange={handleSnapshotChange}
-            onSeedCanvas={handleSeedCanvas}
-            hideUi={isLocked}
-          />
-        </div>
+      <div className="flex-1 flex overflow-hidden">
+        {/* Canvas Area (fixed 85% width) */}
+        <div className="w-[85%] relative overflow-hidden">
+          <div id="canvas-export-area" className="absolute inset-0">
+          {/* tldraw canvas — always visible */}
+          <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}>
+            <CanvasEditor
+              snapshot={snapshot}
+              onEditorReady={handleEditorReady}
+              onSnapshotChange={handleSnapshotChange}
+              onSeedCanvas={handleSeedCanvas}
+              hideUi={isLocked}
+            />
+          </div>
 
-        {/* React Flow diagram overlay — always rendered so nodes/edges stay in DOM for animation steps */}
-        <div ref={diagramWrapperRef} className={`absolute inset-0 z-10 pointer-events-none ${isLocked && currentStep < 0 ? 'invisible' : ''} ${isLocked ? 'rf-locked' : ''}`}>
-          <DiagramEditor
-            diagramData={diagramData}
-            onDiagramChange={handleDiagramChange}
-            onSelectionChange={handleRfSelectionChange}
-            pendingNode={pendingNode}
-            onPendingNodeConsumed={() => setPendingNode(null)}
-            tldrawCamera={tldrawCamera}
-            onReady={handleDiagramReady}
-            edgeType={rfEdgeType}
-            pathType={rfPathType}
-            arrowType={rfArrowType}
-            color={rfColor}
-            onEdgeTypeChange={setRfEdgeType}
-            onPathTypeChange={setRfPathType}
-            onArrowTypeChange={setRfArrowType}
-            onColorChange={setRfColor}
-          />
-        </div>
+          {/* React Flow diagram overlay — always rendered so nodes/edges stay in DOM for animation steps */}
+          <div ref={diagramWrapperRef} className={`absolute inset-0 z-10 pointer-events-none ${isLocked && currentStep < 0 ? 'invisible' : ''} ${isLocked ? 'rf-locked' : ''}`}>
+            <DiagramEditor
+              diagramData={diagramData}
+              onDiagramChange={handleDiagramChange}
+              onSelectionChange={handleRfSelectionChange}
+              pendingNode={pendingNode}
+              onPendingNodeConsumed={() => setPendingNode(null)}
+              tldrawCamera={tldrawCamera}
+              onReady={handleDiagramReady}
+              edgeType={rfEdgeType}
+              pathType={rfPathType}
+              arrowType={rfArrowType}
+              color={rfColor}
+              onEdgeTypeChange={setRfEdgeType}
+              onPathTypeChange={setRfPathType}
+              onArrowTypeChange={setRfArrowType}
+              onColorChange={setRfColor}
+            />
+          </div>
 
-        {/* Drop zone overlay — catches node catalog drops above tldraw */}
-        {!isLocked && <DropZone onNodeDrop={setPendingNode} editor={editor} />}
+          {/* Drop zone overlay — catches node catalog drops above tldraw */}
+          {!isLocked && <DropZone onNodeDrop={setPendingNode} editor={editor} />}
 
-        {/* Destination picker — drag shape then confirm */}
-        {pickingDestinationForStep && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-slate-900/95 backdrop-blur-md text-blue-100 text-xs font-medium px-4 py-2.5 rounded-lg border border-blue-800/40 shadow-xl">
-            <span className="text-blue-300">Drag the shape to its destination</span>
-            <button
-              onClick={() => {
-                if (!editor) return;
-                const step = animationSteps.find(s => s.id === pickingDestinationForStep);
-                if (!step || step.shapeIds.length === 0) return;
-                const shapeId = step.shapeIds[0];
-                const shape = editor.getShape(shapeId as any);
-                if (!shape) return;
-
-                // Save current (dragged-to) position as target
-                const targetPos = { x: (shape as any).x, y: (shape as any).y };
-
-                // Move shape back to original position
-                if (pickOriginalPosition) {
-                  editor.updateShape({
-                    id: shape.id,
-                    type: shape.type,
-                    x: pickOriginalPosition.x,
-                    y: pickOriginalPosition.y,
-                  });
-                }
-
-                // Save target position in the step
-                setAnimationSteps(steps => steps.map(s =>
-                  s.id === pickingDestinationForStep ? { ...s, targetPosition: targetPos } : s
-                ));
-
-                // Re-lock canvas
-                editor.updateInstanceState({ isReadonly: true });
-                setPickingDestinationForStep(null);
-                setPickOriginalPosition(null);
-                markDirty();
-              }}
-              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 rounded text-blue-100 text-xs font-semibold transition-colors"
-            >
-              Confirm
-            </button>
-            <button
-              onClick={() => {
-                if (!editor) return;
-                // Cancel — move shape back to original
-                const step = animationSteps.find(s => s.id === pickingDestinationForStep);
-                if (step && step.shapeIds.length > 0 && pickOriginalPosition) {
+          {/* Destination picker — drag shape then confirm */}
+          {pickingDestinationForStep && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-slate-900/95 backdrop-blur-md text-blue-100 text-xs font-medium px-4 py-2.5 rounded-lg border border-blue-800/40 shadow-xl">
+              <span className="text-blue-300">Drag the shape to its destination</span>
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  const step = animationSteps.find(s => s.id === pickingDestinationForStep);
+                  if (!step || step.shapeIds.length === 0) return;
                   const shapeId = step.shapeIds[0];
                   const shape = editor.getShape(shapeId as any);
-                  if (shape) {
+                  if (!shape) return;
+
+                  // Save current (dragged-to) position as target
+                  const targetPos = { x: (shape as any).x, y: (shape as any).y };
+
+                  // Move shape back to original position
+                  if (pickOriginalPosition) {
                     editor.updateShape({
                       id: shape.id,
                       type: shape.type,
@@ -2462,117 +2485,179 @@ export default function LessonCanvas({
                       y: pickOriginalPosition.y,
                     });
                   }
-                }
-                editor.updateInstanceState({ isReadonly: true });
-                setPickingDestinationForStep(null);
-                setPickOriginalPosition(null);
-              }}
-              className="px-3 py-1 bg-slate-600 hover:bg-slate-500 rounded text-blue-200 text-xs font-semibold transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
 
-        {/* ─── Floating Widgets (all draggable, dark glass-morphism) ──── */}
+                  // Save target position in the step
+                  setAnimationSteps(steps => steps.map(s =>
+                    s.id === pickingDestinationForStep ? { ...s, targetPosition: targetPos } : s
+                  ));
 
-        {/* Nodes Catalog */}
-        {!isLocked && showNodes && (
-          <DraggableWidget defaultPosition={{ x: 16, y: 16 }} zIndex={50}>
-            <div className="bg-[#0f1b3d]/95 backdrop-blur-xl rounded-xl border border-emerald-400/25 shadow-2xl shadow-emerald-500/5 overflow-hidden w-72">
-              <div data-drag-handle className="flex items-center justify-between px-3 py-2.5 border-b border-emerald-400/15 bg-emerald-500/8 cursor-grab active:cursor-grabbing">
-                <span className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
-                  <Boxes className="w-3 h-3" />
-                  Node Catalog
-                </span>
+                  // Re-lock canvas
+                  editor.updateInstanceState({ isReadonly: true });
+                  setPickingDestinationForStep(null);
+                  setPickOriginalPosition(null);
+                  markDirty();
+                }}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 rounded text-blue-100 text-xs font-semibold transition-colors"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  // Cancel — move shape back to original
+                  const step = animationSteps.find(s => s.id === pickingDestinationForStep);
+                  if (step && step.shapeIds.length > 0 && pickOriginalPosition) {
+                    const shapeId = step.shapeIds[0];
+                    const shape = editor.getShape(shapeId as any);
+                    if (shape) {
+                      editor.updateShape({
+                        id: shape.id,
+                        type: shape.type,
+                        x: pickOriginalPosition.x,
+                        y: pickOriginalPosition.y,
+                      });
+                    }
+                  }
+                  editor.updateInstanceState({ isReadonly: true });
+                  setPickingDestinationForStep(null);
+                  setPickOriginalPosition(null);
+                }}
+                className="px-3 py-1 bg-slate-600 hover:bg-slate-500 rounded text-blue-200 text-xs font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {/* ─── Floating Widgets (all draggable, dark glass-morphism) ──── */}
+
+          {/* Nodes Catalog */}
+          {!isLocked && showNodes && (
+            <DraggableWidget defaultPosition={{ x: 16, y: 16 }} zIndex={50}>
+              <div className="bg-[#0f1b3d]/95 backdrop-blur-xl rounded-xl border border-emerald-400/25 shadow-2xl shadow-emerald-500/5 overflow-hidden w-72">
+                <div data-drag-handle className="flex items-center justify-between px-3 py-2.5 border-b border-emerald-400/15 bg-emerald-500/8 cursor-grab active:cursor-grabbing">
+                  <span className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
+                    <Boxes className="w-3 h-3" />
+                    Node Catalog
+                  </span>
+                </div>
+                <NodeCatalog />
               </div>
-              <NodeCatalog />
+            </DraggableWidget>
+          )}
+
+          {/* Laser pointer overlay — only in presentation mode with laser tool */}
+          {isPresenting && isLocked && presentationTool === 'laser' && <LaserPointer />}
+
+          {/* Timeline pill — when fully collapsed, draggable anywhere on canvas */}
+          {!isLocked && timelineFullyCollapsed && (
+            <DraggableWidget defaultPosition={{ x: 16, y: 60 }} zIndex={35}>
+              <div
+                data-drag-handle
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#0a1230] border border-[#1a2a5e] rounded-lg text-[10px] text-slate-400 hover:text-slate-200 hover:bg-[#0f1b3d] transition-all shadow-lg cursor-grab active:cursor-grabbing"
+                title="Click to expand timeline"
+                onMouseDown={(e) => { (e.currentTarget as any)._dragStartX = e.clientX; (e.currentTarget as any)._dragStartY = e.clientY; }}
+                onMouseUp={(e) => {
+                  const dx = Math.abs(e.clientX - ((e.currentTarget as any)._dragStartX || 0));
+                  const dy = Math.abs(e.clientY - ((e.currentTarget as any)._dragStartY || 0));
+                  if (dx < 5 && dy < 5) setTimelineFullyCollapsed(false); // only expand on clean click, not drag
+                }}
+              >
+                <span className="text-slate-500 uppercase tracking-wider font-bold text-[9px]">Timeline</span>
+                <span className="text-slate-600">{animationSteps.length}</span>
+                <ChevronUp className="w-3 h-3" />
+              </div>
+            </DraggableWidget>
+          )}
+
+          {/* Guide border — shows visible area at 75% zoom, hidden when locked */}
+          {showGuideBorder && !isLocked && tldrawCamera && (() => {
+            void guideResizeTick; // re-render on window resize
+            const container = document.getElementById('canvas-export-area');
+            if (!container) return null;
+            const cw = container.clientWidth;
+            const ch = container.clientHeight;
+            // Page-coordinate dimensions of the viewport at 75% zoom
+            const guideW = cw / 0.75;
+            const guideH = ch / 0.75;
+            const cam = tldrawCamera;
+            // Convert page coords (0,0) to screen coords
+            const screenX = cam.x * cam.z;
+            const screenY = cam.y * cam.z;
+            const screenW = guideW * cam.z;
+            const screenH = guideH * cam.z;
+            return (
+              <div
+                className="absolute pointer-events-none z-[5]"
+                style={{
+                  left: screenX,
+                  top: screenY,
+                  width: screenW,
+                  height: screenH,
+                  border: '2px dashed rgba(251, 146, 60, 0.5)',
+                  borderRadius: 4,
+                }}
+              />
+            );
+          })()}
+        </div>
+        {!isLocked && !timelineFullyCollapsed && (
+          <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
+            <div className="overflow-hidden shadow-2xl border border-[#1a2a5e]" style={{ width: '85vw' }}>
+              <TimelineBar
+                steps={animationSteps}
+                onStepsChange={handleStepsChange}
+                onDeleteRfElements={handleDeleteRfElements}
+                editor={editor}
+                isLocked={isLocked}
+                diagramData={diagramData}
+                selectedShapeIds={selectedShapeIds}
+                fullyCollapsed={timelineFullyCollapsed}
+                onFullyCollapsedChange={setTimelineFullyCollapsed}
+              />
             </div>
           </DraggableWidget>
         )}
+        </div>
 
-        {/* Laser pointer overlay — only in presentation mode with laser tool */}
-        {isPresenting && isLocked && presentationTool === 'laser' && <LaserPointer />}
-
-        {/* Timeline pill — when fully collapsed, draggable anywhere on canvas */}
-        {!isLocked && timelineFullyCollapsed && (
-          <DraggableWidget defaultPosition={{ x: 16, y: 60 }} zIndex={35}>
-            <div
-              data-drag-handle
-              className="flex items-center gap-1.5 px-3 py-2 bg-[#0a1230] border border-[#1a2a5e] rounded-lg text-[10px] text-slate-400 hover:text-slate-200 hover:bg-[#0f1b3d] transition-all shadow-lg cursor-grab active:cursor-grabbing"
-              title="Click to expand timeline"
-              onMouseDown={(e) => { (e.currentTarget as any)._dragStartX = e.clientX; (e.currentTarget as any)._dragStartY = e.clientY; }}
-              onMouseUp={(e) => {
-                const dx = Math.abs(e.clientX - ((e.currentTarget as any)._dragStartX || 0));
-                const dy = Math.abs(e.clientY - ((e.currentTarget as any)._dragStartY || 0));
-                if (dx < 5 && dy < 5) setTimelineFullyCollapsed(false); // only expand on clean click, not drag
-              }}
-            >
-              <span className="text-slate-500 uppercase tracking-wider font-bold text-[9px]">Timeline</span>
-              <span className="text-slate-600">{animationSteps.length}</span>
-              <ChevronUp className="w-3 h-3" />
-            </div>
-          </DraggableWidget>
-        )}
-      </div>
-
-      {/* Timeline — anchored to bottom, draggable */}
-      {!isLocked && !timelineFullyCollapsed && (
-        <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
-          <div className="rounded-xl overflow-hidden shadow-2xl border border-[#1a2a5e]" style={{ width: 'calc(85vw - 20px)' }}>
-            <TimelineBar
-              steps={animationSteps}
-              onStepsChange={handleStepsChange}
-              onDeleteRfElements={handleDeleteRfElements}
-              editor={editor}
-              isLocked={isLocked}
-              diagramData={diagramData}
-              selectedShapeIds={selectedShapeIds}
-              fullyCollapsed={timelineFullyCollapsed}
-              onFullyCollapsedChange={setTimelineFullyCollapsed}
-            />
-          </div>
-        </DraggableWidget>
-      )}
-
-      {/* Sidebar (overlays right side) — Pages panel when collapsed, Sub-topics when expanded */}
-      {showSidebar && (
-      <div className="absolute top-0 right-0 bottom-0 w-[15%] min-w-[180px] border-l border-[#1a2a5e] bg-[#0a1230] flex flex-col overflow-hidden z-30">
-        {isLocked ? (
-          // Locked: always show Sub-topics
-          <SubTopicTracker
-            labels={subTopicLabels}
-            onLabelsChange={handleLabelsChange}
-            steps={animationSteps}
-            isLocked={isLocked}
-            currentStep={currentStep}
-            editor={editor}
-            sidebar
-            sidebarTitle={sidebarTitle}
-            onSidebarTitleChange={setSidebarTitle}
-            collapsed={false}
-          />
-        ) : sidebarCollapsed ? (
-          // Unlocked + collapsed: show Pages panel
-          <PagePanel editor={editor} isLocked={isLocked} onShowTopics={() => setSidebarCollapsed(false)} />
-        ) : (
-          // Unlocked + expanded: show Sub-topics
-          <SubTopicTracker
-            labels={subTopicLabels}
-            onLabelsChange={handleLabelsChange}
-            steps={animationSteps}
-            isLocked={isLocked}
-            currentStep={currentStep}
-            editor={editor}
-            sidebar
-            sidebarTitle={sidebarTitle}
-            onSidebarTitleChange={setSidebarTitle}
-            collapsed={sidebarCollapsed}
-            onCollapsedChange={setSidebarCollapsed}
-          />
-        )}
-      </div>
-      )}
+        {/* Sidebar (right 15%) — always rendered for layout, content conditional */}
+        <div className="w-[15%] min-w-[180px] border-l border-[#1a2a5e] bg-[#0a1230] flex flex-col overflow-hidden flex-shrink-0">
+          {showSidebar ? (
+            isLocked ? (
+              // Locked: always show Sub-topics
+              <SubTopicTracker
+                labels={subTopicLabels}
+                onLabelsChange={handleLabelsChange}
+                steps={animationSteps}
+                isLocked={isLocked}
+                currentStep={currentStep}
+                editor={editor}
+                sidebar
+                sidebarTitle={sidebarTitle}
+                onSidebarTitleChange={setSidebarTitle}
+                collapsed={false}
+              />
+            ) : sidebarCollapsed ? (
+              // Unlocked + collapsed: show Pages panel
+              <PagePanel editor={editor} isLocked={isLocked} onShowTopics={() => setSidebarCollapsed(false)} />
+            ) : (
+              // Unlocked + expanded: show Sub-topics
+              <SubTopicTracker
+                labels={subTopicLabels}
+                onLabelsChange={handleLabelsChange}
+                steps={animationSteps}
+                isLocked={isLocked}
+                currentStep={currentStep}
+                editor={editor}
+                sidebar
+                sidebarTitle={sidebarTitle}
+                onSidebarTitleChange={setSidebarTitle}
+                collapsed={sidebarCollapsed}
+                onCollapsedChange={setSidebarCollapsed}
+              />
+            )
+          ) : null}
+        </div>
       </div>
 
       </>

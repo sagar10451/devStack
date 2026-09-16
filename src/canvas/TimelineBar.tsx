@@ -406,7 +406,7 @@ export default function TimelineBar({
       id: `step-${Date.now()}`,
       shapeIds: [...ids],
       animation: 'appear' as AnimationType,
-      duration: 800,
+      duration: 100,
       label: `Step`,
       action: 'exit' as StepAction,
       pageId,
@@ -654,7 +654,7 @@ export default function TimelineBar({
       <div
         ref={scrollRef}
         className="flex items-stretch gap-0 px-3 py-2 overflow-x-auto"
-        style={{ minHeight: 100 }}
+        style={{ minHeight: 100, overscrollBehavior: 'contain' }}
       >
         {currentPageSteps.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">

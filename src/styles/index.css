@@ -172,10 +172,14 @@ a[href*="tldraw.dev"] {
 
 /* Hide hover/selection indicators when canvas is locked */
 .canvas-locked .tl-overlays,
+.canvas-locked .tl-canvas-overlays,
+.canvas-locked .tl-overlay,
+.canvas-locked .tl-canvas-overlay,
 .canvas-locked .tl-hover-indicator,
 .canvas-locked .tl-selection-indicator,
 .canvas-locked [class*="indicator"],
 .canvas-locked [class*="hover"],
+.canvas-locked [class*="overlay"]:not(.tl-error-boundary__overlay),
 .canvas-locked .tl-cursor,
 .canvas-locked .tl-collaborator,
 .canvas-locked [class*="cursor"] {
