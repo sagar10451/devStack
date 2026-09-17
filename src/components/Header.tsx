@@ -67,7 +67,7 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
   return (
     <>
     <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b-2 border-indigo-200">
-      <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-4 flex items-center justify-between">
+      <div className="w-full max-w-[1600px] mx-auto px-1.5 sm:px-2 lg:px-3 py-4 flex items-center justify-between">
         {/* Logo */}
         <Link to={site.basePath || '/'} className="flex items-center gap-3 group">
           <div className="w-11 h-11 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-md group-hover:shadow-lg transition-shadow">
@@ -95,7 +95,7 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
                 <Search className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
                 <input
                   type="text"
-                  placeholder="Search topics..."
+                  placeholder="Search..."
                   className="bg-transparent outline-none text-sm text-gray-700 placeholder-gray-400 w-full"
                   value={searchQuery}
                   onChange={(e) => onSearchChange(e.target.value)}

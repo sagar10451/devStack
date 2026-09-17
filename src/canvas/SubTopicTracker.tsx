@@ -23,7 +23,7 @@ interface SubTopicTrackerProps {
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
-const SIDEBAR_TITLE_OPTIONS = ['Outline', 'Scenes', 'Topics', 'Contents', 'Agenda', 'Chapter Breakdown', 'Progress'];
+const SIDEBAR_TITLE_OPTIONS = ['Outline', 'Scenes', 'Topics', 'Contents', 'Agenda', 'Chapter Breakdown', 'Progress', 'Sections'];
 
 // ─── Helper: get ordered page IDs from steps ─────────────────────────────────
 function getOrderedPageIds(steps: AnimationStep[], editor?: Editor | null): string[] {
@@ -296,7 +296,7 @@ export default function SubTopicTracker({
         {/* Collapsible content — always visible when locked, toggleable when unlocked */}
         {(isLocked || !collapsed) && (
         <>
-        <div ref={listRef} className="flex-1 overflow-y-auto p-2 space-y-1">
+        <div ref={listRef} className="flex-1 overflow-y-auto px-1 py-2 space-y-1">
           {labels.length === 0 && !isLocked && (
             <p className="text-[10px] text-slate-500 text-center py-4">Click + to add sub topics</p>
           )}
@@ -313,30 +313,19 @@ export default function SubTopicTracker({
                     : 'px-2 py-1.5'
                 } ${
                   isLocked
-                    ? (status === 'complete' ? 'border-2 border-emerald-400/60 shadow-sm shadow-emerald-500/20' :
-                       status === 'active' ? 'border-2 border-amber-400/50 shadow-sm shadow-amber-500/15' :
-                       'border border-slate-600/40 bg-slate-800/50')
+                    ? (status === 'complete' ? 'border border-emerald-500/40 bg-emerald-950/40' :
+                       status === 'active' ? 'border border-orange-400/30 bg-slate-800/60' :
+                       'border border-slate-700/40 bg-slate-800/30')
                     : (status === 'complete' ? 'bg-emerald-500/10 border border-emerald-400/40' :
                        status === 'active' ? 'bg-indigo-500/10 border border-indigo-400/40' :
                        'bg-slate-800/30 border border-slate-600/30')
                 }`}
               >
-                {/* Water fill background — covers the entire card when locked */}
-                {isLocked && (status === 'active' || status === 'complete') && (
-                  <div
-                    className={`absolute inset-0 rounded-lg overflow-hidden ${
-                      status === 'complete' ? 'water-card-complete' : 'water-card-active'
-                    }`}
-                    style={{ width: status === 'complete' ? '100%' : `${Math.round(getProgress(label, i) * 100)}%`, transition: 'width 0.7s ease-out' }}
-                  >
-                    <div className="water-wave-card" />
-                  </div>
-                )}
                 <div className="flex items-center gap-2 relative z-10">
                   <div className="relative flex-shrink-0">
-                    <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${
-                      status === 'complete' ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' :
-                      status === 'active' ? 'bg-amber-400 shadow-sm shadow-amber-400/50' :
+                    <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center transition-all duration-500 ${
+                      status === 'complete' ? 'bg-emerald-400 shadow-md shadow-emerald-400/60 scale-110' :
+                      status === 'active' ? 'bg-orange-400 shadow-md shadow-orange-400/50' :
                       'bg-slate-600'
                     } ${justCompletedId === label.id ? 'celebrate-glow' : ''}`}>
                       {status === 'complete' && <Check className="w-2 h-2 text-white" />}
@@ -349,22 +338,44 @@ export default function SubTopicTracker({
                     <input
                       value={label.title}
                       onChange={(e) => updateLabelTitle(label.id, e.target.value)}
+                      readOnly={label.id.startsWith('auto-')}
                       className="text-[10px] font-medium text-slate-300 bg-transparent border-none outline-none flex-1 min-w-0"
                     />
                   ) : (
-                    <span className={`text-[10px] font-semibold ${
-                      status === 'complete' ? 'text-emerald-100' : status === 'active' ? 'text-white' : 'text-slate-400'
+                    <span className={`text-[10px] font-semibold transition-colors duration-300 ${
+                      status === 'complete' ? 'text-emerald-300' : status === 'active' ? 'text-white' : 'text-slate-500'
                     }`}>{label.title}</span>
                   )}
-                  {!isLocked && (
+                  {isLocked && status !== 'pending' && (
+                    <span className={`text-[8px] font-bold ml-auto flex-shrink-0 ${
+                      status === 'complete' ? 'text-emerald-400' : 'text-orange-300'
+                    }`}>{Math.round(getProgress(label, i) * 100)}%</span>
+                  )}
+                  {!isLocked && !label.id.startsWith('auto-') && (
                     <button onClick={() => removeLabel(label.id)} className="p-0.5 hover:bg-red-500/10 rounded">
                       <Trash2 className="w-2.5 h-2.5 text-red-400/50" />
                     </button>
                   )}
                 </div>
 
-                {/* Page range — only when unlocked */}
-                {!isLocked && (
+                {/* Progress bar — slim glowing bar at bottom */}
+                {isLocked && (
+                  <div className="mt-1.5 w-full h-[3px] rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full relative transition-all duration-700 ease-out ${
+                        status === 'complete'
+                          ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 shadow-[0_0_6px_rgba(52,211,153,0.5)]'
+                          : status === 'active'
+                          ? 'bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-300 shadow-[0_0_6px_rgba(251,191,36,0.5)]'
+                          : ''
+                      }`}
+                      style={{ width: `${Math.round(getProgress(label, i) * 100)}%` }}
+                    />
+                  </div>
+                )}
+
+                {/* Page range — only when unlocked and not auto-generated */}
+                {!isLocked && !label.id.startsWith('auto-') && (
                   <div className="mt-1 flex items-center gap-1 text-[9px] text-slate-500">
                     {i === 0 ? (
                       <>
@@ -462,19 +473,20 @@ export default function SubTopicTracker({
                   </div>
                   {!isLocked ? (
                     <input type="text" value={label.title} onChange={(e) => updateLabelTitle(label.id, e.target.value)}
+                      readOnly={label.id.startsWith('auto-')}
                       className="text-xs font-medium text-gray-700 bg-transparent border-none outline-none flex-1 min-w-0" />
                   ) : (
                     <span className={`text-xs font-medium whitespace-nowrap ${
                       status === 'complete' ? 'text-emerald-700' : status === 'active' ? 'text-blue-700' : 'text-gray-500'
                     }`}>{label.title}</span>
                   )}
-                  {!isLocked && (
+                  {!isLocked && !label.id.startsWith('auto-') && (
                     <button onClick={() => removeLabel(label.id)} className="p-0.5 rounded hover:bg-red-100 flex-shrink-0">
                       <Trash2 className="w-2.5 h-2.5 text-red-400" />
                     </button>
                   )}
                 </div>
-                {!isLocked && (
+                {!isLocked && !label.id.startsWith('auto-') && (
                   <div className="mt-1.5 flex items-center gap-1 text-[10px] text-gray-500">
                     {i === 0 ? (
                       <>

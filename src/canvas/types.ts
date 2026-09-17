@@ -92,6 +92,12 @@ export interface AnimationStep {
     /** Volume 0-1 */
     volume: number;
   };
+  /** Pin this shape as a fixed title overlay during presentation */
+  pinAsTitle?: boolean;
+  /** Page range for pinned title: 'all' | 'current' | { from: number; to: number } (1-based page indices) */
+  titlePageRange?: 'all' | 'current' | { from: number; to: number };
+  /** Pin this shape as a fixed subtitle overlay during presentation (current page only) */
+  pinAsSubtitle?: boolean;
 }
 
 /**
@@ -143,10 +149,32 @@ export interface LessonCanvasData {
   animationSteps: AnimationStep[];
   /** Sub-topic labels with step ranges (progress tracker) */
   subTopicLabels: SubTopicLabel[];
+  /** Selected sidebar panel title */
+  sidebarTitle?: string;
   /** Per-shape animation config */
   shapeAnimations: Record<string, ShapeAnimationConfig>;
   /** React Flow diagram data (nodes, edges, toolbar settings) */
   diagramData?: DiagramData;
+  /** Per-page topic texts (keyed by pageId) */
+  pageTopics?: Record<string, string>;
+  /** Per-page subtitle texts (keyed by pageId) */
+  pageSubtitles?: Record<string, string>;
+  /** Per-page topic text colors */
+  pageTopicColors?: Record<string, string>;
+  /** Per-page subtitle text colors */
+  pageSubtitleColors?: Record<string, string>;
+  /** Per-page topic border colors */
+  pageTopicBorderColors?: Record<string, string>;
+  /** Per-page subtitle border colors */
+  pageSubtitleBorderColors?: Record<string, string>;
+  /** Per-page topic reveal animation */
+  pageTopicAnimations?: Record<string, string>;
+  /** Per-page subtitle reveal animation */
+  pageSubtitleAnimations?: Record<string, string>;
+  /** Per-page topic mode: 'preload' (visible on page load) or 'animate' (needs step) */
+  pageTopicModes?: Record<string, 'preload' | 'animate'>;
+  /** Per-page subtitle mode: 'preload' or 'animate' */
+  pageSubtitleModes?: Record<string, 'preload' | 'animate'>;
 }
 
 /**

@@ -139,11 +139,14 @@ export default function LessonCanvas({
   const [snapshot, setSnapshot] = useState<unknown>(initialData?.snapshot || null);
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
-  const [sidebarTitle, setSidebarTitle] = useState('Outline');
+  const [sidebarTitle, setSidebarTitle] = useState(initialData?.sidebarTitle || 'Topics');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [timelineFullyCollapsed, setTimelineFullyCollapsed] = useState(false); // true = show Pages, false = show Sub-topics
   const [shapeAnimations, setShapeAnimations] = useState<Record<string, ShapeAnimationConfig>>(initialData?.shapeAnimations || {});
   const [currentStep, setCurrentStep] = useState(-1);
+  // Track which virtual topic/subtitle steps have been revealed per page
+  const [revealedTopicPages, setRevealedTopicPages] = useState<Set<string>>(new Set());
+  const [revealedSubtitlePages, setRevealedSubtitlePages] = useState<Set<string>>(new Set());
   const [showAnimBar, setShowAnimBar] = useState(false);
   const [showLineConfig, setShowLineConfig] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
@@ -151,7 +154,27 @@ export default function LessonCanvas({
   const showTextBoundaryRef = useRef(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showGuideBorder, setShowGuideBorder] = useState(true);
+  // Per-page topic/subtitle data (keyed by pageId)
+  const [pageTopics, setPageTopics] = useState<Record<string, string>>(initialData?.pageTopics || {});
+  const [pageSubtitles, setPageSubtitles] = useState<Record<string, string>>(initialData?.pageSubtitles || {});
+  const [pageTopicColors, setPageTopicColors] = useState<Record<string, string>>(initialData?.pageTopicColors || {});
+  const [pageSubtitleColors, setPageSubtitleColors] = useState<Record<string, string>>(initialData?.pageSubtitleColors || {});
+  const [pageTopicBorderColors, setPageTopicBorderColors] = useState<Record<string, string>>(initialData?.pageTopicBorderColors || {});
+  const [pageSubtitleBorderColors, setPageSubtitleBorderColors] = useState<Record<string, string>>(initialData?.pageSubtitleBorderColors || {});
+  const [pageTopicAnimations, setPageTopicAnimations] = useState<Record<string, string>>(initialData?.pageTopicAnimations || {});
+  const [pageSubtitleAnimations, setPageSubtitleAnimations] = useState<Record<string, string>>(initialData?.pageSubtitleAnimations || {});
+  // 'preload' = visible immediately, 'animate' = needs right-arrow to appear
+  const [pageTopicModes, setPageTopicModes] = useState<Record<string, 'preload' | 'animate'>>(initialData?.pageTopicModes || {});
+  const [pageSubtitleModes, setPageSubtitleModes] = useState<Record<string, 'preload' | 'animate'>>(initialData?.pageSubtitleModes || {});
+  const [topicColorPickerOpen, setTopicColorPickerOpen] = useState(false);
+  const [subtitleColorPickerOpen, setSubtitleColorPickerOpen] = useState(false);
+  // Track which pages have topic/subtitle visible (toggled by toolbar buttons)
+  const [pageTopicVisible, setPageTopicVisible] = useState<Set<string>>(() => new Set(Object.keys(initialData?.pageTopics || {})));
+  const [pageSubtitleVisible, setPageSubtitleVisible] = useState<Set<string>>(() => new Set(Object.keys(initialData?.pageSubtitles || {})));
   const [guideResizeTick, setGuideResizeTick] = useState(0);
+  // Guide border position offset in page coordinates (draggable)
+  const [guideOffset, setGuideOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const guideDragRef = useRef<{ startX: number; startY: number; origOffX: number; origOffY: number } | null>(null);
   useEffect(() => {
     const onResize = () => setGuideResizeTick(t => t + 1);
     window.addEventListener('resize', onResize);
@@ -758,6 +781,33 @@ export default function LessonCanvas({
     markDirty();
   }, []);
 
+  // ─── Auto-sync SubTopicLabels from pageSubtitles ────────────────────────
+  useEffect(() => {
+    if (!editor) return;
+    const pages = editor.getPages();
+    const newLabels: SubTopicLabel[] = [];
+    pages.forEach((page, idx) => {
+      const pid = page.id as string;
+      if (pageSubtitleVisible.has(pid) && pageSubtitles[pid]) {
+        newLabels.push({
+          id: `auto-${pid}`,
+          title: pageSubtitles[pid],
+          startStep: 0,
+          endStep: 0,
+          startPage: idx,
+          endPage: idx,
+        });
+      }
+    });
+    // Only update if labels actually changed (avoid infinite loop)
+    const currentIds = subTopicLabels.map(l => l.id + ':' + l.title).join(',');
+    const newIds = newLabels.map(l => l.id + ':' + l.title).join(',');
+    if (currentIds !== newIds) {
+      setSubTopicLabels(newLabels);
+      markDirty();
+    }
+  }, [editor, pageSubtitles, pageSubtitleVisible]);
+
   // ─── Build save data helper ──────────────────────────────────────────────
   const buildSaveData = useCallback((): LessonCanvasData => {
     const doc = editor ? getSnapshot(editor.store).document : (snapshot as any)?.document;
@@ -773,10 +823,21 @@ export default function LessonCanvas({
       camera: cam ? { x: cam.x, y: cam.y, z: cam.z } : undefined,
       animationSteps,
       subTopicLabels,
+      sidebarTitle,
       shapeAnimations,
       diagramData,
+      pageTopics,
+      pageSubtitles,
+      pageTopicColors,
+      pageSubtitleColors,
+      pageTopicBorderColors,
+      pageSubtitleBorderColors,
+      pageTopicAnimations,
+      pageSubtitleAnimations,
+      pageTopicModes,
+      pageSubtitleModes,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, shapeAnimations, diagramData, initialData]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -790,6 +851,30 @@ export default function LessonCanvas({
   shapeAnimationsRef.current = shapeAnimations;
   const diagramDataRef = useRef(diagramData);
   diagramDataRef.current = diagramData;
+  const canvasTopicRef = useRef(pageTopics);
+  canvasTopicRef.current = pageTopics;
+  const canvasSubtitlesRef = useRef(pageSubtitles);
+  canvasSubtitlesRef.current = pageSubtitles;
+  const pageTopicColorsRef = useRef(pageTopicColors);
+  pageTopicColorsRef.current = pageTopicColors;
+  const pageSubtitleColorsRef = useRef(pageSubtitleColors);
+  pageSubtitleColorsRef.current = pageSubtitleColors;
+  const pageTopicBorderColorsRef = useRef(pageTopicBorderColors);
+  pageTopicBorderColorsRef.current = pageTopicBorderColors;
+  const pageSubtitleBorderColorsRef = useRef(pageSubtitleBorderColors);
+  pageSubtitleBorderColorsRef.current = pageSubtitleBorderColors;
+  const pageTopicAnimationsRef = useRef(pageTopicAnimations);
+  pageTopicAnimationsRef.current = pageTopicAnimations;
+  const pageSubtitleAnimationsRef = useRef(pageSubtitleAnimations);
+  pageSubtitleAnimationsRef.current = pageSubtitleAnimations;
+  const pageTopicModesRef = useRef(pageTopicModes);
+  pageTopicModesRef.current = pageTopicModes;
+  const pageSubtitleModesRef = useRef(pageSubtitleModes);
+  pageSubtitleModesRef.current = pageSubtitleModes;
+  const pageTopicVisibleRef = useRef(pageTopicVisible);
+  pageTopicVisibleRef.current = pageTopicVisible;
+  const pageSubtitleVisibleRef = useRef(pageSubtitleVisible);
+  pageSubtitleVisibleRef.current = pageSubtitleVisible;
 
   useEffect(() => {
     // Run auto-save every 3 seconds via interval
@@ -812,8 +897,19 @@ export default function LessonCanvas({
         camera: cam ? { x: cam.x, y: cam.y, z: cam.z } : undefined,
         animationSteps: animationStepsRef.current,
         subTopicLabels: subTopicLabelsRef.current,
+        sidebarTitle,
         shapeAnimations: shapeAnimationsRef.current,
         diagramData: diagramDataRef.current,
+        pageTopics: canvasTopicRef.current,
+        pageSubtitles: canvasSubtitlesRef.current,
+        pageTopicColors: pageTopicColorsRef.current,
+        pageSubtitleColors: pageSubtitleColorsRef.current,
+        pageTopicBorderColors: pageTopicBorderColorsRef.current,
+        pageSubtitleBorderColors: pageSubtitleBorderColorsRef.current,
+        pageTopicAnimations: pageTopicAnimationsRef.current,
+        pageSubtitleAnimations: pageSubtitleAnimationsRef.current,
+        pageTopicModes: pageTopicModesRef.current,
+        pageSubtitleModes: pageSubtitleModesRef.current,
       };
 
       // Strip audio base64 data
@@ -1018,6 +1114,8 @@ export default function LessonCanvas({
       }
 
       setCurrentStep(-1);
+      setRevealedTopicPages(new Set());
+      setRevealedSubtitlePages(new Set());
       applyAnimationState(editor, sortedSteps, -1);
       // Re-apply after a frame to catch RF elements that might not be in DOM yet
       setTimeout(() => applyAnimationState(editor, sortedSteps, -1), 100);
@@ -1078,6 +1176,26 @@ export default function LessonCanvas({
 
   const goNext = useCallback(() => {
     if (!editor || !isLocked) return;
+    const pid = editor.getCurrentPageId() as string;
+    const tMode = pageTopicModesRef.current[pid];
+    const sMode = pageSubtitleModesRef.current[pid];
+    const hasTopic = pageTopicVisibleRef.current.has(pid);
+    const hasSubtitle = pageSubtitleVisibleRef.current.has(pid);
+    const topicNeedsStep = hasTopic && tMode === 'animate';
+    const subtitleNeedsStep = hasSubtitle && sMode === 'animate';
+
+    // Handle virtual topic step
+    if (topicNeedsStep && !revealedTopicPages.has(pid)) {
+      setRevealedTopicPages(prev => new Set(prev).add(pid));
+      return; // consume this arrow press for the topic reveal
+    }
+    // Handle virtual subtitle step
+    if (subtitleNeedsStep && !revealedSubtitlePages.has(pid)) {
+      setRevealedSubtitlePages(prev => new Set(prev).add(pid));
+      return; // consume this arrow press for the subtitle reveal
+    }
+
+    // Normal step processing
     if (currentStep >= animationSteps.length - 1) return;
     editor.stopCameraAnimation();
     let nextStep = currentStep + 1;
@@ -1099,6 +1217,13 @@ export default function LessonCanvas({
 
     // Switch page if the next step belongs to a different page
     if (step.pageId && (editor.getCurrentPageId() as string) !== step.pageId) {
+      // Check if the target page has virtual animate steps that need to play first
+      const targetPid = step.pageId;
+      const targetHasTopic = pageTopicVisibleRef.current.has(targetPid);
+      const targetHasSubtitle = pageSubtitleVisibleRef.current.has(targetPid);
+      const targetTopicNeedsStep = targetHasTopic && pageTopicModesRef.current[targetPid] === 'animate';
+      const targetSubtitleNeedsStep = targetHasSubtitle && pageSubtitleModesRef.current[targetPid] === 'animate';
+
       // Pre-hide all shapes that will be on the new page by preparing CSS
       // Get all steps for the target page and hide their shapes BEFORE switching
       const targetPageSteps = animationSteps.filter(s => s.pageId === step.pageId);
@@ -1137,13 +1262,28 @@ export default function LessonCanvas({
         // Remove blanket hide — applyAnimationState has set correct per-shape visibility
         hideStyle.remove();
         
-        requestAnimationFrame(() => {
-          runStepAction();
+        if (targetTopicNeedsStep || targetSubtitleNeedsStep) {
+          // Target page has virtual steps — auto-reveal the first one during page switch
           editor.setCameraOptions({ isLocked: true });
-          handleCamera();
-          playStepAudio(step);
-          setCurrentStep(nextStep);
-        });
+          if (step.cameraPosition) {
+            editor.setCamera(step.cameraPosition, { force: true });
+          }
+          // Auto-reveal topic if it needs animate, otherwise auto-reveal subtitle
+          if (targetTopicNeedsStep) {
+            setRevealedTopicPages(prev => new Set(prev).add(targetPid));
+          } else if (targetSubtitleNeedsStep) {
+            setRevealedSubtitlePages(prev => new Set(prev).add(targetPid));
+          }
+          setCurrentStep(nextStep - 1);
+        } else {
+          requestAnimationFrame(() => {
+            runStepAction();
+            editor.setCameraOptions({ isLocked: true });
+            handleCamera();
+            playStepAudio(step);
+            setCurrentStep(nextStep);
+          });
+        }
       });
       return;
     }
@@ -1216,10 +1356,37 @@ export default function LessonCanvas({
       }
     }
 
-  }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio]);
+  }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio, revealedTopicPages, revealedSubtitlePages]);
 
   const goPrevious = useCallback(() => {
     if (!editor || !isLocked) return;
+
+    const pid = editor.getCurrentPageId() as string;
+    const tMode = pageTopicModesRef.current[pid];
+    const sMode = pageSubtitleModesRef.current[pid];
+    const hasTopic = pid in (canvasTopicRef.current || {});
+    const hasSubtitle = pid in (canvasSubtitlesRef.current || {});
+    const subtitleNeedsStep = hasSubtitle && sMode === 'animate';
+    const topicNeedsStep = hasTopic && tMode === 'animate';
+
+    // If we're at step -1 or step 0 and virtual steps are revealed, reverse them
+    if (currentStep <= 0) {
+      // First un-reveal subtitle, then topic (reverse order)
+      if (subtitleNeedsStep && revealedSubtitlePages.has(pid)) {
+        setRevealedSubtitlePages(prev => { const next = new Set(prev); next.delete(pid); return next; });
+        if (currentStep === 0) {
+          // Also need to revert step 0
+          // But actually if currentStep is 0, that means real steps have started
+          // We should go back to step -1 first, then virtual steps
+        }
+        return;
+      }
+      if (topicNeedsStep && revealedTopicPages.has(pid)) {
+        setRevealedTopicPages(prev => { const next = new Set(prev); next.delete(pid); return next; });
+        return;
+      }
+    }
+
     if (currentStep < 0) return;
     // Stop any in-progress camera animation to prevent overlap
     editor.stopCameraAnimation();
@@ -1265,7 +1432,7 @@ export default function LessonCanvas({
       applyAnimationState(editor, animationSteps, prevStep);
       setCurrentStep(prevStep);
     }
-  }, [editor, isLocked, currentStep, animationSteps, applyAnimationState, stopStepAudio]);
+  }, [editor, isLocked, currentStep, animationSteps, applyAnimationState, stopStepAudio, revealedTopicPages, revealedSubtitlePages]);
 
   // Jump to the first step of a specific page (for testing)
   const jumpToPage = useCallback((pageId: string) => {
@@ -2215,21 +2382,25 @@ export default function LessonCanvas({
     <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden`}>
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
       <div className="flex items-center px-4 py-3 bg-[#0f1b3d] border-b border-[#1a2a5e] flex-shrink-0 min-w-0">
-        {/* Fixed left: Back + title */}
-        <div className="flex items-center gap-3 flex-shrink-0 mr-3" style={{ maxWidth: '280px' }}>
+        {/* Fixed left: Back + title (title hidden when unlocked for more button space) */}
+        <div className="flex items-center gap-3 flex-shrink-0 mr-3" style={{ maxWidth: isLocked ? undefined : undefined }}>
           <Link to={backPath} className="flex items-center gap-1.5 text-blue-100 hover:text-blue-100 text-sm transition-colors whitespace-nowrap">
             <ArrowLeft className="w-3.5 h-3.5" />Back
           </Link>
-          <div className="w-px h-5 bg-blue-900 flex-shrink-0" />
-          <div className="flex items-center gap-1 min-w-0 overflow-hidden">
-            <span className="text-blue-200 text-sm truncate">{topicTitle}</span>
-            <span className="text-blue-400 text-sm flex-shrink-0">/</span>
-            <span className="text-blue-100 text-sm font-medium truncate">{subtopicTitle}</span>
-          </div>
+          {isLocked && (
+            <>
+              <div className="w-px h-5 bg-blue-900 flex-shrink-0" />
+              <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+                <span className="text-blue-200 text-sm truncate">{topicTitle}</span>
+                <span className="text-blue-400 text-sm flex-shrink-0">/</span>
+                <span className="text-blue-100 text-sm font-medium truncate">{subtopicTitle}</span>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Scrollable right: all buttons */}
-        <div className="flex items-center gap-2 overflow-x-auto min-w-0 flex-1" style={{ scrollbarWidth: 'thin', scrollbarColor: '#1e3a8a transparent' }}>
+        {/* Scrollable right: all buttons — when locked, push to right with ml-auto */}
+        <div className={`flex items-center gap-2 overflow-x-auto min-w-0 ${isLocked ? 'ml-auto flex-shrink-0' : 'flex-1'}`} style={{ scrollbarWidth: 'none', overscrollBehavior: 'contain' }}>
           {/* Step counter (locked) */}
           {isLocked && animationSteps.length > 0 && (
             <div className={`flex items-center gap-1.5 flex-shrink-0 ${!hideLockButton ? 'mr-2' : ''}`}>
@@ -2263,7 +2434,7 @@ export default function LessonCanvas({
 
           {/* Lock/Unlock — hidden when presenting or public canvas is open */}
           {!hideLockButton && !isPresenting && !showPublicCanvas && (
-            <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isLocked ? 'bg-blue-900 text-blue-100 hover:bg-blue-800 border border-blue-800' : 'bg-emerald-600 text-white hover:bg-emerald-600/30 border border-emerald-500/30'}`}>
+            <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ${isLocked ? 'bg-blue-900 text-blue-100 hover:bg-blue-800 border border-blue-800' : 'bg-emerald-600 text-white hover:bg-emerald-600/30 border border-emerald-500/30'}`}>
               {isLocked ? <><Lock className="w-3.5 h-3.5" />Locked</> : <><Unlock className="w-3.5 h-3.5" />Unlocked</>}
             </button>
           )}
@@ -2380,6 +2551,42 @@ export default function LessonCanvas({
                 <Frame className="w-3 h-3" />
                 Guide
               </button>
+              {/* Topic / Subtitle strip toggles */}
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  const pid = editor.getCurrentPageId() as string;
+                  if (pageTopicVisible.has(pid)) {
+                    setPageTopicVisible(prev => { const next = new Set(prev); next.delete(pid); return next; });
+                  } else {
+                    // Initialize data if never added before
+                    if (!(pid in pageTopics)) setPageTopics(prev => ({ ...prev, [pid]: '' }));
+                    setPageTopicVisible(prev => new Set(prev).add(pid));
+                  }
+                  markDirty();
+                }}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageTopicVisible.has(editor.getCurrentPageId() as string) ? 'bg-rose-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
+                title="Show/hide topic for this page"
+              >
+                Topic
+              </button>
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  const pid = editor.getCurrentPageId() as string;
+                  if (pageSubtitleVisible.has(pid)) {
+                    setPageSubtitleVisible(prev => { const next = new Set(prev); next.delete(pid); return next; });
+                  } else {
+                    if (!(pid in pageSubtitles)) setPageSubtitles(prev => ({ ...prev, [pid]: '' }));
+                    setPageSubtitleVisible(prev => new Set(prev).add(pid));
+                  }
+                  markDirty();
+                }}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageSubtitleVisible.has(editor.getCurrentPageId() as string) ? 'bg-teal-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
+                title="Show/hide subtitle for this page"
+              >
+                Subtitle
+              </button>
             </>
           )}
           {/* Public canvas toggle — hidden when presenting */}
@@ -2422,9 +2629,162 @@ export default function LessonCanvas({
 
       {/* ─── Canvas + Sidebar ─────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Canvas Area (fixed 85% width) */}
-        <div className="w-[85%] relative overflow-hidden">
-          <div id="canvas-export-area" className="absolute inset-0">
+        {/* Canvas column (fixed 85% width) — includes topic strip + canvas */}
+        <div className="w-[85%] flex flex-col overflow-hidden">
+          {/* Topic / Subtitle strip above canvas — per page */}
+          {editor && (() => {
+            const pid = editor.getCurrentPageId() as string;
+            const hasTopic = pageTopicVisible.has(pid);
+            const hasSubtitle = pageSubtitleVisible.has(pid);
+            if (!hasTopic && !hasSubtitle) return null;
+            const tText = pageTopics[pid] || '';
+            const sText = pageSubtitles[pid] || '';
+            const tColor = pageTopicColors[pid] || '#1e293b';
+            const tBorder = pageTopicBorderColors[pid] || '#1e293b';
+            const sColor = pageSubtitleColors[pid] || '#1e293b';
+            const sBorder = pageSubtitleBorderColors[pid] || '#1e293b';
+            const tAnim = pageTopicAnimations[pid] || 'none';
+            const sAnim = pageSubtitleAnimations[pid] || 'none';
+            const tMode = pageTopicModes[pid] || 'preload';
+            const sMode = pageSubtitleModes[pid] || 'preload';
+            const tVisible = !isLocked || tMode === 'preload' || revealedTopicPages.has(pid);
+            const sVisible = !isLocked || sMode === 'preload' || revealedSubtitlePages.has(pid);
+            // For animation: only play the CSS animation when it was just revealed (animate mode + revealed)
+            const tPlayAnim = isLocked && tAnim !== 'none' && (tMode === 'preload' || revealedTopicPages.has(pid));
+            const sPlayAnim = isLocked && sAnim !== 'none' && (sMode === 'preload' || revealedSubtitlePages.has(pid));
+            return (
+              <div className="flex-shrink-0 bg-[#f0ede8] px-2 py-1 flex flex-col gap-2">
+                {hasTopic && (
+                  <div className="flex justify-center" style={{ visibility: tVisible ? 'visible' : 'hidden', opacity: tVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+                    <div className={`relative border-2 rounded inline-flex items-center ${tPlayAnim ? `step-anim-${tAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: tBorder }}>
+                      <div className="inline-grid items-center">
+                        <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 26 }}>{tText || 'Topic'}</span>
+                        <input
+                          type="text"
+                          value={tText}
+                          onChange={(e) => { setPageTopics(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
+                          placeholder="Topic"
+                          readOnly={isLocked}
+                          className="bg-transparent font-bold outline-none placeholder:text-[#94a3b8] placeholder:font-normal text-center col-start-1 row-start-1"
+                          style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 26, width: 0, minWidth: '100%', color: tColor }}
+                        />
+                      </div>
+                      {!isLocked && (
+                        <button onClick={() => { setTopicColorPickerOpen(v => !v); setSubtitleColorPickerOpen(false); }} className="ml-1 w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: tColor }} title="Change color" />
+                      )}
+                      {topicColorPickerOpen && !isLocked && (
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="text-[8px] text-slate-500 font-medium">Text</div>
+                          <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
+                            {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','#ffffff'].map(c => (
+                              <button key={`tt-${c}`} onClick={() => { setPageTopicColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${tColor === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'}`} style={{ background: c }} />
+                            ))}
+                          </div>
+                          <div className="text-[8px] text-slate-500 font-medium mt-1">Border</div>
+                          <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
+                            {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','transparent'].map(c => (
+                              <button key={`tb-${c}`} onClick={() => { setPageTopicBorderColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${tBorder === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'} ${c === 'transparent' ? 'bg-[repeating-conic-gradient(#ccc_0%_25%,#fff_0%_50%)] bg-[length:8px_8px]' : ''}`} style={c !== 'transparent' ? { background: c } : {}} />
+                            ))}
+                          </div>
+                          <div className="text-[8px] text-slate-500 font-medium mt-1">Animation</div>
+                          <select
+                            value={pageTopicAnimations[pid] || 'none'}
+                            onChange={(e) => { setPageTopicAnimations(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
+                            className="text-[9px] border border-slate-300 rounded px-1 py-0.5 bg-white text-slate-700 w-full"
+                          >
+                            <option value="none">None</option>
+                            <option value="appear">Appear</option>
+                            <option value="revealLeft">Reveal L→R</option>
+                            <option value="revealRight">Reveal R→L</option>
+                            <option value="revealTop">Reveal T→D</option>
+                            <option value="revealBottom">Reveal B→U</option>
+                            <option value="revealCenter">Reveal Center</option>
+                          </select>
+                          <div className="text-[8px] text-slate-500 font-medium mt-1">Step</div>
+                          <div className="flex gap-2">
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input type="radio" name={`topic-mode-${pid}`} checked={(pageTopicModes[pid] || 'preload') === 'preload'} onChange={() => { setPageTopicModes(prev => ({ ...prev, [pid]: 'preload' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
+                              <span className="text-[8px] text-slate-600">Preload</span>
+                            </label>
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input type="radio" name={`topic-mode-${pid}`} checked={(pageTopicModes[pid] || 'preload') === 'animate'} onChange={() => { setPageTopicModes(prev => ({ ...prev, [pid]: 'animate' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
+                              <span className="text-[8px] text-slate-600">Animate</span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {hasSubtitle && (
+                  <div className="flex justify-start" style={{ visibility: sVisible ? 'visible' : 'hidden', opacity: sVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+                    <div className={`relative border-2 rounded inline-flex items-center ${sPlayAnim ? `step-anim-${sAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: sBorder }}>
+                      <div className="inline-grid items-center">
+                        <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22 }}>{sText || 'Subtitle'}</span>
+                        <input
+                          type="text"
+                          value={sText}
+                          onChange={(e) => { setPageSubtitles(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
+                          placeholder="Subtitle"
+                          readOnly={isLocked}
+                          className="bg-transparent font-bold outline-none placeholder:text-[#94a3b8] placeholder:font-normal col-start-1 row-start-1"
+                          style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22, width: 0, minWidth: '100%', color: sColor }}
+                        />
+                      </div>
+                      {!isLocked && (
+                        <button onClick={() => { setSubtitleColorPickerOpen(v => !v); setTopicColorPickerOpen(false); }} className="ml-1 w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: sColor }} title="Change color" />
+                      )}
+                      {subtitleColorPickerOpen && !isLocked && (
+                        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="text-[8px] text-slate-500 font-medium">Text</div>
+                          <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
+                            {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','#ffffff'].map(c => (
+                              <button key={`st-${c}`} onClick={() => { setPageSubtitleColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${sColor === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'}`} style={{ background: c }} />
+                            ))}
+                          </div>
+                          <div className="text-[8px] text-slate-500 font-medium mt-1">Border</div>
+                          <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
+                            {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','transparent'].map(c => (
+                              <button key={`sb-${c}`} onClick={() => { setPageSubtitleBorderColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${sBorder === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'} ${c === 'transparent' ? 'bg-[repeating-conic-gradient(#ccc_0%_25%,#fff_0%_50%)] bg-[length:8px_8px]' : ''}`} style={c !== 'transparent' ? { background: c } : {}} />
+                            ))}
+                          </div>
+                          <div className="text-[8px] text-slate-500 font-medium mt-1">Animation</div>
+                          <select
+                            value={pageSubtitleAnimations[pid] || 'none'}
+                            onChange={(e) => { setPageSubtitleAnimations(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
+                            className="text-[9px] border border-slate-300 rounded px-1 py-0.5 bg-white text-slate-700 w-full"
+                          >
+                            <option value="none">None</option>
+                            <option value="appear">Appear</option>
+                            <option value="revealLeft">Reveal L→R</option>
+                            <option value="revealRight">Reveal R→L</option>
+                            <option value="revealTop">Reveal T→D</option>
+                            <option value="revealBottom">Reveal B→U</option>
+                            <option value="revealCenter">Reveal Center</option>
+                          </select>
+                          <div className="text-[8px] text-slate-500 font-medium mt-1">Step</div>
+                          <div className="flex gap-2">
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input type="radio" name={`subtitle-mode-${pid}`} checked={(pageSubtitleModes[pid] || 'preload') === 'preload'} onChange={() => { setPageSubtitleModes(prev => ({ ...prev, [pid]: 'preload' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
+                              <span className="text-[8px] text-slate-600">Preload</span>
+                            </label>
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input type="radio" name={`subtitle-mode-${pid}`} checked={(pageSubtitleModes[pid] || 'preload') === 'animate'} onChange={() => { setPageSubtitleModes(prev => ({ ...prev, [pid]: 'animate' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
+                              <span className="text-[8px] text-slate-600">Animate</span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Canvas Area */}
+          <div className="flex-1 relative overflow-hidden">
+            <div id="canvas-export-area" className="absolute inset-0">
           {/* tldraw canvas — always visible */}
           <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}>
             <CanvasEditor
@@ -2575,32 +2935,96 @@ export default function LessonCanvas({
             void guideResizeTick; // re-render on window resize
             const container = document.getElementById('canvas-export-area');
             if (!container) return null;
-            const cw = container.clientWidth;
-            const ch = container.clientHeight;
+            if (!editor) return null;
+            const pid = editor.getCurrentPageId() as string;
+
+            // Calculate fullscreen canvas dimensions
+            // In fullscreen: window.innerHeight + 78px (app header gone) = total height
+            // Then subtract toolbar and topic/subtitle strip
+            const fullscreenTotalH = window.innerHeight + 78; // app header removed in fullscreen
+            const screenW = window.innerWidth * 0.85 - 26; // 85% canvas column minus 13px each side
+            const toolbarHeight = 47; // toolbar py-3 + content + border
+            const hasTopic = pageTopicVisible.has(pid);
+            const hasSubtitle = pageSubtitleVisible.has(pid);
+            const topicLineH = 32;
+            const subtitleLineH = 28;
+            const stripContainerPy = 8;
+            const stripGap = 8;
+            let stripHeight = 0;
+            if (hasTopic && hasSubtitle) stripHeight = stripContainerPy + topicLineH + stripGap + subtitleLineH + 30;
+            else if (hasTopic) stripHeight = stripContainerPy + topicLineH + 10;
+            else if (hasSubtitle) stripHeight = stripContainerPy + subtitleLineH + 10;
+
+            const screenH = fullscreenTotalH - toolbarHeight - stripHeight - 47;
+
             // Page-coordinate dimensions of the viewport at 75% zoom
-            const guideW = cw / 0.75;
-            const guideH = ch / 0.75;
+            const guideW = screenW / 0.75;
+            const guideH = screenH / 0.75;
             const cam = tldrawCamera;
-            // Convert page coords (0,0) to screen coords
-            const screenX = cam.x * cam.z;
-            const screenY = cam.y * cam.z;
-            const screenW = guideW * cam.z;
-            const screenH = guideH * cam.z;
+            // Convert page coords to screen coords, applying guide offset
+            const screenX = (guideOffset.x + cam.x) * cam.z;
+            const screenY = (guideOffset.y + cam.y) * cam.z;
+            const screenWPx = guideW * cam.z;
+            const screenHPx = guideH * cam.z;
             return (
               <div
-                className="absolute pointer-events-none z-[5]"
+                className="absolute z-[5] pointer-events-none"
                 style={{
                   left: screenX,
                   top: screenY,
-                  width: screenW,
-                  height: screenH,
-                  border: '2px dashed rgba(251, 146, 60, 0.5)',
-                  borderRadius: 4,
+                  width: screenWPx,
+                  height: screenHPx,
                 }}
-              />
+              >
+                {/* Top border - draggable */}
+                <div className="absolute top-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderTop: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
+                    const c = tldrawCamera;
+                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
+                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+                  }}
+                />
+                {/* Bottom border */}
+                <div className="absolute bottom-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderBottom: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
+                    const c = tldrawCamera;
+                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
+                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+                  }}
+                />
+                {/* Left border */}
+                <div className="absolute top-0 bottom-0 left-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderLeft: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
+                    const c = tldrawCamera;
+                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
+                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+                  }}
+                />
+                {/* Right border */}
+                <div className="absolute top-0 bottom-0 right-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderRight: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
+                    const c = tldrawCamera;
+                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
+                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+                  }}
+                />
+              </div>
             );
           })()}
         </div>
+
         {!isLocked && !timelineFullyCollapsed && (
           <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
             <div className="overflow-hidden shadow-2xl border border-[#1a2a5e]" style={{ width: '85vw' }}>
@@ -2618,6 +3042,7 @@ export default function LessonCanvas({
             </div>
           </DraggableWidget>
         )}
+        </div>
         </div>
 
         {/* Sidebar (right 15%) — always rendered for layout, content conditional */}

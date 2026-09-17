@@ -808,3 +808,8 @@ a[href*="tldraw.dev"] {
 }
 
 /* (paste frame styles handled via tldraw opacity) */
+
+/* Hide tldraw's "Back to content" helper button */
+.tlui-helper-buttons {
+  display: none !important;
+}
