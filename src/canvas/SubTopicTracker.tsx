@@ -21,6 +21,7 @@ interface SubTopicTrackerProps {
   onSidebarTitleChange?: (title: string) => void;
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  pageGlow?: { pageId: string; type: 'orange' | 'green' } | null;
 }
 
 const SIDEBAR_TITLE_OPTIONS = ['Outline', 'Scenes', 'Topics', 'Contents', 'Agenda', 'Chapter Breakdown', 'Progress', 'Sections'];
@@ -43,7 +44,7 @@ function getOrderedPageIds(steps: AnimationStep[], editor?: Editor | null): stri
 export default function SubTopicTracker({
   labels, onLabelsChange, steps, isLocked, currentStep, editor,
   sidebar, sidebarTitle = 'Outline', onSidebarTitleChange,
-  collapsed: collapsedProp = false, onCollapsedChange,
+  collapsed: collapsedProp = false, onCollapsedChange, pageGlow,
 }: SubTopicTrackerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -107,6 +108,8 @@ export default function SubTopicTracker({
       const pid = pageIds[pi];
       for (let si = 0; si < steps.length; si++) {
         if ((steps[si].pageId || 'page:page') === pid) {
+          // Skip preloaded steps — they don't count towards progress
+          if (steps[si].animation === 'none' && (steps[si].action || 'enter') === 'enter') continue;
           totalStepsInRange++;
           if (currentStep >= si) completedSteps++;
         }
@@ -304,16 +307,21 @@ export default function SubTopicTracker({
             const status = getStatus(label, i);
             const startP = label.startPage ?? 0;
             const endP = label.endPage ?? label.endStep ?? 0;
+            // Check if this card should glow
+            const labelPageId = label.id.startsWith('auto-') ? label.id.replace('auto-', '') : pageIds[startP];
+            const glowType = pageGlow && pageGlow.pageId === labelPageId ? pageGlow.type : null;
             return (
               <div
                 key={label.id}
-                className={`rounded-lg transition-all relative overflow-hidden ${
+                className={`rounded-lg transition-all duration-300 relative overflow-hidden ${
                   isLocked
                     ? 'px-3 py-2'
                     : 'px-2 py-1.5'
                 } ${
                   isLocked
-                    ? (status === 'complete' ? 'border border-emerald-500/40 bg-emerald-950/40' :
+                    ? (glowType === 'green' ? 'border-2 border-emerald-400 bg-emerald-950/60 shadow-lg shadow-emerald-500/30' :
+                       glowType === 'orange' ? 'border-2 border-orange-400 bg-orange-950/40 shadow-lg shadow-orange-500/30' :
+                       status === 'complete' ? 'border border-emerald-500/40 bg-emerald-950/40' :
                        status === 'active' ? 'border border-orange-400/30 bg-slate-800/60' :
                        'border border-slate-700/40 bg-slate-800/30')
                     : (status === 'complete' ? 'bg-emerald-500/10 border border-emerald-400/40' :

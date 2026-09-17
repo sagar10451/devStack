@@ -55,6 +55,10 @@ export default function PagePanel({ editor, isLocked, onShowTopics }: PagePanelP
   const createPage = useCallback(() => {
     if (!editor) return;
     editor.createPage({ name: `Page ${pages.length + 1}` });
+    // Switch to the newly created page
+    const allPages = editor.getPages();
+    const newPage = allPages[allPages.length - 1];
+    if (newPage) editor.setCurrentPage(newPage.id);
   }, [editor, pages.length]);
 
   const deletePage = useCallback((pageId: string) => {

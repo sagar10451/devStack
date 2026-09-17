@@ -277,7 +277,7 @@ export function applyZoomToShapes(
     }
     editor.setCamera(capturedCamera, {
       force: true,
-      animation: { duration: Math.max(duration, 300), easing: (t: number) => 1 - Math.pow(1 - t, 3) },
+      animation: { duration: 800, easing: (t: number) => 1 - Math.pow(1 - t, 3) },
     });
     return savedCamera;
   }

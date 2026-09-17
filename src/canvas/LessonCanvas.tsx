@@ -206,6 +206,8 @@ export default function LessonCanvas({
   const [rfSelectedEdgeIds, setRfSelectedEdgeIds] = useState<string[]>([]);
   const diagramWrapperRef = useRef<HTMLDivElement>(null);
   const moveOriginalPositionsRef = useRef<Record<string, MoveRecord[]>>({});
+  // Track pending camera-first step: first arrow moves camera, second arrow plays animation
+  const pendingCameraStepRef = useRef<{ nextStep: number; step: any } | null>(null);
   const zoomSavedCamerasRef = useRef<Record<string, { x: number; y: number; z: number }>>({});
   const presentationStartCameraRef = useRef<{ x: number; y: number; z: number } | null>(null);
   const editingCameraRef = useRef<{ x: number; y: number; z: number } | null>(null);
@@ -1033,6 +1035,63 @@ export default function LessonCanvas({
     audio.addEventListener('ended', handleEnded);
   }, [stopStepAudio]);
 
+  // ─── Page countdown sounds (Web Audio API) + glow state ─────────────────
+  const countdownAudioCtxRef = useRef<AudioContext | null>(null);
+  const [pageGlow, setPageGlow] = useState<{ pageId: string; type: 'orange' | 'green' } | null>(null);
+
+  const playBeep = useCallback((frequency: number, duration: number, volume = 0.15) => {
+    try {
+      if (!countdownAudioCtxRef.current) countdownAudioCtxRef.current = new AudioContext();
+      const ctx = countdownAudioCtxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = frequency;
+      gain.gain.setValueAtTime(volume, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + duration / 1000);
+    } catch { /* ignore audio errors */ }
+  }, []);
+
+  const playCountdownBeep = useCallback(() => {
+    playBeep(520, 150, 0.04);
+  }, [playBeep]);
+
+  const playCompletionChime = useCallback(() => {
+    playBeep(523, 150, 0.05);
+    setTimeout(() => playBeep(659, 150, 0.05), 120);
+    setTimeout(() => playBeep(784, 250, 0.06), 240);
+  }, [playBeep]);
+
+  // Helper: get the last step index on a given page
+  const getLastStepIndexOnPage = useCallback((pageId: string): number => {
+    let last = -1;
+    for (let i = 0; i < animationSteps.length; i++) {
+      if ((animationSteps[i].pageId || 'page:page') === pageId) last = i;
+    }
+    return last;
+  }, [animationSteps]);
+
+  // Helper: check position relative to page end and play sounds
+  const playPageCountdownSound = useCallback((stepIndex: number) => {
+    if (!editor) return;
+    const pid = editor.getCurrentPageId() as string;
+    const lastOnPage = getLastStepIndexOnPage(pid);
+    if (lastOnPage < 0) return;
+    if (stepIndex === lastOnPage) {
+      playCompletionChime();
+      setPageGlow({ pageId: pid, type: 'green' });
+      setTimeout(() => setPageGlow(null), 1500);
+    } else if (stepIndex === lastOnPage - 1) {
+      playCountdownBeep();
+      setPageGlow({ pageId: pid, type: 'orange' });
+      setTimeout(() => setPageGlow(null), 1500);
+    }
+  }, [editor, getLastStepIndexOnPage, playCountdownBeep, playCompletionChime]);
+
   // Lock / Unlock
   const toggleLock = useCallback(() => {
     if (!editor) return;
@@ -1116,6 +1175,7 @@ export default function LessonCanvas({
       setCurrentStep(-1);
       setRevealedTopicPages(new Set());
       setRevealedSubtitlePages(new Set());
+      pendingCameraStepRef.current = null;
       applyAnimationState(editor, sortedSteps, -1);
       // Re-apply after a frame to catch RF elements that might not be in DOM yet
       setTimeout(() => applyAnimationState(editor, sortedSteps, -1), 100);
@@ -1193,6 +1253,48 @@ export default function LessonCanvas({
     if (subtitleNeedsStep && !revealedSubtitlePages.has(pid)) {
       setRevealedSubtitlePages(prev => new Set(prev).add(pid));
       return; // consume this arrow press for the subtitle reveal
+    }
+
+    // Handle pending camera step — second press plays the animation
+    if (pendingCameraStepRef.current) {
+      const pending = pendingCameraStepRef.current;
+      pendingCameraStepRef.current = null;
+      const pendingStep = pending.step;
+      const pendingAction = pendingStep.action || 'enter';
+
+      // Run the step action now
+      switch (pendingAction) {
+        case 'none': break;
+        case 'enter': {
+          applyAnimationState(editor!, animationSteps, pending.nextStep);
+          if (pendingStep.animation !== 'none') {
+            applyStepAnimation(pendingStep.shapeIds, pendingStep.animation, pendingStep.duration);
+          }
+          pendingStep.shapeIds.forEach((shapeId: string) => {
+            const config = shapeAnimations[shapeId];
+            if (config?.idle && config.idle !== 'none') {
+              applyIdleAnimation(shapeId, config.idle);
+            }
+          });
+          break;
+        }
+        case 'exit': {
+          applyAnimationState(editor!, animationSteps, pending.nextStep);
+          break;
+        }
+        case 'blink': {
+          applyBlinkAnimation(pendingStep.shapeIds, pendingStep.duration);
+          break;
+        }
+        default: {
+          applyAnimationState(editor!, animationSteps, pending.nextStep);
+          applyStepAnimation(pendingStep.shapeIds, pendingStep.animation, pendingStep.duration);
+          break;
+        }
+      }
+      playStepAudio(pendingStep);
+      playPageCountdownSound(pending.nextStep);
+      return;
     }
 
     // Normal step processing
@@ -1281,6 +1383,7 @@ export default function LessonCanvas({
             editor.setCameraOptions({ isLocked: true });
             handleCamera();
             playStepAudio(step);
+            playPageCountdownSound(nextStep);
             setCurrentStep(nextStep);
           });
         }
@@ -1288,10 +1391,27 @@ export default function LessonCanvas({
       return;
     }
 
-    runStepAction();
-    handleCamera();
-    playStepAudio(step);
-    setCurrentStep(nextStep);
+    // Check if camera will move — if so, delay the step animation
+    const currentCam = editor.getCamera();
+    const stepCam = step.cameraPosition;
+    const cameraWillMove = stepCam && (
+      Math.abs(currentCam.x - stepCam.x) > 1 ||
+      Math.abs(currentCam.y - stepCam.y) > 1 ||
+      Math.abs(currentCam.z - stepCam.z) > 0.01
+    );
+
+    if (cameraWillMove) {
+      // First press: move camera only, store step for second press
+      handleCamera();
+      setCurrentStep(nextStep);
+      pendingCameraStepRef.current = { nextStep, step };
+    } else {
+      runStepAction();
+      handleCamera();
+      playStepAudio(step);
+      playPageCountdownSound(nextStep);
+      setCurrentStep(nextStep);
+    }
 
     function runStepAction() {
       switch (action) {
@@ -1356,7 +1476,7 @@ export default function LessonCanvas({
       }
     }
 
-  }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio, revealedTopicPages, revealedSubtitlePages]);
+  }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio, playPageCountdownSound, revealedTopicPages, revealedSubtitlePages]);
 
   const goPrevious = useCallback(() => {
     if (!editor || !isLocked) return;
@@ -2551,6 +2671,18 @@ export default function LessonCanvas({
                 <Frame className="w-3 h-3" />
                 Guide
               </button>
+              {/* 75% zoom button */}
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  const cam = editor.getCamera();
+                  editor.setCamera({ ...cam, z: 0.75 }, { force: true, animation: { duration: 300 } });
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+                title="Set zoom to 75%"
+              >
+                75%
+              </button>
               {/* Topic / Subtitle strip toggles */}
               <button
                 onClick={() => {
@@ -2655,7 +2787,7 @@ export default function LessonCanvas({
             return (
               <div className="flex-shrink-0 bg-[#f0ede8] px-2 py-1 flex flex-col gap-2">
                 {hasTopic && (
-                  <div className="flex justify-center" style={{ visibility: tVisible ? 'visible' : 'hidden', opacity: tVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+                  <div key={`topic-${pid}`} className="flex justify-center" style={{ visibility: tVisible ? 'visible' : 'hidden', opacity: tVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
                     <div className={`relative border-2 rounded inline-flex items-center ${tPlayAnim ? `step-anim-${tAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: tBorder }}>
                       <div className="inline-grid items-center">
                         <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 26 }}>{tText || 'Topic'}</span>
@@ -2717,7 +2849,7 @@ export default function LessonCanvas({
                   </div>
                 )}
                 {hasSubtitle && (
-                  <div className="flex justify-start" style={{ visibility: sVisible ? 'visible' : 'hidden', opacity: sVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+                  <div key={`subtitle-${pid}`} className="flex justify-start" style={{ visibility: sVisible ? 'visible' : 'hidden', opacity: sVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
                     <div className={`relative border-2 rounded inline-flex items-center ${sPlayAnim ? `step-anim-${sAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: sBorder }}>
                       <div className="inline-grid items-center">
                         <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22 }}>{sText || 'Subtitle'}</span>
@@ -2942,7 +3074,7 @@ export default function LessonCanvas({
             // In fullscreen: window.innerHeight + 78px (app header gone) = total height
             // Then subtract toolbar and topic/subtitle strip
             const fullscreenTotalH = window.innerHeight + 78; // app header removed in fullscreen
-            const screenW = window.innerWidth * 0.85 - 26; // 85% canvas column minus 13px each side
+            const screenW = window.innerWidth * 0.85 - 6; // 85% canvas column minus 3px each side
             const toolbarHeight = 47; // toolbar py-3 + content + border
             const hasTopic = pageTopicVisible.has(pid);
             const hasSubtitle = pageSubtitleVisible.has(pid);
@@ -3061,6 +3193,7 @@ export default function LessonCanvas({
                 sidebarTitle={sidebarTitle}
                 onSidebarTitleChange={setSidebarTitle}
                 collapsed={false}
+                pageGlow={pageGlow}
               />
             ) : sidebarCollapsed ? (
               // Unlocked + collapsed: show Pages panel
@@ -3079,6 +3212,7 @@ export default function LessonCanvas({
                 onSidebarTitleChange={setSidebarTitle}
                 collapsed={sidebarCollapsed}
                 onCollapsedChange={setSidebarCollapsed}
+                pageGlow={pageGlow}
               />
             )
           ) : null}
