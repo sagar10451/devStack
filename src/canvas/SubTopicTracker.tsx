@@ -96,7 +96,7 @@ export default function SubTopicTracker({
 
   // ─── Progress calculation ───────────────────────────────────────────────
   const getProgress = useCallback((label: SubTopicLabel, labelIdx: number): number => {
-    if (steps.length === 0 || totalPages === 0) return 0;
+    if (steps.length === 0 || totalPages === 0 || currentStep < 0) return 0;
     const startPageIdx = label.startPage ?? (labelIdx === 0 ? 0 : (labels[labelIdx - 1].endPage ?? 0) + 1);
     const endPageIdx = label.endPage ?? label.endStep ?? 0;
 
