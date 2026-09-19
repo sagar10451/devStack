@@ -175,6 +175,8 @@ export interface LessonCanvasData {
   pageTopicModes?: Record<string, 'preload' | 'animate'>;
   /** Per-page subtitle mode: 'preload' or 'animate' */
   pageSubtitleModes?: Record<string, 'preload' | 'animate'>;
+  /** Black & white theme mode */
+  bwMode?: boolean;
 }
 
 /**

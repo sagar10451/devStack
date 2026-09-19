@@ -813,3 +813,174 @@ a[href*="tldraw.dev"] {
 .tlui-helper-buttons {
   display: none !important;
 }
+
+
+/* ─── Black & White Theme ──────────────────────────────────────────────────── */
+
+/* Toolbar */
+.bw-theme > div:first-child {
+  background: #0a0a0a !important;
+  border-color: #2a2a2a !important;
+}
+.bw-theme > div:first-child button,
+.bw-theme > div:first-child a {
+  color: #d4d4d4 !important;
+}
+.bw-theme > div:first-child button:hover {
+  background: #1a1a1a !important;
+}
+.bw-theme > div:first-child span {
+  color: #a3a3a3 !important;
+}
+.bw-theme > div:first-child .bg-emerald-600,
+.bw-theme > div:first-child .bg-blue-500,
+.bw-theme > div:first-child .bg-blue-900 {
+  background: #1a1a1a !important;
+}
+
+/* Topic/Subtitle strip */
+.bw-theme .bg-\[\#f0ede8\] {
+  background: #fafafa !important;
+}
+.bw-theme .bg-\[\#f0ede8\] input,
+.bw-theme .bg-\[\#f0ede8\] div {
+  color: #0a0a0a !important;
+}
+.bw-theme .bg-\[\#f0ede8\] .border-2 {
+  border-color: #0a0a0a !important;
+}
+
+/* Canvas background */
+.bw-theme .tl-background {
+  background: #ffffff !important;
+}
+
+/* Canvas shapes — make all text black, strokes dark */
+.bw-theme .tl-shape {
+  filter: grayscale(1) !important;
+}
+
+/* Sidebar */
+.bw-theme .bg-\[\#0a1230\] {
+  background: #0a0a0a !important;
+}
+.bw-theme .bg-\[\#0a1230\] * {
+  border-color: #2a2a2a !important;
+}
+
+/* Sidebar header */
+.bw-theme .from-indigo-500 {
+  background: linear-gradient(to right, #333, #1a1a1a) !important;
+}
+.bw-theme .bg-indigo-500\/8 {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Progress cards — active */
+.bw-theme .border-orange-400\/30 {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  background: #1a1a1a !important;
+}
+/* Progress cards — complete */
+.bw-theme .border-emerald-500\/40,
+.bw-theme .bg-emerald-950\/40 {
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  background: #111 !important;
+}
+/* Progress cards — pending */
+.bw-theme .border-slate-700\/40 {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Progress bar — active: white gradient */
+.bw-theme .bg-gradient-to-r.from-orange-500 {
+  background: linear-gradient(to right, #888, #ccc, #fff) !important;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.3) !important;
+}
+/* Progress bar — complete: bright white */
+.bw-theme .bg-gradient-to-r.from-emerald-500 {
+  background: linear-gradient(to right, #aaa, #ddd, #fff) !important;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Progress percentage text */
+.bw-theme .text-orange-300 {
+  color: #d4d4d4 !important;
+}
+.bw-theme .text-emerald-400,
+.bw-theme .text-emerald-300 {
+  color: #ffffff !important;
+}
+
+/* Status dots */
+.bw-theme .bg-orange-400 {
+  background: #d4d4d4 !important;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4) !important;
+}
+.bw-theme .bg-emerald-400 {
+  background: #ffffff !important;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.6) !important;
+}
+.bw-theme .bg-slate-600 {
+  background: #333 !important;
+}
+
+/* Card text */
+.bw-theme .text-slate-500 {
+  color: #555 !important;
+}
+.bw-theme .text-slate-400 {
+  color: #666 !important;
+}
+
+/* Glow states — orange becomes white pulse */
+.bw-theme .border-orange-400.shadow-lg {
+  border-color: rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.2) !important;
+  background: #1a1a1a !important;
+}
+/* Glow states — green becomes bright white */
+.bw-theme .border-emerald-400.shadow-lg {
+  border-color: #fff !important;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.3) !important;
+  background: #111 !important;
+}
+
+/* Timeline */
+.bw-theme .border-\[\#1a2a5e\] {
+  border-color: #2a2a2a !important;
+}
+.bw-theme .bg-\[\#0f1b3d\] {
+  background: #0a0a0a !important;
+}
+.bw-theme .bg-\[\#0f1b3d\]\/95 {
+  background: rgba(10, 10, 10, 0.95) !important;
+}
+
+/* Guide border */
+.bw-theme .border-dashed {
+  border-color: rgba(160, 160, 160, 0.5) !important;
+}
+
+/* Step counter in locked toolbar */
+.bw-theme .bg-blue-900 {
+  background: #1a1a1a !important;
+}
+.bw-theme .text-blue-100 {
+  color: #d4d4d4 !important;
+}
+.bw-theme .text-blue-200 {
+  color: #a3a3a3 !important;
+}
+.bw-theme .text-blue-400 {
+  color: #737373 !important;
+}
+
+/* Navigation panel in tldraw */
+.bw-theme .tlui-navigation-panel {
+  filter: grayscale(1) brightness(0.8) !important;
+}
+
+
+
+

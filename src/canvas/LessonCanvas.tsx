@@ -154,6 +154,7 @@ export default function LessonCanvas({
   const showTextBoundaryRef = useRef(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showGuideBorder, setShowGuideBorder] = useState(true);
+  const [bwMode, setBwMode] = useState(initialData?.bwMode || false);
   // Per-page topic/subtitle data (keyed by pageId)
   const [pageTopics, setPageTopics] = useState<Record<string, string>>(initialData?.pageTopics || {});
   const [pageSubtitles, setPageSubtitles] = useState<Record<string, string>>(initialData?.pageSubtitles || {});
@@ -514,8 +515,9 @@ export default function LessonCanvas({
       }
 
       // If many shapes appeared at once, likely a duplication that slipped through
-      // But not if they were from a multi-line paste (tracked via ref)
-      if (trulyNew.length > 5 && !multiLinePasteRef.current) return;
+      // But not if they were from a multi-line paste or image drop (tracked via ref)
+      // Allow up to 20 shapes at once (images can add many)
+      if (trulyNew.length > 20 && !multiLinePasteRef.current) return;
       multiLinePasteRef.current = false;
 
       const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
@@ -838,8 +840,9 @@ export default function LessonCanvas({
       pageSubtitleAnimations,
       pageTopicModes,
       pageSubtitleModes,
+      bwMode,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -912,6 +915,7 @@ export default function LessonCanvas({
         pageSubtitleAnimations: pageSubtitleAnimationsRef.current,
         pageTopicModes: pageTopicModesRef.current,
         pageSubtitleModes: pageSubtitleModesRef.current,
+        bwMode,
       };
 
       // Strip audio base64 data
@@ -1057,7 +1061,7 @@ export default function LessonCanvas({
   }, []);
 
   const playCountdownBeep = useCallback(() => {
-    playBeep(520, 150, 0.04);
+    playBeep(520, 150, 0.02);
   }, [playBeep]);
 
   const playCompletionChime = useCallback(() => {
@@ -1082,7 +1086,6 @@ export default function LessonCanvas({
     const lastOnPage = getLastStepIndexOnPage(pid);
     if (lastOnPage < 0) return;
     if (stepIndex === lastOnPage) {
-      playCompletionChime();
       setPageGlow({ pageId: pid, type: 'green' });
       setTimeout(() => setPageGlow(null), 1500);
     } else if (stepIndex === lastOnPage - 1) {
@@ -2499,7 +2502,7 @@ export default function LessonCanvas({
   }, [topicSlug, subtopicSlug, applyAnimationState]);
 
   return (
-    <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden`}>
+    <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}>
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
       <div className="flex items-center px-4 py-3 bg-[#0f1b3d] border-b border-[#1a2a5e] flex-shrink-0 min-w-0">
         {/* Fixed left: Back + title (title hidden when unlocked for more button space) */}
@@ -2682,6 +2685,14 @@ export default function LessonCanvas({
                 title="Set zoom to 75%"
               >
                 75%
+              </button>
+              {/* B&W theme toggle */}
+              <button
+                onClick={() => { setBwMode(v => !v); markDirty(); }}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${bwMode ? 'bg-gray-800 text-white border border-white/30' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
+                title="Toggle black & white theme"
+              >
+                B&W
               </button>
               {/* Topic / Subtitle strip toggles */}
               <button
