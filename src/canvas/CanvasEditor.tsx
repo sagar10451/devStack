@@ -4,8 +4,9 @@ import type { Editor } from 'tldraw';
 import 'tldraw/tldraw.css';
 import { CodeBlockShapeUtil } from './shapes/CodeBlockShape';
 import { MarkdownBlockShapeUtil } from './shapes/MarkdownBlockShape';
+import { GlowNotesShapeUtil } from './shapes/GlowNotesShape';
 
-const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil];
+const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesShapeUtil];
 
 interface CanvasEditorProps {
   snapshot: unknown | null;

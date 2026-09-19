@@ -97,6 +97,25 @@ function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: Diag
   }
 
   if (!editor) return { icon: <Square className={cls} />, label: 'Unknown' };
+
+  // Handle glow-notes line references (format: shape:xxx:line:N)
+  if (shapeId.includes(':line:')) {
+    const parts = shapeId.split(':line:');
+    const baseId = parts[0];
+    const lineIdx = parts[1];
+    const parentShape = editor.getShape((baseId) as any) as any;
+    if (parentShape?.type === 'glow-notes') {
+      try {
+        const lines: string[] = JSON.parse(parentShape.props?.lines || '[]');
+        const idx = parseInt(lineIdx, 10);
+        const lineText = lines[idx] || `Line ${idx + 1}`;
+        const preview = lineText.trim().split(/\s+/).slice(0, 4).join(' ');
+        return { icon: <Type className={cls} />, label: `• ${preview}` };
+      } catch { /* fallback */ }
+    }
+    return { icon: <Type className={cls} />, label: `Line ${lineIdx}` };
+  }
+
   const shape = editor.getShape(shapeId as any);
   if (!shape) return { icon: <Square className={cls} />, label: 'Deleted' };
   switch (shape.type) {
@@ -149,6 +168,7 @@ function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: Diag
     case 'image': return { icon: <Image className={cls} />, label: 'Image' };
     case 'code-block': return { icon: <Square className={cls} />, label: 'Code' };
     case 'md-block': return { icon: <Square className={cls} />, label: 'Markdown' };
+    case 'glow-notes': return { icon: <Square className={cls} />, label: 'Glow Notes' };
     default: return { icon: <Square className={cls} />, label: shape.type };
   }
 }

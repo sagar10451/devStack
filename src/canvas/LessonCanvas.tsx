@@ -272,6 +272,100 @@ export default function LessonCanvas({
 
   // Track selected shape IDs for timeline highlighting
   const [selectedShapeIds, setSelectedShapeIds] = useState<string[]>([]);
+
+  // ─── Glow Notes line highlighting during presentation ───────────────────
+  useEffect(() => {
+    if (!isLocked || !editor) return;
+    // Find all glow-notes line steps up to currentStep
+    const activeLineIds = new Set<string>(); // "shapeId:line:N" format
+    const completedLineIds = new Set<string>();
+    let latestLineId: string | null = null;
+
+    for (let i = 0; i <= currentStep && i < animationSteps.length; i++) {
+      const step = animationSteps[i];
+      for (const sid of step.shapeIds) {
+        if (sid.includes(':line:')) {
+          activeLineIds.add(sid);
+          latestLineId = sid;
+        }
+      }
+    }
+    // All active except the latest are "completed"
+    if (latestLineId) {
+      for (const sid of activeLineIds) {
+        if (sid !== latestLineId) completedLineIds.add(sid);
+      }
+    }
+
+    // Build CSS for each glow-notes shape
+    const styleId = 'glow-notes-highlight-style';
+    let existing = document.getElementById(styleId);
+    if (!existing) {
+      existing = document.createElement('style');
+      existing.id = styleId;
+      document.head.appendChild(existing);
+    }
+
+    // Collect all glow-notes shapes that have line steps
+    const glowShapeIds = new Set<string>();
+    for (const step of animationSteps) {
+      for (const sid of step.shapeIds) {
+        if (sid.includes(':line:')) {
+          glowShapeIds.add(sid.split(':line:')[0]);
+        }
+      }
+    }
+
+    let css = '';
+    for (const shapeId of glowShapeIds) {
+      // Dim all lines in this shape
+      css += `[data-shape-id="${shapeId}"] [data-glow-line] { opacity: 0.3 !important; transition: all 0.4s ease !important; }\n`;
+    }
+    // Highlight completed lines (green tint)
+    for (const sid of completedLineIds) {
+      const [baseId, idx] = sid.split(':line:');
+      css += `[data-shape-id="${baseId}"] [data-glow-line="${idx}"] { opacity: 1 !important; color: #4ade80 !important; background: rgba(74, 222, 128, 0.1) !important; border-radius: 6px !important; }\n`;
+    }
+    // Highlight current line (glow)
+    if (latestLineId) {
+      const [baseId, idx] = latestLineId.split(':line:');
+      css += `[data-shape-id="${baseId}"] [data-glow-line="${idx}"] { opacity: 1 !important; color: #fbbf24 !important; background: rgba(251, 191, 36, 0.12) !important; border-radius: 6px !important; box-shadow: 0 0 12px rgba(251, 191, 36, 0.25) !important; font-weight: 700 !important; }\n`;
+    }
+
+    existing.textContent = css;
+
+    // Trigger flicker animation on glow-notes boxes that just appeared
+    for (let i = 0; i <= currentStep && i < animationSteps.length; i++) {
+      const step = animationSteps[i];
+      for (const sid of step.shapeIds) {
+        if (!sid.includes(':line:')) {
+          const shape = editor.getShape(sid as any) as any;
+          if (shape?.type === 'glow-notes') {
+            const el = document.querySelector(`[data-shape-id="${sid}"] .glow-notes-box`) as HTMLElement;
+            if (el) {
+              if (i === currentStep) {
+                // Just appeared — trigger flicker
+                el.classList.remove('glow-flicker-in');
+                void el.offsetWidth; // force reflow to restart animation
+                el.classList.add('glow-flicker-in');
+                // Play border_animation sound
+                try {
+                  const audio = new Audio('/sounds/border_animation.mp3');
+                  audio.volume = 0.3;
+                  audio.play().catch(() => {});
+                } catch { /* ignore */ }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return () => {
+      const el = document.getElementById(styleId);
+      if (el) el.textContent = '';
+    };
+  }, [isLocked, currentStep, animationSteps, editor]);
   useEffect(() => {
     if (!editor || isLocked) return;
     const updateSelection = () => {
@@ -423,6 +517,7 @@ export default function LessonCanvas({
             ...step,
             shapeIds: step.shapeIds.filter(id => {
               if (pasteFrameIdsRef.current.has(id)) return true; // don't clean frame shapes
+              if (id.includes(':line:')) return true; // don't clean glow-notes line references
               if (isRfId(id)) return rfNodeIds.has(id) || rfEdgeIds.has(id);
               return existingShapeIds.has(id);
             }),
@@ -520,15 +615,48 @@ export default function LessonCanvas({
       if (trulyNew.length > 20 && !multiLinePasteRef.current) return;
       multiLinePasteRef.current = false;
 
-      const newSteps: AnimationStep[] = trulyNew.map((id, i) => ({
-        id: `step-${Date.now()}-${i}`,
-        shapeIds: [id],
-        animation: 'appear' as AnimationType,
-        duration: 800,
-        label: `Step`,
-        action: 'enter' as StepAction,
-        pageId,
-      }));
+      const newSteps: AnimationStep[] = [];
+      trulyNew.forEach((id, i) => {
+        const shape = editor.getShape(id as any) as any;
+        // For glow-notes shapes, add the box step + one step per line
+        if (shape?.type === 'glow-notes') {
+          // Box step
+          newSteps.push({
+            id: `step-${Date.now()}-${i}-box`,
+            shapeIds: [id],
+            animation: 'appear' as AnimationType,
+            duration: 800,
+            label: 'Step',
+            action: 'enter' as StepAction,
+            pageId,
+          });
+          // Line steps
+          try {
+            const lines: string[] = JSON.parse(shape.props?.lines || '[]');
+            lines.forEach((_line: string, li: number) => {
+              newSteps.push({
+                id: `step-${Date.now()}-${i}-line-${li}`,
+                shapeIds: [`${id}:line:${li}`],
+                animation: 'appear' as AnimationType,
+                duration: 800,
+                label: 'Step',
+                action: 'enter' as StepAction,
+                pageId,
+              });
+            });
+          } catch { /* no lines */ }
+        } else {
+          newSteps.push({
+            id: `step-${Date.now()}-${i}`,
+            shapeIds: [id],
+            animation: 'appear' as AnimationType,
+            duration: 800,
+            label: 'Step',
+            action: 'enter' as StepAction,
+            pageId,
+          });
+        }
+      });
 
       // Insert at end of current page's section
       setAnimationSteps(prev => {
@@ -570,6 +698,92 @@ export default function LessonCanvas({
     const unsubSession = editor.store.listen(handlePageSwitch, { scope: 'session' });
 
     return () => { unsub(); unsubSession(); };
+  }, [editor, isLocked]);
+
+  // ─── Sync glow-notes line steps when box content changes ────────────────
+  const glowLinesCountRef = useRef<Record<string, number>>({}); // shapeId → line count
+  useEffect(() => {
+    if (!editor || isLocked) return;
+
+    const syncGlowLines = () => {
+      const currentSteps = animationStepsRef.current;
+      // Find all glow-notes shapes that have a box step in the timeline
+      const allBoxCandidates = currentSteps.filter(s =>
+        s.shapeIds.length === 1 &&
+        !s.shapeIds[0].includes(':line:')
+      );
+      const glowBoxSteps = allBoxCandidates.filter(s => {
+        const shape = editor.getShape(s.shapeIds[0] as any) as any;
+        return shape?.type === 'glow-notes';
+      });
+
+      if (glowBoxSteps.length === 0) return;
+
+      let changed = false;
+
+      for (const boxStep of glowBoxSteps) {
+        const shapeId = boxStep.shapeIds[0];
+        const shape = editor.getShape(shapeId as any) as any;
+        if (!shape) continue;
+
+        let lines: string[] = [];
+        try { lines = JSON.parse(shape.props?.lines || '[]'); } catch { continue; }
+
+        const prevCount = glowLinesCountRef.current[shapeId] ?? -1;
+        if (lines.length === prevCount) continue; // No change
+        glowLinesCountRef.current[shapeId] = lines.length;
+        changed = true;
+      }
+
+      if (!changed) return;
+
+      // Use functional update to avoid stale ref race with auto-add
+      setAnimationSteps(prev => {
+        let result = [...prev];
+
+        for (const boxStep of glowBoxSteps) {
+          const shapeId = boxStep.shapeIds[0];
+          const shape = editor.getShape(shapeId as any) as any;
+          if (!shape) continue;
+
+          let lines: string[] = [];
+          try { lines = JSON.parse(shape.props?.lines || '[]'); } catch { continue; }
+
+          // Remove old line steps for this shape
+          result = result.filter(s =>
+            !(s.shapeIds.length === 1 && s.shapeIds[0].startsWith(`${shapeId}:line:`))
+          );
+
+          if (lines.length === 0) continue;
+
+          // Create new line steps
+          const newLineSteps = lines.map((_, li) => ({
+            id: `step-${Date.now()}-glow-${shapeId}-${li}`,
+            shapeIds: [`${shapeId}:line:${li}`],
+            animation: 'appear' as any,
+            duration: 800,
+            label: 'Step',
+            action: 'enter' as any,
+            pageId: boxStep.pageId,
+          }));
+
+          // Insert line steps right after the box step
+          const boxIdx = result.findIndex(s => s.id === boxStep.id);
+          if (boxIdx >= 0) {
+            result.splice(boxIdx + 1, 0, ...newLineSteps);
+          } else {
+            result.push(...newLineSteps);
+          }
+        }
+
+        return result;
+      });
+      markDirty();
+    };
+
+    // Run on store changes (shape prop updates)
+    const unsub = editor.store.listen(syncGlowLines, { scope: 'document' });
+    return () => unsub();
   }, [editor, isLocked]);
 
   // ─── Auto-add new RF nodes/edges to timeline ──────────────────────────────
@@ -1070,6 +1284,36 @@ export default function LessonCanvas({
     setTimeout(() => playBeep(784, 250, 0.06), 240);
   }, [playBeep]);
 
+  // ─── Glow Notes sound effects ───────────────────────────────────────────
+  // Box appears: soft pop/thud
+  const playGlowBoxSound = useCallback(() => {
+    playBeep(250, 120, 0.025);
+  }, [playBeep]);
+
+  // Line highlights: gentle tick
+  const playGlowLineSound = useCallback(() => {
+    playBeep(700, 80, 0.02);
+  }, [playBeep]);
+
+  // Box-to-box transition: rising swoosh (frequency sweep)
+  const playGlowTransitionSound = useCallback(() => {
+    try {
+      if (!countdownAudioCtxRef.current) countdownAudioCtxRef.current = new AudioContext();
+      const ctx = countdownAudioCtxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.025, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.25);
+    } catch { /* ignore */ }
+  }, []);
+
   // Helper: get the last step index on a given page
   const getLastStepIndexOnPage = useCallback((pageId: string): number => {
     let last = -1;
@@ -1078,6 +1322,39 @@ export default function LessonCanvas({
     }
     return last;
   }, [animationSteps]);
+
+  // Helper: play glow-notes sound based on step content
+  const playGlowSound = useCallback((stepIndex: number) => {
+    if (stepIndex < 0 || stepIndex >= animationSteps.length) return;
+    const step = animationSteps[stepIndex];
+    const sid = step.shapeIds[0] || '';
+
+    if (sid.includes(':line:')) {
+      // Line highlight — tick sound
+      playGlowLineSound();
+    } else if (editor) {
+      const shape = editor.getShape(sid as any) as any;
+      if (shape?.type === 'glow-notes') {
+        // Check if previous step was also a glow-notes box — transition sound
+        if (stepIndex > 0) {
+          const prevStep = animationSteps[stepIndex - 1];
+          const prevSid = prevStep.shapeIds[0] || '';
+          const prevIsGlowLine = prevSid.includes(':line:');
+          const prevIsGlowBox = !prevIsGlowLine && (() => {
+            const prevShape = editor.getShape(prevSid as any) as any;
+            return prevShape?.type === 'glow-notes';
+          })();
+          if (prevIsGlowLine || prevIsGlowBox) {
+            // Transitioning from one glow-notes content to another box — swoosh
+            playGlowTransitionSound();
+            return;
+          }
+        }
+        // First glow box or standalone — pop sound
+        playGlowBoxSound();
+      }
+    }
+  }, [animationSteps, editor, playGlowBoxSound, playGlowLineSound, playGlowTransitionSound]);
 
   // Helper: check position relative to page end and play sounds
   const playPageCountdownSound = useCallback((stepIndex: number) => {
@@ -1255,6 +1532,8 @@ export default function LessonCanvas({
     // Handle virtual subtitle step
     if (subtitleNeedsStep && !revealedSubtitlePages.has(pid)) {
       setRevealedSubtitlePages(prev => new Set(prev).add(pid));
+      // Play subtitle reveal sound
+      try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 0.3; a.play().catch(() => {}); } catch {}
       return; // consume this arrow press for the subtitle reveal
     }
 
@@ -1297,6 +1576,7 @@ export default function LessonCanvas({
       }
       playStepAudio(pendingStep);
       playPageCountdownSound(pending.nextStep);
+      playGlowSound(pending.nextStep);
       return;
     }
 
@@ -1378,6 +1658,7 @@ export default function LessonCanvas({
             setRevealedTopicPages(prev => new Set(prev).add(targetPid));
           } else if (targetSubtitleNeedsStep) {
             setRevealedSubtitlePages(prev => new Set(prev).add(targetPid));
+            try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 0.3; a.play().catch(() => {}); } catch {}
           }
           setCurrentStep(nextStep - 1);
         } else {
@@ -1387,6 +1668,7 @@ export default function LessonCanvas({
             handleCamera();
             playStepAudio(step);
             playPageCountdownSound(nextStep);
+            playGlowSound(nextStep);
             setCurrentStep(nextStep);
           });
         }
@@ -1413,6 +1695,7 @@ export default function LessonCanvas({
       handleCamera();
       playStepAudio(step);
       playPageCountdownSound(nextStep);
+      playGlowSound(nextStep);
       setCurrentStep(nextStep);
     }
 
@@ -1479,7 +1762,7 @@ export default function LessonCanvas({
       }
     }
 
-  }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio, playPageCountdownSound, revealedTopicPages, revealedSubtitlePages]);
+  }, [editor, isLocked, currentStep, animationSteps, shapeAnimations, ensureShapesVisible, applyAnimationState, playStepAudio, playPageCountdownSound, playGlowSound, revealedTopicPages, revealedSubtitlePages]);
 
   const goPrevious = useCallback(() => {
     if (!editor || !isLocked) return;
@@ -2649,6 +2932,18 @@ export default function LessonCanvas({
                 <FileText className="w-3 h-3" />
                 Markdown
               </button>
+              {/* Glow Notes Box */}
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  const { x, y } = editor.getViewportScreenCenter();
+                  const point = editor.screenToPage({ x, y });
+                  editor.createShape({ type: 'glow-notes' as any, x: point.x - 225, y: point.y - 175 });
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+              >
+                ✨ Glow
+              </button>
               {/* Flip selected shapes horizontally */}
               <button
                 onClick={() => {
@@ -2861,7 +3156,15 @@ export default function LessonCanvas({
                 )}
                 {hasSubtitle && (
                   <div key={`subtitle-${pid}`} className="flex justify-start" style={{ visibility: sVisible ? 'visible' : 'hidden', opacity: sVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
-                    <div className={`relative border-2 rounded inline-flex items-center ${sPlayAnim ? `step-anim-${sAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: sBorder }}>
+                    <div className={`relative border-2 rounded inline-flex items-center ${sPlayAnim ? `step-anim-${sAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: sBorder, boxShadow: sVisible ? `0 0 8px ${sBorder}44, 0 0 20px ${sBorder}18` : 'none' }}
+                      onAnimationEnd={(e) => {
+                        // After reveal animation completes, trigger flicker once
+                        if (e.animationName.startsWith('step-') && !e.currentTarget.classList.contains('subtitle-flicker-in')) {
+                          const el = e.currentTarget;
+                          el.classList.add('subtitle-flicker-in');
+                        }
+                      }}
+                    >
                       <div className="inline-grid items-center">
                         <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22 }}>{sText || 'Subtitle'}</span>
                         <input
