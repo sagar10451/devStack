@@ -12,8 +12,8 @@ export interface ContentNode {
   slug: string;
   icon: string;
   color: string;
-  /** 'live' (default) or 'coming-soon' — shows ribbon on card */
-  status?: 'live' | 'coming-soon';
+  /** 'live' (default), 'coming-soon', 'done', or 'upcoming' — shows ribbon on card */
+  status?: 'live' | 'coming-soon' | 'done' | 'upcoming';
   /** Optional YouTube URL for this level (channel, playlist, or video) */
   youtubeUrl?: string;
   /** Child nodes — if empty, this is a leaf (canvas lesson) */

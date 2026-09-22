@@ -352,6 +352,66 @@ export function canvasApiPlugin(): Plugin {
           }
         });
       });
+
+      // ─── Global audio file save/load ───────────────────────────────────
+
+      // POST /__save-audio — save audio file to disk (binary, not base64)
+      server.middlewares.use('/__save-audio', (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+        req.on('end', () => {
+          try {
+            const url = new URL(req.url || '', 'http://localhost');
+            const siteId = url.searchParams.get('siteId') || '';
+            const topicSlug = url.searchParams.get('topicSlug') || '';
+            const subtopicSlug = url.searchParams.get('subtopicSlug') || '';
+            const fileName = url.searchParams.get('fileName') || 'audio.mp3';
+            const dir = join(process.cwd(), 'data', 'audio', siteId, topicSlug);
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+            const filePath = join(dir, `${subtopicSlug}-${fileName}`);
+            writeFileSync(filePath, Buffer.concat(chunks));
+            console.log(`[canvas-api] Saved audio: ${filePath} (${Math.round(Buffer.concat(chunks).length / 1024)}KB)`);
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: true, fileName: `${subtopicSlug}-${fileName}` }));
+          } catch (err: any) {
+            console.error(`[canvas-api] Audio save error:`, err.message);
+            res.statusCode = 500;
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: false, error: err.message }));
+          }
+        });
+      });
+
+      // GET /__load-audio?siteId=...&topicSlug=...&fileName=...
+      server.middlewares.use('/__load-audio', (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        try {
+          const url = new URL(req.url || '', 'http://localhost');
+          const siteId = url.searchParams.get('siteId') || '';
+          const topicSlug = url.searchParams.get('topicSlug') || '';
+          const fileName = url.searchParams.get('fileName') || '';
+          const filePath = join(process.cwd(), 'data', 'audio', siteId, topicSlug, fileName);
+          if (existsSync(filePath)) {
+            const data = readFileSync(filePath);
+            const ext = fileName.split('.').pop()?.toLowerCase() || 'mp3';
+            const mimeMap: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac' };
+            res.setHeader('Content-Type', mimeMap[ext] || 'audio/mpeg');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Content-Length', data.length.toString());
+            res.end(data);
+          } else {
+            res.statusCode = 404;
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end('Not found');
+          }
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(err.message);
+        }
+      });
     },
   };
 }

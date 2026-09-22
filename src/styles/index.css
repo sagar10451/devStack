@@ -12,9 +12,9 @@
   --color-primary-800: #1e40af;
   --color-primary-900: #1e3a8a;
 
-  --color-surface: #e2e8f0;
-  --color-surface-card: #ffffff;
-  --color-surface-hover: #f8fafc;
+  --color-surface: #0a0a14;
+  --color-surface-card: #12121f;
+  --color-surface-hover: #0d0d18;
 }
 
 body {
@@ -33,7 +33,7 @@ html:has(.presenting-mode):has(.canvas-locked) {
   font-size: 2rem;
   font-weight: 700;
   margin-bottom: 1rem;
-  color: #1e293b;
+  color: #e2e8f0;
 }
 
 .prose h2 {
@@ -41,7 +41,7 @@ html:has(.presenting-mode):has(.canvas-locked) {
   font-weight: 600;
   margin-top: 2rem;
   margin-bottom: 0.75rem;
-  color: #1e40af;
+  color: #60a5fa;
 }
 
 .prose h3 {
@@ -49,13 +49,13 @@ html:has(.presenting-mode):has(.canvas-locked) {
   font-weight: 600;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
-  color: #334155;
+  color: #94a3b8;
 }
 
 .prose p {
   margin-bottom: 1rem;
   line-height: 1.75;
-  color: #475569;
+  color: #cbd5e1;
 }
 
 .prose ul {
@@ -73,15 +73,15 @@ html:has(.presenting-mode):has(.canvas-locked) {
 .prose li {
   margin-bottom: 0.5rem;
   line-height: 1.6;
-  color: #475569;
+  color: #cbd5e1;
 }
 
 .prose code {
-  background-color: #f1f5f9;
+  background-color: #1a1a2e;
   padding: 0.125rem 0.375rem;
   border-radius: 0.25rem;
   font-size: 0.875rem;
-  color: #be185d;
+  color: #f472b6;
 }
 
 .prose pre {
@@ -106,23 +106,23 @@ html:has(.presenting-mode):has(.canvas-locked) {
   border-left: 4px solid #3b82f6;
   padding-left: 1rem;
   margin: 1.5rem 0;
-  background-color: #eff6ff;
+  background-color: rgba(59, 130, 246, 0.08);
   padding: 1rem 1.25rem;
   border-radius: 0 0.5rem 0.5rem 0;
 }
 
 .prose blockquote p {
-  color: #1e40af;
+  color: #93c5fd;
   margin-bottom: 0;
 }
 
 .prose strong {
-  color: #1e293b;
+  color: #f1f5f9;
   font-weight: 600;
 }
 
 .prose hr {
-  border-color: #e2e8f0;
+  border-color: #1a1a2e;
   margin: 2rem 0;
 }
 
@@ -134,15 +134,15 @@ html:has(.presenting-mode):has(.canvas-locked) {
 
 .prose th,
 .prose td {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #1a1a2e;
   padding: 0.75rem 1rem;
   text-align: left;
 }
 
 .prose th {
-  background-color: #f1f5f9;
+  background-color: #12121f;
   font-weight: 600;
-  color: #334155;
+  color: #94a3b8;
 }
 
 
@@ -158,7 +158,7 @@ a[href*="tldraw.dev"] {
 
 /* Softer dark canvas background */
 .tl-background {
-  background-color: #f0ede8 !important;
+  background-color: #0b0b16 !important;
 }
 .tl-canvas {
   background-color: #f0ede8 !important;
@@ -409,13 +409,30 @@ a[href*="tldraw.dev"] {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0%25' stop-color='%23ff0000' stop-opacity='1'/%3E%3Cstop offset='40%25' stop-color='%23ff0000' stop-opacity='0.8'/%3E%3Cstop offset='70%25' stop-color='%23ff0000' stop-opacity='0.2'/%3E%3Cstop offset='100%25' stop-color='%23ff0000' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='16' cy='16' r='14' fill='url(%23g)'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ff0000'/%3E%3Ccircle cx='15' cy='15' r='2' fill='%23ff6666' opacity='0.8'/%3E%3C/svg%3E") 16 16, crosshair !important;
 }
 
+/* Hide cursor when audio auto-play is active in fullscreen */
+body.audio-playing-fullscreen,
+body.audio-playing-fullscreen *,
+body.audio-playing-fullscreen .tl-canvas,
+body.audio-playing-fullscreen .tl-canvas *,
+body.audio-playing-fullscreen .canvas-locked,
+body.audio-playing-fullscreen .canvas-locked * {
+  cursor: none !important;
+}
+
+/* Hide laser toggle button when audio is auto-playing in fullscreen */
+body.audio-playing-fullscreen button[title*="Laser"],
+body.audio-playing-fullscreen button[title*="Pointer"],
+body.audio-playing-fullscreen button[title*="Switch to"] {
+  display: none !important;
+}
+
 /* (hand mode removed — presentation uses normal pointer by default, laser is opt-in) */
 
 
 /* Coming Soon diagonal ribbon */
 .ribbon-coming-soon {
   position: absolute;
-  top: 14px;
+  top: 22px;
   right: -28px;
   width: 130px;
   padding: 5px 0;
@@ -428,6 +445,42 @@ a[href*="tldraw.dev"] {
   letter-spacing: 0.5px;
   transform: rotate(45deg);
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+  z-index: 10;
+}
+
+.ribbon-done {
+  position: absolute;
+  top: 22px;
+  right: -28px;
+  width: 130px;
+  padding: 5px 0;
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transform: rotate(45deg);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+  z-index: 10;
+}
+
+.ribbon-upcoming {
+  position: absolute;
+  top: 22px;
+  right: -28px;
+  width: 130px;
+  padding: 5px 0;
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transform: rotate(45deg);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
   z-index: 10;
 }
 
@@ -664,7 +717,7 @@ a[href*="tldraw.dev"] {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 16px;
   line-height: 1.8;
-  color: #1e293b;
+  color: #e2e8f0;
 }
 .public-md-content h1 {
   font-size: 2em;
@@ -677,21 +730,21 @@ a[href*="tldraw.dev"] {
   font-size: 1.5em;
   font-weight: 700;
   margin: 1.8em 0 0.5em;
-  color: #1e40af;
+  color: #60a5fa;
   padding-bottom: 0.3em;
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid #1a1a2e;
 }
 .public-md-content h3 {
   font-size: 1.25em;
   font-weight: 600;
   margin: 1.4em 0 0.4em;
-  color: #334155;
+  color: #94a3b8;
 }
 .public-md-content h4 {
   font-size: 1.1em;
   font-weight: 600;
   margin: 1.2em 0 0.3em;
-  color: #475569;
+  color: #64748b;
 }
 .public-md-content p {
   margin: 0.8em 0;
@@ -708,19 +761,19 @@ a[href*="tldraw.dev"] {
 }
 .public-md-content strong {
   font-weight: 600;
-  color: #0f172a;
+  color: #f1f5f9;
 }
 .public-md-content em {
   font-style: italic;
-  color: #475569;
+  color: #94a3b8;
 }
 .public-md-content del {
   color: #94a3b8;
   text-decoration: line-through;
 }
 .public-md-content .inline-code {
-  background: #f1f5f9;
-  color: #be185d;
+  background: #1a1a2e;
+  color: #f472b6;
   padding: 2px 7px;
   border-radius: 5px;
   font-size: 0.88em;
@@ -736,7 +789,7 @@ a[href*="tldraw.dev"] {
 }
 .public-md-content blockquote p {
   margin: 0.3em 0;
-  color: #1e40af;
+  color: #93c5fd;
 }
 .public-md-content table {
   width: 100%;
@@ -745,30 +798,30 @@ a[href*="tldraw.dev"] {
   font-size: 0.92em;
 }
 .public-md-content th, .public-md-content td {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #1a1a2e;
   padding: 10px 14px;
   text-align: left;
 }
 .public-md-content th {
-  background: #f8fafc;
+  background: #12121f;
   font-weight: 600;
-  color: #334155;
+  color: #94a3b8;
 }
 .public-md-content tr:nth-child(even) {
-  background: #fafbfc;
+  background: #0d0d18;
 }
 .public-md-content a {
-  color: #2563eb;
+  color: #60a5fa;
   text-decoration: none;
   font-weight: 500;
 }
 .public-md-content a:hover {
   text-decoration: underline;
-  color: #1d4ed8;
+  color: #3b82f6;
 }
 .public-md-content hr {
   border: none;
-  border-top: 2px solid #e2e8f0;
+  border-top: 2px solid #1a1a2e;
   margin: 2em 0;
 }
 .public-md-content img {
@@ -861,10 +914,10 @@ a[href*="tldraw.dev"] {
 }
 
 /* Sidebar */
-.bw-theme .bg-\[\#0a1230\] {
+.bw-theme .bg-\[\#0a0a14\] {
   background: #0a0a0a !important;
 }
-.bw-theme .bg-\[\#0a1230\] * {
+.bw-theme .bg-\[\#0a0a14\] * {
   border-color: #2a2a2a !important;
 }
 
@@ -877,18 +930,18 @@ a[href*="tldraw.dev"] {
 }
 
 /* Progress cards — active */
-.bw-theme .border-orange-400\/30 {
+.bw-theme .border-indigo-400\/30 {
   border-color: rgba(255, 255, 255, 0.2) !important;
   background: #1a1a1a !important;
 }
 /* Progress cards — complete */
-.bw-theme .border-emerald-500\/40,
-.bw-theme .bg-emerald-950\/40 {
+.bw-theme .border-emerald-500\/30,
+.bw-theme .bg-emerald-500\/8 {
   border-color: rgba(255, 255, 255, 0.4) !important;
   background: #111 !important;
 }
 /* Progress cards — pending */
-.bw-theme .border-slate-700\/40 {
+.bw-theme .border-\[\#2a2a4e\] {
   border-color: rgba(255, 255, 255, 0.08) !important;
 }
 
@@ -947,13 +1000,10 @@ a[href*="tldraw.dev"] {
 }
 
 /* Timeline */
-.bw-theme .border-\[\#1a2a5e\] {
+.bw-theme .border-\[\#1a1a2e\] {
   border-color: #2a2a2a !important;
 }
-.bw-theme .bg-\[\#0f1b3d\] {
-  background: #0a0a0a !important;
-}
-.bw-theme .bg-\[\#0f1b3d\]\/95 {
+.bw-theme .bg-\[\#0a0a14\]\/95 {
   background: rgba(10, 10, 10, 0.95) !important;
 }
 
@@ -1005,6 +1055,92 @@ a[href*="tldraw.dev"] {
   animation: glow-border-flicker 1.2s ease-out forwards !important;
 }
 
+/* ─── Glow Notes — Line reveal classes ─────────────────────────────────────── */
+/* Lines with glow-swipe (current) or glow-done (completed) show at full opacity with their original color */
+[data-glow-line].glow-swipe,
+[data-glow-line].glow-done {
+  opacity: 1 !important;
+}
+
+/* ─── Image Glow — drop-shadow on PNG/image shapes during presentation ───── */
+@keyframes image-glow-breathe {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+[data-shape-id].glow-image-blue {
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6)) drop-shadow(0 0 22px rgba(59, 130, 246, 0.25)) !important;
+  animation: image-glow-breathe 3s ease-in-out infinite !important;
+}
+[data-shape-id].glow-image-cyan {
+  filter: drop-shadow(0 0 8px rgba(6, 182, 212, 0.6)) drop-shadow(0 0 22px rgba(6, 182, 212, 0.25)) !important;
+  animation: image-glow-breathe 3s ease-in-out infinite !important;
+}
+[data-shape-id].glow-image-purple {
+  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.6)) drop-shadow(0 0 22px rgba(139, 92, 246, 0.25)) !important;
+  animation: image-glow-breathe 3s ease-in-out infinite !important;
+}
+[data-shape-id].glow-image-pink {
+  filter: drop-shadow(0 0 8px rgba(236, 72, 153, 0.55)) drop-shadow(0 0 22px rgba(236, 72, 153, 0.2)) !important;
+  animation: image-glow-breathe 3s ease-in-out infinite !important;
+}
+[data-shape-id].glow-image-emerald {
+  filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.55)) drop-shadow(0 0 22px rgba(16, 185, 129, 0.2)) !important;
+  animation: image-glow-breathe 3s ease-in-out infinite !important;
+}
+[data-shape-id].glow-image-amber {
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.55)) drop-shadow(0 0 22px rgba(245, 158, 11, 0.2)) !important;
+  animation: image-glow-breathe 3s ease-in-out infinite !important;
+}
+
+/* ─── Glow Notes — Border Completion Running Light ─────────────────────────── */
+@keyframes glow-border-run {
+  0% { background-position: 0% 0; }
+  100% { background-position: 300% 0; }
+}
+
+.glow-notes-box.glow-border-complete {
+  border: none !important;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  position: relative;
+  overflow: visible !important;
+}
+.glow-notes-box.glow-border-complete::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid transparent;
+  background: linear-gradient(90deg, #3b82f6, #06b6d4, #8b5cf6, #3b82f6, #06b6d4, #8b5cf6) border-box;
+  background-size: 300% 100%;
+  animation: glow-border-run 2s linear infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 2;
+}
+/* Soft outer glow that follows the border */
+.glow-notes-box.glow-border-complete::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid transparent;
+  background: linear-gradient(90deg, rgba(59,130,246,0.3), rgba(6,182,212,0.2), rgba(139,92,246,0.3), rgba(59,130,246,0.3), rgba(6,182,212,0.2), rgba(139,92,246,0.3)) border-box;
+  background-size: 300% 100%;
+  animation: glow-border-run 2s linear infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  filter: blur(6px);
+  pointer-events: none;
+  z-index: 1;
+}
+
 
 /* ─── Subtitle Reveal — Neon Flicker Animation ─────────────────────────────── */
 @keyframes subtitle-flicker-in {
@@ -1021,4 +1157,25 @@ a[href*="tldraw.dev"] {
 
 .subtitle-flicker-in {
   animation: subtitle-flicker-in 1s ease-out forwards !important;
+}
+
+
+/* ─── Dark Mode — Global ───────────────────────────────────────────────────── */
+
+/* Canvas background — subtle color variation + grid (lightweight) */
+.tl-background {
+  background-color: #0b0b16 !important;
+  background-image:
+    /* Single blended multi-stop gradient for color variation */
+    radial-gradient(ellipse at 20% 25%, rgba(139, 92, 246, 0.06), transparent 50%),
+    radial-gradient(ellipse at 80% 75%, rgba(6, 182, 212, 0.05), transparent 50%),
+    /* Grid lines */
+    linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px) !important;
+  background-size: 100% 100%, 100% 100%, 24px 24px, 24px 24px !important;
+}
+
+/* tldraw dark mode text — ensure shapes default to light */
+.tl-theme__dark {
+  --tl-color-text: #e2e8f0;
 }

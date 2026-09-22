@@ -75,6 +75,7 @@ export default function CanvasEditor({
         onMount={handleMount}
         hideUi={hideUi}
         shapeUtils={customShapeUtils}
+        colorScheme="dark"
         components={{ PageMenu: null, MainMenu: null, QuickActions: null, ActionsMenu: null, HelpMenu: null }}
       />
     </div>

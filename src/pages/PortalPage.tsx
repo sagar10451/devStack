@@ -33,9 +33,9 @@ export default function PortalPage({ searchQuery, onSearchChange }: PortalPagePr
   if (!currentNode) {
     return (
       <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-16 text-center">
-        <h2 className="text-2xl font-bold text-gray-800">Page not found</h2>
+        <h2 className="text-2xl font-bold text-gray-200">Page not found</h2>
         <p className="text-gray-500 mt-2">The page you're looking for doesn't exist.</p>
-        <Link to={site.basePath || '/'} className="inline-block mt-4 text-blue-600 hover:text-blue-700 font-medium">
+        <Link to={site.basePath || '/'} className="inline-block mt-4 text-blue-400 hover:text-blue-300 font-medium">
           ← Back to Home
         </Link>
       </main>
@@ -178,14 +178,14 @@ function CardGrid({ nodes, searchQuery, onSearchChange, basePath, breadcrumbs, s
       {/* Breadcrumb (not on top-level landing) */}
       {!isTopLevel && breadcrumbs.length > 0 && (
         <nav className="flex items-center gap-2 text-sm text-gray-500 mb-4 flex-wrap">
-          <Link to={site.basePath || '/'} className="hover:text-blue-600 transition-colors">Home</Link>
+          <Link to={site.basePath || '/'} className="hover:text-blue-400 transition-colors">Home</Link>
           {breadcrumbs.map((crumb, i) => (
             <span key={crumb.slug} className="flex items-center gap-2">
               <ChevronRight className="w-3 h-3" />
               {i === breadcrumbs.length - 1 ? (
-                <span className="text-gray-800 font-medium">{crumb.title}</span>
+                <span className="text-gray-200 font-medium">{crumb.title}</span>
               ) : (
-                <Link to={crumb.path} className="hover:text-blue-600 transition-colors">{crumb.title}</Link>
+                <Link to={crumb.path} className="hover:text-blue-400 transition-colors">{crumb.title}</Link>
               )}
             </span>
           ))}
@@ -195,13 +195,15 @@ function CardGrid({ nodes, searchQuery, onSearchChange, basePath, breadcrumbs, s
       {/* Topic Header Card (when not top-level) */}
       {!isTopLevel && parentNode && (
         <div
-          className="bg-slate-800 rounded-xl border-2 border-slate-700 p-5 mb-6"
-          style={{ borderLeftWidth: '4px', borderLeftColor: parentNode.color }}
+          className="relative bg-gradient-to-r from-[#141428] to-[#0e0e1c] rounded-xl border border-[#2a2a4e] p-5 mb-6 overflow-hidden"
+          style={{ borderLeftWidth: '3px', borderLeftColor: parentNode.color, boxShadow: `0 0 20px ${parentNode.color}10, 0 4px 20px rgba(0,0,0,0.3)` }}
         >
+          {/* Top highlight */}
+          <div className="absolute top-0 left-[10%] right-[60%] h-[1px]" style={{ background: `linear-gradient(90deg, transparent, ${parentNode.color}40, transparent)` }} />
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: `linear-gradient(135deg, ${parentNode.color}50, ${parentNode.color}30)` }}
+              style={{ background: `linear-gradient(135deg, ${parentNode.color}40, ${parentNode.color}15)`, boxShadow: `0 0 12px ${parentNode.color}25` }}
             >
               <TopicIcon icon={parentNode.icon} className="w-5 h-5 text-white" />
             </div>
@@ -234,8 +236,8 @@ function CardGrid({ nodes, searchQuery, onSearchChange, basePath, breadcrumbs, s
             </div>
 
             {/* Search bar inside dark header */}
-            <div className="hidden sm:flex items-center bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 w-56 focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-400/30 transition-all">
-              <Search className="w-3.5 h-3.5 text-slate-400 mr-2 flex-shrink-0" />
+            <div className="hidden sm:flex items-center bg-[#12121f] border border-[#2a2a4e] rounded-lg px-3 py-2 w-56 focus-within:border-blue-500/40 focus-within:ring-1 focus-within:ring-blue-500/20 transition-all">
+              <Search className="w-3.5 h-3.5 text-slate-500 mr-2 flex-shrink-0" />
               <input
                 type="text"
                 placeholder="Search..."
@@ -258,7 +260,7 @@ function CardGrid({ nodes, searchQuery, onSearchChange, basePath, breadcrumbs, s
             max={5}
             value={columns}
             onChange={(e) => handleColumnsChange(Number(e.target.value))}
-            className="w-28 h-2 bg-slate-400 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-indigo-600 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:bg-indigo-600 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0"
+            className="w-28 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-blue-500 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:bg-blue-500 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0"
           />
           <span className="text-xs font-medium text-gray-500 w-4">{columns}</span>
         </div>
@@ -280,22 +282,54 @@ function CardGrid({ nodes, searchQuery, onSearchChange, basePath, breadcrumbs, s
                 layout: { type: 'spring', stiffness: 500, damping: 35 },
               }}
             >
-            <Link
-              to={`${basePath}/${node.slug}`}
-              className={`group block bg-white rounded-2xl ${cardPadding} border-2 border-indigo-200 shadow-sm hover:shadow-lg hover:-translate-y-1 hover:border-indigo-400 transition-all duration-300 relative overflow-hidden ${!isTopLevel ? 'h-full' : ''}`}
+            {(() => {
+              const canEnter = isLocalhost || node.status === 'done' || !node.status || node.status === 'live';
+              const CardWrapper = canEnter ? Link : 'div';
+              const cardProps = canEnter ? { to: `${basePath}/${node.slug}` } : {};
+              return (
+            <CardWrapper
+              {...cardProps as any}
+              className={`group block relative rounded-2xl ${cardPadding} border transition-all duration-300 overflow-hidden ${!isTopLevel ? 'h-full' : ''} ${!canEnter ? 'cursor-not-allowed opacity-70' : ''}`}
+              style={{
+                background: 'linear-gradient(to bottom, #141428, #0e0e1c)',
+                borderColor: `${node.color}15`,
+                boxShadow: `0 0 0 1px ${node.color}08, 0 4px 16px rgba(0,0,0,0.25)`,
+              }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.borderColor = `${node.color}45`;
+                el.style.boxShadow = `0 0 16px ${node.color}18, 0 0 50px ${node.color}08, 0 8px 24px rgba(0,0,0,0.35)`;
+                el.style.transform = 'translateY(-4px)';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.borderColor = `${node.color}15`;
+                el.style.boxShadow = `0 0 0 1px ${node.color}08, 0 4px 16px rgba(0,0,0,0.25)`;
+                el.style.transform = 'translateY(0)';
+              }}
             >
+              {/* Top highlight line */}
+              <div className="absolute top-0 left-[15%] right-[15%] h-[1px]" style={{ background: `linear-gradient(90deg, transparent, ${node.color}25, transparent)` }} />
               {/* Coming Soon ribbon + frosted glass */}
               {node.status === 'coming-soon' && (
                 <>
                   <div className="ribbon-coming-soon">In Progress</div>
-                  <div className="absolute bottom-0 left-0 right-0 h-[60px] backdrop-blur-[2px] bg-white/60 z-[5] flex items-end justify-center pb-3">
-                    <span className="text-xs font-semibold text-indigo-500 tracking-wide uppercase">Coming Soon</span>
+                  <div className="absolute bottom-0 left-0 right-0 h-[60px] backdrop-blur-[2px] bg-[#0a0a12]/80 z-[5] flex items-end justify-center pb-3">
+                    <span className="text-xs font-semibold text-blue-400 tracking-wide uppercase">Coming Soon</span>
                   </div>
                 </>
               )}
+              {/* Done ribbon */}
+              {node.status === 'done' && (
+                <div className="ribbon-done">Done</div>
+              )}
+              {/* Upcoming ribbon */}
+              {node.status === 'upcoming' && (
+                <div className="ribbon-upcoming">Upcoming</div>
+              )}
 
               {/* Number badge */}
-              <div className="absolute top-3 right-3">
+              <div className="absolute top-1.5 right-2">
                 <span
                   className="text-xs font-bold px-2 py-0.5 rounded-full"
                   style={{
@@ -311,14 +345,15 @@ function CardGrid({ nodes, searchQuery, onSearchChange, basePath, breadcrumbs, s
               <div
                 className={`${iconSize} rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform duration-300`}
                 style={{
-                  background: `linear-gradient(135deg, ${node.color}20, ${node.color}10)`,
+                  background: `linear-gradient(135deg, ${node.color}25, ${node.color}08)`,
+                  boxShadow: `0 0 12px ${node.color}15`,
                 }}
               >
-                <TopicIcon icon={node.icon} className={iconInnerSize} />
+                <TopicIcon icon={node.icon} className={`${iconInnerSize} text-slate-300`} />
               </div>
 
               {/* Content */}
-              <h3 className={`font-semibold text-gray-900 ${titleSize} mb-1`}>
+              <h3 className={`font-semibold text-gray-100 ${titleSize} mb-1`}>
                 {node.title}
               </h3>
               <p className={`${descSize} text-gray-500 leading-relaxed line-clamp-2`}>
@@ -327,10 +362,12 @@ function CardGrid({ nodes, searchQuery, onSearchChange, basePath, breadcrumbs, s
 
               {/* Bottom accent line */}
               <div
-                className="absolute bottom-0 left-0 right-0 h-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                style={{ backgroundColor: node.color }}
+                className="absolute bottom-0 left-0 right-0 h-[2px] opacity-30 group-hover:opacity-100 transition-opacity duration-300"
+                style={{ background: `linear-gradient(90deg, transparent, ${node.color}, transparent)`, boxShadow: `0 0 8px ${node.color}40` }}
               />
-            </Link>
+            </CardWrapper>
+              );
+            })()}
           </motion.div>
         ))}
         </AnimatePresence>

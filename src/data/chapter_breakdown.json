@@ -26,15 +26,97 @@
             "icon": "BookOpen",
             "color": "#3b82f6",
             "children": [
-              { "id": "a-letter-to-god", "number": 1, "title": "A Letter to God", "description": "G.L. Fuentes", "slug": "a-letter-to-god", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "nelson-mandela", "number": 2, "title": "Nelson Mandela: Long Walk to Freedom", "description": "Nelson Mandela", "slug": "nelson-mandela", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "two-stories-about-flying", "number": 3, "title": "Two Stories about Flying", "description": "His First Flight & The Black Aeroplane", "slug": "two-stories-about-flying", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "from-the-diary-of-anne-frank", "number": 4, "title": "From the Diary of Anne Frank", "description": "Anne Frank", "slug": "from-the-diary-of-anne-frank", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "glimpses-of-india", "number": 5, "title": "Glimpses of India", "description": "A Baker from Goa, Coorg, Tea from Assam", "slug": "glimpses-of-india", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "mijbil-the-otter", "number": 6, "title": "Mijbil the Otter", "description": "Gavin Maxwell", "slug": "mijbil-the-otter", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "madam-rides-the-bus", "number": 7, "title": "Madam Rides the Bus", "description": "Vallikkannan", "slug": "madam-rides-the-bus", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "the-sermon-at-benares", "number": 8, "title": "The Sermon at Benares", "description": "Betty Renshaw", "slug": "the-sermon-at-benares", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "the-proposal", "number": 9, "title": "The Proposal", "description": "Anton Chekhov", "slug": "the-proposal", "icon": "BookOpen", "color": "#3b82f6", "children": [] }
+              {
+                "id": "a-letter-to-god",
+                "number": 1,
+                "title": "A Letter to God",
+                "description": "G.L. Fuentes",
+                "slug": "a-letter-to-god",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "status": "done",
+                "children": []
+              },
+              {
+                "id": "nelson-mandela",
+                "number": 2,
+                "title": "Nelson Mandela: Long Walk to Freedom",
+                "description": "Nelson Mandela",
+                "slug": "nelson-mandela",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "two-stories-about-flying",
+                "number": 3,
+                "title": "Two Stories about Flying",
+                "description": "His First Flight & The Black Aeroplane",
+                "slug": "two-stories-about-flying",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "from-the-diary-of-anne-frank",
+                "number": 4,
+                "title": "From the Diary of Anne Frank",
+                "description": "Anne Frank",
+                "slug": "from-the-diary-of-anne-frank",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "glimpses-of-india",
+                "number": 5,
+                "title": "Glimpses of India",
+                "description": "A Baker from Goa, Coorg, Tea from Assam",
+                "slug": "glimpses-of-india",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "mijbil-the-otter",
+                "number": 6,
+                "title": "Mijbil the Otter",
+                "description": "Gavin Maxwell",
+                "slug": "mijbil-the-otter",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "madam-rides-the-bus",
+                "number": 7,
+                "title": "Madam Rides the Bus",
+                "description": "Vallikkannan",
+                "slug": "madam-rides-the-bus",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "the-sermon-at-benares",
+                "number": 8,
+                "title": "The Sermon at Benares",
+                "description": "Betty Renshaw",
+                "slug": "the-sermon-at-benares",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "the-proposal",
+                "number": 9,
+                "title": "The Proposal",
+                "description": "Anton Chekhov",
+                "slug": "the-proposal",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              }
             ]
           },
           {
@@ -46,15 +128,96 @@
             "icon": "BookOpen",
             "color": "#ef4444",
             "children": [
-              { "id": "a-triumph-of-surgery", "number": 1, "title": "A Triumph of Surgery", "description": "James Herriot", "slug": "a-triumph-of-surgery", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "the-thiefs-story", "number": 2, "title": "The Thief's Story", "description": "Ruskin Bond", "slug": "the-thiefs-story", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "the-midnight-visitor", "number": 3, "title": "The Midnight Visitor", "description": "Robert Arthur", "slug": "the-midnight-visitor", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "a-question-of-trust", "number": 4, "title": "A Question of Trust", "description": "Victor Canning", "slug": "a-question-of-trust", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "footprints-without-feet-chapter", "number": 5, "title": "Footprints Without Feet", "description": "H.G. Wells", "slug": "footprints-without-feet-chapter", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "the-making-of-a-scientist", "number": 6, "title": "The Making of a Scientist", "description": "Robert W. Peterson", "slug": "the-making-of-a-scientist", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "the-necklace", "number": 7, "title": "The Necklace", "description": "Guy de Maupassant", "slug": "the-necklace", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "bholi", "number": 8, "title": "Bholi", "description": "K.A. Abbas", "slug": "bholi", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "the-book-that-saved-the-earth", "number": 9, "title": "The Book That Saved the Earth", "description": "Claire Boiko", "slug": "the-book-that-saved-the-earth", "icon": "BookOpen", "color": "#ef4444", "children": [] }
+              {
+                "id": "a-triumph-of-surgery",
+                "number": 1,
+                "title": "A Triumph of Surgery",
+                "description": "James Herriot",
+                "slug": "a-triumph-of-surgery",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "the-thiefs-story",
+                "number": 2,
+                "title": "The Thief's Story",
+                "description": "Ruskin Bond",
+                "slug": "the-thiefs-story",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "the-midnight-visitor",
+                "number": 3,
+                "title": "The Midnight Visitor",
+                "description": "Robert Arthur",
+                "slug": "the-midnight-visitor",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "a-question-of-trust",
+                "number": 4,
+                "title": "A Question of Trust",
+                "description": "Victor Canning",
+                "slug": "a-question-of-trust",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "footprints-without-feet-chapter",
+                "number": 5,
+                "title": "Footprints Without Feet",
+                "description": "H.G. Wells",
+                "slug": "footprints-without-feet-chapter",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "the-making-of-a-scientist",
+                "number": 6,
+                "title": "The Making of a Scientist",
+                "description": "Robert W. Peterson",
+                "slug": "the-making-of-a-scientist",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "the-necklace",
+                "number": 7,
+                "title": "The Necklace",
+                "description": "Guy de Maupassant",
+                "slug": "the-necklace",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "bholi",
+                "number": 8,
+                "title": "Bholi",
+                "description": "K.A. Abbas",
+                "slug": "bholi",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "the-book-that-saved-the-earth",
+                "number": 9,
+                "title": "The Book That Saved the Earth",
+                "description": "Claire Boiko",
+                "slug": "the-book-that-saved-the-earth",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              }
             ]
           },
           {
@@ -66,17 +229,116 @@
             "icon": "BookOpen",
             "color": "#8b5cf6",
             "children": [
-              { "id": "dust-of-snow", "number": 1, "title": "Dust of Snow", "description": "Robert Frost", "slug": "dust-of-snow", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "fire-and-ice", "number": 2, "title": "Fire and Ice", "description": "Robert Frost", "slug": "fire-and-ice", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "a-tiger-in-the-zoo", "number": 3, "title": "A Tiger in the Zoo", "description": "Leslie Norris", "slug": "a-tiger-in-the-zoo", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "how-to-tell-wild-animals", "number": 4, "title": "How to Tell Wild Animals", "description": "Carolyn Wells", "slug": "how-to-tell-wild-animals", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "the-ball-poem", "number": 5, "title": "The Ball Poem", "description": "John Berryman", "slug": "the-ball-poem", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "amanda", "number": 6, "title": "Amanda!", "description": "Robin Klein", "slug": "amanda", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "animals", "number": 7, "title": "Animals", "description": "Walt Whitman", "slug": "animals", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "the-trees", "number": 8, "title": "The Trees", "description": "Adrienne Rich", "slug": "the-trees", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "fog", "number": 9, "title": "Fog", "description": "Carl Sandburg", "slug": "fog", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "the-tale-of-custard-the-dragon", "number": 10, "title": "The Tale of Custard the Dragon", "description": "Ogden Nash", "slug": "the-tale-of-custard-the-dragon", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "for-anne-gregory", "number": 11, "title": "For Anne Gregory", "description": "W.B. Yeats", "slug": "for-anne-gregory", "icon": "BookOpen", "color": "#8b5cf6", "children": [] }
+              {
+                "id": "dust-of-snow",
+                "number": 1,
+                "title": "Dust of Snow",
+                "description": "Robert Frost",
+                "slug": "dust-of-snow",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "fire-and-ice",
+                "number": 2,
+                "title": "Fire and Ice",
+                "description": "Robert Frost",
+                "slug": "fire-and-ice",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "a-tiger-in-the-zoo",
+                "number": 3,
+                "title": "A Tiger in the Zoo",
+                "description": "Leslie Norris",
+                "slug": "a-tiger-in-the-zoo",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "how-to-tell-wild-animals",
+                "number": 4,
+                "title": "How to Tell Wild Animals",
+                "description": "Carolyn Wells",
+                "slug": "how-to-tell-wild-animals",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "the-ball-poem",
+                "number": 5,
+                "title": "The Ball Poem",
+                "description": "John Berryman",
+                "slug": "the-ball-poem",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "amanda",
+                "number": 6,
+                "title": "Amanda!",
+                "description": "Robin Klein",
+                "slug": "amanda",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "animals",
+                "number": 7,
+                "title": "Animals",
+                "description": "Walt Whitman",
+                "slug": "animals",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "the-trees",
+                "number": 8,
+                "title": "The Trees",
+                "description": "Adrienne Rich",
+                "slug": "the-trees",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "fog",
+                "number": 9,
+                "title": "Fog",
+                "description": "Carl Sandburg",
+                "slug": "fog",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "the-tale-of-custard-the-dragon",
+                "number": 10,
+                "title": "The Tale of Custard the Dragon",
+                "description": "Ogden Nash",
+                "slug": "the-tale-of-custard-the-dragon",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "for-anne-gregory",
+                "number": 11,
+                "title": "For Anne Gregory",
+                "description": "W.B. Yeats",
+                "slug": "for-anne-gregory",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              }
             ]
           }
         ]
@@ -99,11 +361,56 @@
             "icon": "Clock",
             "color": "#f59e0b",
             "children": [
-              { "id": "rise-of-nationalism-in-europe", "number": 1, "title": "The Rise of Nationalism in Europe", "description": "", "slug": "rise-of-nationalism-in-europe", "icon": "Clock", "color": "#f59e0b", "children": [] },
-              { "id": "nationalism-in-india", "number": 2, "title": "Nationalism in India", "description": "", "slug": "nationalism-in-india", "icon": "Clock", "color": "#f59e0b", "children": [] },
-              { "id": "the-making-of-a-global-world", "number": 3, "title": "The Making of a Global World", "description": "", "slug": "the-making-of-a-global-world", "icon": "Clock", "color": "#f59e0b", "children": [] },
-              { "id": "the-age-of-industrialisation", "number": 4, "title": "The Age of Industrialisation", "description": "", "slug": "the-age-of-industrialisation", "icon": "Clock", "color": "#f59e0b", "children": [] },
-              { "id": "print-culture-and-the-modern-world", "number": 5, "title": "Print Culture and the Modern World", "description": "", "slug": "print-culture-and-the-modern-world", "icon": "Clock", "color": "#f59e0b", "children": [] }
+              {
+                "id": "rise-of-nationalism-in-europe",
+                "number": 1,
+                "title": "The Rise of Nationalism in Europe",
+                "description": "",
+                "slug": "rise-of-nationalism-in-europe",
+                "icon": "Clock",
+                "color": "#f59e0b",
+                "children": []
+              },
+              {
+                "id": "nationalism-in-india",
+                "number": 2,
+                "title": "Nationalism in India",
+                "description": "",
+                "slug": "nationalism-in-india",
+                "icon": "Clock",
+                "color": "#f59e0b",
+                "children": []
+              },
+              {
+                "id": "the-making-of-a-global-world",
+                "number": 3,
+                "title": "The Making of a Global World",
+                "description": "",
+                "slug": "the-making-of-a-global-world",
+                "icon": "Clock",
+                "color": "#f59e0b",
+                "children": []
+              },
+              {
+                "id": "the-age-of-industrialisation",
+                "number": 4,
+                "title": "The Age of Industrialisation",
+                "description": "",
+                "slug": "the-age-of-industrialisation",
+                "icon": "Clock",
+                "color": "#f59e0b",
+                "children": []
+              },
+              {
+                "id": "print-culture-and-the-modern-world",
+                "number": 5,
+                "title": "Print Culture and the Modern World",
+                "description": "",
+                "slug": "print-culture-and-the-modern-world",
+                "icon": "Clock",
+                "color": "#f59e0b",
+                "children": []
+              }
             ]
           },
           {
@@ -115,13 +422,76 @@
             "icon": "Map",
             "color": "#06b6d4",
             "children": [
-              { "id": "resources-and-development", "number": 1, "title": "Resources and Development", "description": "", "slug": "resources-and-development", "icon": "Map", "color": "#06b6d4", "children": [] },
-              { "id": "forest-and-wildlife-resources", "number": 2, "title": "Forest and Wildlife Resources", "description": "", "slug": "forest-and-wildlife-resources", "icon": "Map", "color": "#06b6d4", "children": [] },
-              { "id": "water-resources", "number": 3, "title": "Water Resources", "description": "", "slug": "water-resources", "icon": "Map", "color": "#06b6d4", "children": [] },
-              { "id": "agriculture", "number": 4, "title": "Agriculture", "description": "", "slug": "agriculture", "icon": "Map", "color": "#06b6d4", "children": [] },
-              { "id": "minerals-and-energy-resources", "number": 5, "title": "Minerals and Energy Resources", "description": "", "slug": "minerals-and-energy-resources", "icon": "Map", "color": "#06b6d4", "children": [] },
-              { "id": "manufacturing-industries", "number": 6, "title": "Manufacturing Industries", "description": "", "slug": "manufacturing-industries", "icon": "Map", "color": "#06b6d4", "children": [] },
-              { "id": "lifelines-of-national-economy", "number": 7, "title": "Lifelines of National Economy", "description": "", "slug": "lifelines-of-national-economy", "icon": "Map", "color": "#06b6d4", "children": [] }
+              {
+                "id": "resources-and-development",
+                "number": 1,
+                "title": "Resources and Development",
+                "description": "",
+                "slug": "resources-and-development",
+                "icon": "Map",
+                "color": "#06b6d4",
+                "children": []
+              },
+              {
+                "id": "forest-and-wildlife-resources",
+                "number": 2,
+                "title": "Forest and Wildlife Resources",
+                "description": "",
+                "slug": "forest-and-wildlife-resources",
+                "icon": "Map",
+                "color": "#06b6d4",
+                "children": []
+              },
+              {
+                "id": "water-resources",
+                "number": 3,
+                "title": "Water Resources",
+                "description": "",
+                "slug": "water-resources",
+                "icon": "Map",
+                "color": "#06b6d4",
+                "children": []
+              },
+              {
+                "id": "agriculture",
+                "number": 4,
+                "title": "Agriculture",
+                "description": "",
+                "slug": "agriculture",
+                "icon": "Map",
+                "color": "#06b6d4",
+                "children": []
+              },
+              {
+                "id": "minerals-and-energy-resources",
+                "number": 5,
+                "title": "Minerals and Energy Resources",
+                "description": "",
+                "slug": "minerals-and-energy-resources",
+                "icon": "Map",
+                "color": "#06b6d4",
+                "children": []
+              },
+              {
+                "id": "manufacturing-industries",
+                "number": 6,
+                "title": "Manufacturing Industries",
+                "description": "",
+                "slug": "manufacturing-industries",
+                "icon": "Map",
+                "color": "#06b6d4",
+                "children": []
+              },
+              {
+                "id": "lifelines-of-national-economy",
+                "number": 7,
+                "title": "Lifelines of National Economy",
+                "description": "",
+                "slug": "lifelines-of-national-economy",
+                "icon": "Map",
+                "color": "#06b6d4",
+                "children": []
+              }
             ]
           },
           {
@@ -133,12 +503,66 @@
             "icon": "Landmark",
             "color": "#8b5cf6",
             "children": [
-              { "id": "power-sharing", "number": 1, "title": "Power Sharing", "description": "", "slug": "power-sharing", "icon": "Landmark", "color": "#8b5cf6", "children": [] },
-              { "id": "federalism", "number": 2, "title": "Federalism", "description": "", "slug": "federalism", "icon": "Landmark", "color": "#8b5cf6", "children": [] },
-              { "id": "gender-religion-and-caste", "number": 3, "title": "Gender, Religion and Caste", "description": "", "slug": "gender-religion-and-caste", "icon": "Landmark", "color": "#8b5cf6", "children": [] },
-              { "id": "political-parties", "number": 4, "title": "Political Parties", "description": "", "slug": "political-parties", "icon": "Landmark", "color": "#8b5cf6", "children": [] },
-              { "id": "outcomes-of-democracy", "number": 5, "title": "Outcomes of Democracy", "description": "", "slug": "outcomes-of-democracy", "icon": "Landmark", "color": "#8b5cf6", "children": [] },
-              { "id": "challenges-to-democracy", "number": 6, "title": "Challenges to Democracy", "description": "", "slug": "challenges-to-democracy", "icon": "Landmark", "color": "#8b5cf6", "children": [] }
+              {
+                "id": "power-sharing",
+                "number": 1,
+                "title": "Power Sharing",
+                "description": "",
+                "slug": "power-sharing",
+                "icon": "Landmark",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "federalism",
+                "number": 2,
+                "title": "Federalism",
+                "description": "",
+                "slug": "federalism",
+                "icon": "Landmark",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "gender-religion-and-caste",
+                "number": 3,
+                "title": "Gender, Religion and Caste",
+                "description": "",
+                "slug": "gender-religion-and-caste",
+                "icon": "Landmark",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "political-parties",
+                "number": 4,
+                "title": "Political Parties",
+                "description": "",
+                "slug": "political-parties",
+                "icon": "Landmark",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "outcomes-of-democracy",
+                "number": 5,
+                "title": "Outcomes of Democracy",
+                "description": "",
+                "slug": "outcomes-of-democracy",
+                "icon": "Landmark",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "challenges-to-democracy",
+                "number": 6,
+                "title": "Challenges to Democracy",
+                "description": "",
+                "slug": "challenges-to-democracy",
+                "icon": "Landmark",
+                "color": "#8b5cf6",
+                "children": []
+              }
             ]
           },
           {
@@ -150,11 +574,56 @@
             "icon": "TrendingUp",
             "color": "#ef4444",
             "children": [
-              { "id": "development", "number": 1, "title": "Development", "description": "", "slug": "development", "icon": "TrendingUp", "color": "#ef4444", "children": [] },
-              { "id": "sectors-of-the-indian-economy", "number": 2, "title": "Sectors of the Indian Economy", "description": "", "slug": "sectors-of-the-indian-economy", "icon": "TrendingUp", "color": "#ef4444", "children": [] },
-              { "id": "money-and-credit", "number": 3, "title": "Money and Credit", "description": "", "slug": "money-and-credit", "icon": "TrendingUp", "color": "#ef4444", "children": [] },
-              { "id": "globalisation-and-the-indian-economy", "number": 4, "title": "Globalisation and the Indian Economy", "description": "", "slug": "globalisation-and-the-indian-economy", "icon": "TrendingUp", "color": "#ef4444", "children": [] },
-              { "id": "consumer-rights", "number": 5, "title": "Consumer Rights", "description": "", "slug": "consumer-rights", "icon": "TrendingUp", "color": "#ef4444", "children": [] }
+              {
+                "id": "development",
+                "number": 1,
+                "title": "Development",
+                "description": "",
+                "slug": "development",
+                "icon": "TrendingUp",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "sectors-of-the-indian-economy",
+                "number": 2,
+                "title": "Sectors of the Indian Economy",
+                "description": "",
+                "slug": "sectors-of-the-indian-economy",
+                "icon": "TrendingUp",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "money-and-credit",
+                "number": 3,
+                "title": "Money and Credit",
+                "description": "",
+                "slug": "money-and-credit",
+                "icon": "TrendingUp",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "globalisation-and-the-indian-economy",
+                "number": 4,
+                "title": "Globalisation and the Indian Economy",
+                "description": "",
+                "slug": "globalisation-and-the-indian-economy",
+                "icon": "TrendingUp",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "consumer-rights",
+                "number": 5,
+                "title": "Consumer Rights",
+                "description": "",
+                "slug": "consumer-rights",
+                "icon": "TrendingUp",
+                "color": "#ef4444",
+                "children": []
+              }
             ]
           }
         ]
@@ -188,14 +657,86 @@
             "icon": "BookOpen",
             "color": "#3b82f6",
             "children": [
-              { "id": "the-last-lesson", "number": 1, "title": "The Last Lesson", "description": "Alphonse Daudet", "slug": "the-last-lesson", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "lost-spring", "number": 2, "title": "Lost Spring", "description": "Anees Jung", "slug": "lost-spring", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "deep-water", "number": 3, "title": "Deep Water", "description": "William Douglas", "slug": "deep-water", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "the-rattrap", "number": 4, "title": "The Rattrap", "description": "Selma Lagerlöf", "slug": "the-rattrap", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "indigo", "number": 5, "title": "Indigo", "description": "Louis Fischer", "slug": "indigo", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "poets-and-pancakes", "number": 6, "title": "Poets and Pancakes", "description": "Asokamitran", "slug": "poets-and-pancakes", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "the-interview", "number": 7, "title": "The Interview", "description": "Christopher Silvester", "slug": "the-interview", "icon": "BookOpen", "color": "#3b82f6", "children": [] },
-              { "id": "going-places", "number": 8, "title": "Going Places", "description": "A.R. Barton", "slug": "going-places", "icon": "BookOpen", "color": "#3b82f6", "children": [] }
+              {
+                "id": "the-last-lesson",
+                "number": 1,
+                "title": "The Last Lesson",
+                "description": "Alphonse Daudet",
+                "slug": "the-last-lesson",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "lost-spring",
+                "number": 2,
+                "title": "Lost Spring",
+                "description": "Anees Jung",
+                "slug": "lost-spring",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "deep-water",
+                "number": 3,
+                "title": "Deep Water",
+                "description": "William Douglas",
+                "slug": "deep-water",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "the-rattrap",
+                "number": 4,
+                "title": "The Rattrap",
+                "description": "Selma Lagerlöf",
+                "slug": "the-rattrap",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "indigo",
+                "number": 5,
+                "title": "Indigo",
+                "description": "Louis Fischer",
+                "slug": "indigo",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "poets-and-pancakes",
+                "number": 6,
+                "title": "Poets and Pancakes",
+                "description": "Asokamitran",
+                "slug": "poets-and-pancakes",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "the-interview",
+                "number": 7,
+                "title": "The Interview",
+                "description": "Christopher Silvester",
+                "slug": "the-interview",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              },
+              {
+                "id": "going-places",
+                "number": 8,
+                "title": "Going Places",
+                "description": "A.R. Barton",
+                "slug": "going-places",
+                "icon": "BookOpen",
+                "color": "#3b82f6",
+                "children": []
+              }
             ]
           },
           {
@@ -207,12 +748,66 @@
             "icon": "BookOpen",
             "color": "#8b5cf6",
             "children": [
-              { "id": "my-mother-at-sixty-six", "number": 1, "title": "My Mother at Sixty-Six", "description": "Kamala Das", "slug": "my-mother-at-sixty-six", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "an-elementary-school-classroom-in-a-slum", "number": 2, "title": "An Elementary School Classroom in a Slum", "description": "Stephen Spender", "slug": "an-elementary-school-classroom-in-a-slum", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "keeping-quiet", "number": 3, "title": "Keeping Quiet", "description": "Pablo Neruda", "slug": "keeping-quiet", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "a-thing-of-beauty", "number": 4, "title": "A Thing of Beauty", "description": "John Keats", "slug": "a-thing-of-beauty", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "a-roadside-stand", "number": 5, "title": "A Roadside Stand", "description": "Robert Frost", "slug": "a-roadside-stand", "icon": "BookOpen", "color": "#8b5cf6", "children": [] },
-              { "id": "aunt-jennifers-tigers", "number": 6, "title": "Aunt Jennifer's Tigers", "description": "Adrienne Rich", "slug": "aunt-jennifers-tigers", "icon": "BookOpen", "color": "#8b5cf6", "children": [] }
+              {
+                "id": "my-mother-at-sixty-six",
+                "number": 1,
+                "title": "My Mother at Sixty-Six",
+                "description": "Kamala Das",
+                "slug": "my-mother-at-sixty-six",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "an-elementary-school-classroom-in-a-slum",
+                "number": 2,
+                "title": "An Elementary School Classroom in a Slum",
+                "description": "Stephen Spender",
+                "slug": "an-elementary-school-classroom-in-a-slum",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "keeping-quiet",
+                "number": 3,
+                "title": "Keeping Quiet",
+                "description": "Pablo Neruda",
+                "slug": "keeping-quiet",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "a-thing-of-beauty",
+                "number": 4,
+                "title": "A Thing of Beauty",
+                "description": "John Keats",
+                "slug": "a-thing-of-beauty",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "a-roadside-stand",
+                "number": 5,
+                "title": "A Roadside Stand",
+                "description": "Robert Frost",
+                "slug": "a-roadside-stand",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              },
+              {
+                "id": "aunt-jennifers-tigers",
+                "number": 6,
+                "title": "Aunt Jennifer's Tigers",
+                "description": "Adrienne Rich",
+                "slug": "aunt-jennifers-tigers",
+                "icon": "BookOpen",
+                "color": "#8b5cf6",
+                "children": []
+              }
             ]
           },
           {
@@ -224,12 +819,66 @@
             "icon": "BookOpen",
             "color": "#ef4444",
             "children": [
-              { "id": "the-third-level", "number": 1, "title": "The Third Level", "description": "Jack Finney", "slug": "the-third-level", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "the-tiger-king", "number": 2, "title": "The Tiger King", "description": "Kalki", "slug": "the-tiger-king", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "journey-to-the-end-of-the-earth", "number": 3, "title": "Journey to the End of the Earth", "description": "Tishani Joshi", "slug": "journey-to-the-end-of-the-earth", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "the-enemy", "number": 4, "title": "The Enemy", "description": "Pearl S. Buck", "slug": "the-enemy", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "on-the-face-of-it", "number": 5, "title": "On the Face of It", "description": "Susan Hill", "slug": "on-the-face-of-it", "icon": "BookOpen", "color": "#ef4444", "children": [] },
-              { "id": "memories-of-childhood", "number": 6, "title": "Memories of Childhood", "description": "Zitkala-Sa & Bama", "slug": "memories-of-childhood", "icon": "BookOpen", "color": "#ef4444", "children": [] }
+              {
+                "id": "the-third-level",
+                "number": 1,
+                "title": "The Third Level",
+                "description": "Jack Finney",
+                "slug": "the-third-level",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "the-tiger-king",
+                "number": 2,
+                "title": "The Tiger King",
+                "description": "Kalki",
+                "slug": "the-tiger-king",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "journey-to-the-end-of-the-earth",
+                "number": 3,
+                "title": "Journey to the End of the Earth",
+                "description": "Tishani Joshi",
+                "slug": "journey-to-the-end-of-the-earth",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "the-enemy",
+                "number": 4,
+                "title": "The Enemy",
+                "description": "Pearl S. Buck",
+                "slug": "the-enemy",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "on-the-face-of-it",
+                "number": 5,
+                "title": "On the Face of It",
+                "description": "Susan Hill",
+                "slug": "on-the-face-of-it",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              },
+              {
+                "id": "memories-of-childhood",
+                "number": 6,
+                "title": "Memories of Childhood",
+                "description": "Zitkala-Sa & Bama",
+                "slug": "memories-of-childhood",
+                "icon": "BookOpen",
+                "color": "#ef4444",
+                "children": []
+              }
             ]
           }
         ]

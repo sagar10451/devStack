@@ -397,7 +397,7 @@ export default function PublicMarkdownEditor({
 
         {/* Preview */}
         {showPreview && (
-          <div className={`${showEditor ? 'w-1/2' : 'w-full'} overflow-y-auto bg-white`}>
+          <div className={`${showEditor ? 'w-1/2' : 'w-full'} overflow-y-auto bg-[#0d0d14]`}>
             <div className="max-w-[800px] mx-auto px-8 py-8">
               {content ? (
                 <div className="public-md-content">

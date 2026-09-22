@@ -14,7 +14,7 @@ export interface Topic {
   slug: string;
   icon: string;
   color: string;
-  status?: 'live' | 'coming-soon';
+  status?: 'live' | 'coming-soon' | 'done' | 'upcoming';
   subtopics: SubTopic[];
 }
 

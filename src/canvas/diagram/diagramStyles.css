@@ -207,8 +207,8 @@
 /* ─── Toolbar styles ──────────────────────────────────────────────────────── */
 
 .rf-toolbar {
-  background: #0f1b3d;
-  border-bottom: 1px solid rgba(26, 42, 94, 0.5);
+  background: #0a0a14;
+  border-bottom: 1px solid rgba(26, 26, 46, 0.8);
   padding: 6px 16px 10px;
   z-index: 10;
 }
@@ -226,7 +226,7 @@
   gap: 8px;
   margin-bottom: 8px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #1e3a5f;
+  border-bottom: 1px solid #1a1a2e;
 }
 
 .rf-summary-mode {
@@ -273,8 +273,8 @@
 }
 
 .rf-toolbar-card {
-  background: #0a1230;
-  border: 1px solid rgba(26, 42, 94, 0.5);
+  background: #12121f;
+  border: 1px solid rgba(42, 42, 78, 0.6);
   border-radius: 8px;
   padding: 6px 10px 8px;
   min-width: 0;
@@ -318,22 +318,24 @@
   font-size: 11px;
   border-radius: 5px;
   cursor: pointer;
-  border: 1px solid rgba(26, 42, 94, 0.5);
-  background: #0f1b3d;
+  border: 1px solid rgba(42, 42, 78, 0.6);
+  background: #12121f;
   color: #94a3b8;
   transition: all 0.15s ease;
   font-weight: 500;
   white-space: nowrap;
 }
 .rf-tool-btn:hover {
-  border-color: #475569;
-  color: #cbd5e1;
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.1);
 }
 .rf-tool-btn.rf-active {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.12);
-  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
   font-weight: 600;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.15);
 }
 .rf-tool-btn.rf-disabled,
 .rf-tool-btn:disabled {
@@ -352,15 +354,15 @@
   height: 20px;
   border-radius: 50%;
   cursor: pointer;
-  border: 2px solid #334155;
+  border: 2px solid #2a2a4e;
   transition: all 0.15s ease;
 }
 .rf-color-dot:hover {
   transform: scale(1.15);
 }
 .rf-color-dot.rf-active {
-  border-color: #fff;
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
 }
 
 .rf-flip-btn {

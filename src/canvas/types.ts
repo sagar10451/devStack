@@ -177,6 +177,24 @@ export interface LessonCanvasData {
   pageSubtitleModes?: Record<string, 'preload' | 'animate'>;
   /** Black & white theme mode */
   bwMode?: boolean;
+  /** Per-page guide border positions */
+  guideBordersMap?: Record<string, { x: number; y: number }[]>;
+  /** Number of guide borders (shared across pages) */
+  guideCount?: number;
+  /** Legacy single-page guide borders (migration) */
+  guideBorders?: { x: number; y: number }[];
+  /** Per-image glow colors (keyed by shapeId) */
+  imageGlowColors?: Record<string, string>;
+  /** Rough/Main mode */
+  roughMode?: boolean;
+  /** Shape IDs marked as helper (visible only in Rough mode) */
+  helperShapeIds?: string[];
+  /** Global audio file name (stored on disk at /data/audio/{siteId}/{topic}/{subtopic}.mp3) */
+  globalAudioFile?: string;
+  /** Global audio durations — stepId → seconds (how long this step lasts before next fires) */
+  globalAudioDurations?: Record<string, number>;
+  /** @deprecated — old timestamp format, migrated to durations */
+  globalAudioTimestamps?: Record<string, number>;
 }
 
 /**

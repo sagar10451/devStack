@@ -67,9 +67,9 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
     }
     if (publicLoadFailed) {
       return (
-        <div className="w-full h-[calc(100vh-78px)] flex items-center justify-center bg-white">
+        <div className="w-full h-[calc(100vh-78px)] flex items-center justify-center bg-[#0a0a14]">
           <div className="text-center">
-            <p className="text-gray-500 text-lg font-medium">Notes coming soon</p>
+            <p className="text-slate-400 text-lg font-medium">Notes coming soon</p>
             <p className="text-gray-400 text-sm mt-1">{topicTitle} / {subtopicTitle}</p>
           </div>
         </div>

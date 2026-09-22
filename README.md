@@ -4,6 +4,111 @@ Interactive canvas-based notes platform with step-by-step animations, system des
 
 ---
 
+## Recent Changes (Aug 30, 2026) — Dark Mode & Major Features Update
+
+### Full Dark Mode Conversion (Permanent)
+- **tldraw canvas**: `colorScheme="dark"`, canvas background `#0b0b16` with subtle purple/teal gradient + 24px grid pattern
+- **Toolbar**: Dark gradient `#0e1020` → `#141830`, all buttons restyled with `#12121f` bg, blue-500/20 borders, hover glow shadows
+- **Active toggle buttons**: Translucent color tints with matching glow (cyan for Lines, purple for Colors, emerald for Nodes, amber for Boundary, rose for Topic, teal for Subtitle)
+- **Timeline**: Cards `#12121f` with `#2a2a4e` borders, glow on hover/select, dark headers/footers
+- **SubTopicTracker**: Both sidebar and floating mode restyled — dark cards, indigo/emerald glow
+- **Homepage portal cards**: Gradient backgrounds, color-expanding hover glow, top highlight lines
+- **Topic grid cards**: Per-node color tinting (border, hover glow, accent line), icon glow shadows
+- **Topic header card**: Dark gradient, glowing left accent bar
+- **Public Markdown Viewer/Editor**: Dark backgrounds, inverted content styles, dark TOC sidebar
+- **All CSS**: `.prose` styles, `.public-md-content`, tables, blockquotes, inline code — all dark-inverted
+- **B&W theme overrides**: Updated to reference new dark class names
+- **Guide border**: Changed from orange dashed to cyan solid with glow
+
+### Topic/Subtitle Strip Redesign
+- **Topic**: No border rectangle — clean text with neon text-shadow glow + glowing underline (gradient fade)
+- **Subtitle**: Frosted glass pill (rounded-full, backdrop-blur) with glowing left accent bar
+- **Both**: Flicker animation on reveal (animate mode), `border_animation.mp3` for topic, `topic_reveal.mp3` for subtitle
+- **Preload mode**: No animation, no flicker, no sound — just appears instantly
+- **Color pickers**: Dark popups with text/border/animation/mode controls per page
+
+### Glow Notes Box Enhancements
+- **Transparent background** by default
+- **Font weight**: Normal (400) for all lines, same opacity for main/sub-points
+- **Line reveal**: Dimmed (0.3 opacity) → full color on step trigger via CSS classes (`glow-swipe`/`glow-done`)
+- **Border completion glow**: Running rainbow light animation when all lines revealed
+- **Glow box flicker**: Only plays on box appear step, not on camera-only steps
+- **Sound**: `border_animation.mp3` on box appear (not oscillator), no sound on line reveal
+- **Delete fix**: Deleting a glow box now removes all its line steps from timeline
+
+### Image Glow Effect
+- **Per-image glow color**: Select an image shape → popup with 6 colors (Blue, Cyan, Purple, Pink, Emerald, Amber) + None
+- **Drop-shadow glow** with breathing animation during presentation
+- **Saved per-shape** to JSON (`imageGlowColors`)
+
+### Multiple Guide Borders
+- **Per-page positions**: Each page has independent guide positions, shared count across all pages
+- **Add/Remove**: "+" and "−" buttons next to Guide toggle (visible when Guide is ON)
+- **Numbered labels**: Each guide shows `#1`, `#2`, etc.
+- **Saved to JSON**: `guideBordersMap` (per-page) + `guideCount`
+
+### PDF/PPT Export (Guide-Based Capture)
+- **Per-guide capture**: Each guide border with content = one PDF page / PPT slide
+- **Guide #1**: Captured with topic/subtitle strip (first page only gets both topic + subtitle)
+- **Other guides**: Canvas only (no strip)
+- **Empty guides skipped**, fallback to full-page capture
+- **Dark background** (`#0b0b16`) for export
+
+### Auto-Save Fix
+- **Race condition fixed**: `canvasReadyRef` guard prevents auto-save during initial load
+- **False dirty flag cleared**: `isDirtyRef` reset after canvas initialization
+- **Prevents z-order/position loss** on reload
+
+### Global Audio Sync Timeline
+- **Audio Sync button** in toolbar — opens a separate timeline showing ALL pages' steps
+- **Virtual topic/subtitle cards**: Injected at correct positions (Page 1 gets Topic + Subtitle, other pages get Subtitle only)
+- **Duration-based**: Each card has `- 00:03:00 +` controls (0.5s step). Preloaded items default to 0s
+- **Play per card**: ▶ button seeks audio to that card's computed start time
+- **Upload audio**: Saved to disk via Vite plugin (`/data/audio/`)
+- **Auto-advance**: During presentation, steps fire automatically based on cumulative durations
+- **Play button**: In locked toolbar — 10-second countdown before audio starts (time to enter fullscreen)
+- **Pause/Resume**: Pause stops audio + auto-advance; Resume continues without countdown
+- **Audio-driven mode**: Skips 2-press camera delay (camera + animation fire together)
+- **Fullscreen auto-play**: Cursor hidden, laser hidden, arrow buttons hidden during playback
+- **Esc stops audio**: Exiting fullscreen while audio playing stops everything
+
+### Background Music
+- **Global background music**: Place `bgmusic.mp3` in `public/sounds/`
+- **Controls** in locked toolbar: Toggle ON/OFF (🎵), loop toggle (🔁), volume slider
+- **Synced with Play**: Starts after 10-sec countdown with main audio, stops on pause/unlock/esc
+
+### Rough/Main Mode
+- **Toolbar toggle**: "Main" / "📝 Rough" button (yellow glow)
+- **Helper text elements**: In Rough mode, mark any text shape as "helper" via timeline card toggle
+- **Helper visibility**: Rough mode shows helpers with yellow dashed outline; Main mode hides them from canvas + timeline
+- **Batch presentation**: In Rough mode, one arrow press = all elements from one camera position to the next appear at once (one press per glow box)
+- **Saved to JSON**: `roughMode` + `helperShapeIds`
+
+### Card Status Ribbons
+- **Done**: Green diagonal ribbon (`"status": "done"`)
+- **In Progress**: Purple ribbon + "Coming Soon" overlay (`"status": "coming-soon"`)
+- **Upcoming**: Yellow/amber ribbon (`"status": "upcoming"`)
+- **Click restriction** (production only): Only "done" topics are clickable; others show `cursor-not-allowed`
+
+### Sidebar Title Persistence
+- **Saved to JSON**: Selected label (Topics/Outline/Scene/etc.) now calls `markDirty()` and uses ref in auto-save
+
+### Sound Effects
+- **Volume max (1.0)** for topic/subtitle/glow-box reveal sounds
+- Only 2 MP3 files used: `border_animation.mp3` (topic reveal, glow box), `topic_reveal.mp3` (subtitle reveal)
+- Oscillator sounds removed (`playGlowBoxSound`, `playGlowLineSound` dead code)
+- `playGlowTransitionSound` (swoosh) still active for box-to-box transitions
+
+### Paste Boundary Fix
+- **Order-independent**: Boundary frame created immediately when Boundary is ON and you paste (not just when toggling after paste)
+- **Visibility fixed**: `color: 'light-blue'`, `opacity: 0.5` (was invisible grey on dark theme)
+
+### Shape Visibility Retry
+- **applyAnimationState retry mechanism**: Checks if shapes that should be visible are missing from DOM, retries up to 5 times with `requestAnimationFrame`
+- **Lock-time hardening**: Double retry at 100ms + 300ms
+
+---
+
 ## Recent Changes (Aug 29–30, 2026)
 
 ### Timeline Bar (new)

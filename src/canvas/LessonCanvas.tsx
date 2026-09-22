@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot, toRichText, createShapeId } from 'tldraw';
 import type { Editor } from 'tldraw';
-import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify, PanelRight, FlipHorizontal2, Frame } from 'lucide-react';
+import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify, PanelRight, FlipHorizontal2, Frame, Music } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
@@ -19,6 +19,7 @@ import DraggableWidget from './DraggableWidget';
 import NodeCatalog from './diagram/NodeCatalog';
 import { EMPTY_DIAGRAM } from './diagram/diagramTypes';
 import TimelineBar from './TimelineBar';
+import GlobalAudioTimeline from './GlobalAudioTimeline';
 import type { DiagramData } from './diagram/diagramTypes';
 import './diagram/diagramStyles.css';
 import PublicMarkdownEditor from './PublicMarkdownEditor';
@@ -140,6 +141,8 @@ export default function LessonCanvas({
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
   const [sidebarTitle, setSidebarTitle] = useState(initialData?.sidebarTitle || 'Topics');
+  const sidebarTitleRef = useRef(sidebarTitle);
+  sidebarTitleRef.current = sidebarTitle;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [timelineFullyCollapsed, setTimelineFullyCollapsed] = useState(false); // true = show Pages, false = show Sub-topics
   const [shapeAnimations, setShapeAnimations] = useState<Record<string, ShapeAnimationConfig>>(initialData?.shapeAnimations || {});
@@ -155,6 +158,40 @@ export default function LessonCanvas({
   const [showSidebar, setShowSidebar] = useState(true);
   const [showGuideBorder, setShowGuideBorder] = useState(true);
   const [bwMode, setBwMode] = useState(initialData?.bwMode || false);
+  const [roughMode, setRoughMode] = useState(initialData?.roughMode || false);
+  const roughModeRef = useRef(roughMode);
+  roughModeRef.current = roughMode;
+  const [helperShapeIds, setHelperShapeIds] = useState<Set<string>>(new Set(initialData?.helperShapeIds || []));
+  const helperShapeIdsRef = useRef(helperShapeIds);
+  helperShapeIdsRef.current = helperShapeIds;
+  const [imageGlowColors, setImageGlowColors] = useState<Record<string, string>>(initialData?.imageGlowColors || {});
+  const imageGlowColorsRef = useRef(imageGlowColors);
+  imageGlowColorsRef.current = imageGlowColors;
+
+  // ─── Global Audio Timeline state ───────────────────────────────────────
+  const [showGlobalTimeline, setShowGlobalTimeline] = useState(false);
+  const [globalAudioDurations, setGlobalAudioDurations] = useState<Record<string, number>>(initialData?.globalAudioDurations || {});
+  const globalAudioDurationsRef = useRef(globalAudioDurations);
+  globalAudioDurationsRef.current = globalAudioDurations;
+  const [globalAudioFileName, setGlobalAudioFileName] = useState<string>(initialData?.globalAudioFile || '');
+  const globalAudioFileNameRef = useRef(globalAudioFileName);
+  globalAudioFileNameRef.current = globalAudioFileName;
+  const [globalAudioUrl, setGlobalAudioUrl] = useState<string | null>(null);
+  const globalAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [globalAudioPlaying, setGlobalAudioPlaying] = useState(false);
+  const [globalAudioCurrentTime, setGlobalAudioCurrentTime] = useState(0);
+  const [globalAudioDuration, setGlobalAudioDuration] = useState(0);
+  const isAudioDrivenRef = useRef(false);
+  const [audioCountdown, setAudioCountdown] = useState<number | null>(null); // null = no countdown, number = seconds remaining
+  const audioCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null); // true when presentation is auto-advancing via global audio
+
+  // ─── Background music state ─────────────────────────────────────────────
+  const bgMusicRef = useRef<HTMLAudioElement | null>(null);
+  const [bgMusicEnabled, setBgMusicEnabled] = useState(false);
+  const [bgMusicLoop, setBgMusicLoop] = useState(true);
+  const [bgMusicVolume, setBgMusicVolume] = useState(0.3);
+  const [bgMusicLoaded, setBgMusicLoaded] = useState(false);
+
   // Per-page topic/subtitle data (keyed by pageId)
   const [pageTopics, setPageTopics] = useState<Record<string, string>>(initialData?.pageTopics || {});
   const [pageSubtitles, setPageSubtitles] = useState<Record<string, string>>(initialData?.pageSubtitles || {});
@@ -173,14 +210,96 @@ export default function LessonCanvas({
   const [pageTopicVisible, setPageTopicVisible] = useState<Set<string>>(() => new Set(Object.keys(initialData?.pageTopics || {})));
   const [pageSubtitleVisible, setPageSubtitleVisible] = useState<Set<string>>(() => new Set(Object.keys(initialData?.pageSubtitles || {})));
   const [guideResizeTick, setGuideResizeTick] = useState(0);
-  // Guide border position offset in page coordinates (draggable)
-  const [guideOffset, setGuideOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const guideDragRef = useRef<{ startX: number; startY: number; origOffX: number; origOffY: number } | null>(null);
+  // Multiple guide borders — per-page positions, shared count
+  // guideBordersMap: { [pageId]: [{x,y}, ...] }
+  // guideCount: number of guides (same on all pages)
+  const [guideBordersMap, setGuideBordersMap] = useState<Record<string, { x: number; y: number }[]>>(
+    initialData?.guideBordersMap || (initialData?.guideBorders ? { '_default': initialData.guideBorders } : {})
+  );
+  const [guideCount, setGuideCount] = useState<number>(
+    initialData?.guideCount ?? (initialData?.guideBorders?.length ?? 1)
+  );
+  const guideBordersMapRef = useRef(guideBordersMap);
+  guideBordersMapRef.current = guideBordersMap;
+  const guideCountRef = useRef(guideCount);
+  guideCountRef.current = guideCount;
+
+  // Helper: get guide borders for the current page, falling back to defaults
+  const getGuideBordersForPage = (pageId: string): { x: number; y: number }[] => {
+    const existing = guideBordersMap[pageId];
+    if (existing && existing.length === guideCount) return existing;
+    // Generate defaults or pad/trim to match guideCount
+    const base = existing || guideBordersMap['_default'] || [];
+    const result: { x: number; y: number }[] = [];
+    for (let i = 0; i < guideCount; i++) {
+      result.push(base[i] || { x: i * 50, y: 0 });
+    }
+    return result;
+  };
+  const guideDragRef = useRef<{ idx: number; startX: number; startY: number; origOffX: number; origOffY: number } | null>(null);
   useEffect(() => {
     const onResize = () => setGuideResizeTick(t => t + 1);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // ─── Load global audio file from disk on mount ─────────────────────────
+  useEffect(() => {
+    if (!globalAudioFileName || !siteId || !topicSlug) return;
+    const url = `/__load-audio?siteId=${encodeURIComponent(siteId)}&topicSlug=${encodeURIComponent(topicSlug)}&fileName=${encodeURIComponent(globalAudioFileName)}`;
+    setGlobalAudioUrl(url);
+    // Create audio element
+    const audio = new Audio(url);
+    audio.preload = 'metadata';
+    audio.addEventListener('loadedmetadata', () => {
+      setGlobalAudioDuration(audio.duration);
+    });
+    audio.addEventListener('timeupdate', () => {
+      setGlobalAudioCurrentTime(audio.currentTime);
+    });
+    audio.addEventListener('ended', () => {
+      setGlobalAudioPlaying(false);
+    });
+    globalAudioRef.current = audio;
+    return () => {
+      audio.pause();
+      audio.src = '';
+      globalAudioRef.current = null;
+    };
+  }, [globalAudioFileName, siteId, topicSlug]);
+
+  // ─── Load background music from /public/sounds/bgmusic.mp3 (global) ─────
+  useEffect(() => {
+    const audio = new Audio('/sounds/bgmusic.mp3');
+    audio.preload = 'auto';
+    audio.loop = true;
+    audio.volume = 0.3;
+    const handleCanPlay = () => {
+      bgMusicRef.current = audio;
+      setBgMusicLoaded(true);
+    };
+    const handleError = () => {
+      setBgMusicLoaded(false);
+    };
+    audio.addEventListener('canplaythrough', handleCanPlay);
+    audio.addEventListener('error', handleError);
+    return () => {
+      audio.removeEventListener('canplaythrough', handleCanPlay);
+      audio.removeEventListener('error', handleError);
+      audio.pause();
+      audio.src = '';
+      bgMusicRef.current = null;
+      setBgMusicLoaded(false);
+    };
+  }, []);
+
+  // Sync bg music loop + volume
+  useEffect(() => {
+    if (!bgMusicRef.current) return;
+    bgMusicRef.current.loop = bgMusicLoop;
+    bgMusicRef.current.volume = bgMusicVolume;
+  }, [bgMusicLoop, bgMusicVolume]);
+
   const [pendingNode, setPendingNode] = useState<{ item: any; position: { x: number; y: number } } | null>(null);
   const [pickingDestinationForStep, setPickingDestinationForStep] = useState<string | null>(null);
   const [pickOriginalPosition, setPickOriginalPosition] = useState<{ x: number; y: number } | null>(null);
@@ -192,6 +311,7 @@ export default function LessonCanvas({
     setIsSaved(false);
   }, []);
   const [canvasReady, setCanvasReady] = useState(false);
+  const canvasReadyRef = useRef(false);
   const [hideLockButton, setHideLockButton] = useState(false);
   const [tldrawCamera, setTldrawCamera] = useState<{ x: number; y: number; z: number } | null>(null);
 
@@ -254,6 +374,9 @@ export default function LessonCanvas({
       applyAnimationState(ed, animationSteps, -1);
       ed.updateInstanceState({ isReadonly: true });
       setCanvasReady(true);
+      canvasReadyRef.current = true;
+      // Clear any false dirty flag from initial loadSnapshot triggering store listener
+      isDirtyRef.current = false;
     }, 50);
   }, [animationSteps, initialData]);
 
@@ -274,6 +397,41 @@ export default function LessonCanvas({
   const [selectedShapeIds, setSelectedShapeIds] = useState<string[]>([]);
 
   // ─── Glow Notes line highlighting during presentation ───────────────────
+  // ─── Inject persistent dim CSS for glow-notes lines (once when locked) ─────
+  useEffect(() => {
+    if (!isLocked) {
+      const el = document.getElementById('glow-notes-dim-style');
+      if (el) el.remove();
+      return;
+    }
+    const styleId = 'glow-notes-dim-style';
+    let existing = document.getElementById(styleId);
+    if (!existing) {
+      existing = document.createElement('style');
+      existing.id = styleId;
+      document.head.appendChild(existing);
+    }
+    // Collect all glow-notes shapes that have line steps
+    const glowShapeIds = new Set<string>();
+    for (const step of animationSteps) {
+      for (const sid of step.shapeIds) {
+        if (sid.includes(':line:')) {
+          glowShapeIds.add(sid.split(':line:')[0]);
+        }
+      }
+    }
+    let css = '';
+    for (const shapeId of glowShapeIds) {
+      css += `[data-shape-id="${shapeId}"] [data-glow-line]:not(.glow-swipe):not(.glow-done) { opacity: 0.3 !important; }\n`;
+    }
+    existing.textContent = css;
+    return () => {
+      const el = document.getElementById(styleId);
+      if (el) el.remove();
+    };
+  }, [isLocked, animationSteps]);
+
+  // ─── Glow Notes line class toggling during presentation ─────────────────
   useEffect(() => {
     if (!isLocked || !editor) return;
     // Find all glow-notes line steps up to currentStep
@@ -297,44 +455,61 @@ export default function LessonCanvas({
       }
     }
 
-    // Build CSS for each glow-notes shape
-    const styleId = 'glow-notes-highlight-style';
-    let existing = document.getElementById(styleId);
-    if (!existing) {
-      existing = document.createElement('style');
-      existing.id = styleId;
-      document.head.appendChild(existing);
-    }
-
-    // Collect all glow-notes shapes that have line steps
-    const glowShapeIds = new Set<string>();
+    // Track total line count per shape for border completion
+    const glowShapeLineSteps = new Map<string, Set<string>>();
     for (const step of animationSteps) {
       for (const sid of step.shapeIds) {
         if (sid.includes(':line:')) {
-          glowShapeIds.add(sid.split(':line:')[0]);
+          const baseId = sid.split(':line:')[0];
+          if (!glowShapeLineSteps.has(baseId)) glowShapeLineSteps.set(baseId, new Set());
+          glowShapeLineSteps.get(baseId)!.add(sid);
         }
       }
     }
 
-    let css = '';
-    for (const shapeId of glowShapeIds) {
-      // Dim all lines in this shape
-      css += `[data-shape-id="${shapeId}"] [data-glow-line] { opacity: 0.3 !important; transition: all 0.4s ease !important; }\n`;
-    }
-    // Highlight completed lines (green tint)
-    for (const sid of completedLineIds) {
-      const [baseId, idx] = sid.split(':line:');
-      css += `[data-shape-id="${baseId}"] [data-glow-line="${idx}"] { opacity: 1 !important; color: #4ade80 !important; background: rgba(74, 222, 128, 0.1) !important; border-radius: 6px !important; }\n`;
-    }
-    // Highlight current line (glow)
-    if (latestLineId) {
-      const [baseId, idx] = latestLineId.split(':line:');
-      css += `[data-shape-id="${baseId}"] [data-glow-line="${idx}"] { opacity: 1 !important; color: #fbbf24 !important; background: rgba(251, 191, 36, 0.12) !important; border-radius: 6px !important; box-shadow: 0 0 12px rgba(251, 191, 36, 0.25) !important; font-weight: 700 !important; }\n`;
-    }
+    // Sync classes on all glow-line elements — add/remove without clearing all first
+    document.querySelectorAll('[data-glow-line]').forEach(el => {
+      const lineEl = el as HTMLElement;
+      const shapeEl = lineEl.closest('[data-shape-id]');
+      if (!shapeEl) return;
+      const shapeId = shapeEl.getAttribute('data-shape-id') || '';
+      const lineIdx = lineEl.getAttribute('data-glow-line') || '';
+      const lineId = `${shapeId}:line:${lineIdx}`;
 
-    existing.textContent = css;
+      if (completedLineIds.has(lineId)) {
+        lineEl.classList.add('glow-done');
+        lineEl.classList.remove('glow-swipe');
+      } else if (lineId === latestLineId) {
+        lineEl.classList.add('glow-swipe');
+        lineEl.classList.remove('glow-done');
+      } else {
+        lineEl.classList.remove('glow-swipe', 'glow-done');
+      }
+    });
+
+    // Border completion — remove from all first, then add where needed
+    document.querySelectorAll('.glow-notes-box.glow-border-complete').forEach(el => {
+      el.classList.remove('glow-border-complete');
+    });
+    // Check if all lines of any glow box are completed — trigger border animation
+    for (const [shapeId, allLineIds] of glowShapeLineSteps) {
+      const allDone = [...allLineIds].every(sid => activeLineIds.has(sid));
+      if (allDone && allLineIds.size > 0) {
+        const latestInThisBox = latestLineId && latestLineId.startsWith(shapeId + ':line:');
+        const allButLatestCompleted = [...allLineIds].filter(sid => sid !== latestLineId).every(sid => completedLineIds.has(sid));
+        if (!latestInThisBox || (latestInThisBox && allButLatestCompleted)) {
+          const boxEl = document.querySelector(`[data-shape-id="${shapeId}"] .glow-notes-box`);
+          if (boxEl && !boxEl.classList.contains('glow-border-complete')) {
+            boxEl.classList.add('glow-border-complete');
+          }
+        }
+      }
+    }
 
     // Trigger flicker animation on glow-notes boxes that just appeared
+    // Skip if there's a pending camera step (first press just moved camera, second press will animate)
+    const hasPendingCamera = pendingCameraStepRef.current !== null;
+    if (!hasPendingCamera) {
     for (let i = 0; i <= currentStep && i < animationSteps.length; i++) {
       const step = animationSteps[i];
       for (const sid of step.shapeIds) {
@@ -343,15 +518,15 @@ export default function LessonCanvas({
           if (shape?.type === 'glow-notes') {
             const el = document.querySelector(`[data-shape-id="${sid}"] .glow-notes-box`) as HTMLElement;
             if (el) {
-              if (i === currentStep) {
-                // Just appeared — trigger flicker
+              if (i === currentStep && !glowFlickeredRef.current.has(sid)) {
+                // First time this box appears — trigger flicker + sound
+                glowFlickeredRef.current.add(sid);
                 el.classList.remove('glow-flicker-in');
-                void el.offsetWidth; // force reflow to restart animation
+                void el.offsetWidth;
                 el.classList.add('glow-flicker-in');
-                // Play border_animation sound
                 try {
                   const audio = new Audio('/sounds/border_animation.mp3');
-                  audio.volume = 0.3;
+                  audio.volume = 1.0;
                   audio.play().catch(() => {});
                 } catch { /* ignore */ }
               }
@@ -360,12 +535,121 @@ export default function LessonCanvas({
         }
       }
     }
+    } // end if (!hasPendingCamera)
 
     return () => {
-      const el = document.getElementById(styleId);
-      if (el) el.textContent = '';
+      document.querySelectorAll('[data-glow-line].glow-swipe, [data-glow-line].glow-done').forEach(e => {
+        e.classList.remove('glow-swipe', 'glow-done');
+      });
+      document.querySelectorAll('.glow-notes-box.glow-border-complete').forEach(e => {
+        e.classList.remove('glow-border-complete');
+      });
     };
   }, [isLocked, currentStep, animationSteps, editor]);
+
+  // ─── Image glow — add drop-shadow to visible image shapes during presentation ─
+  useEffect(() => {
+    const glowClasses = ['glow-image-blue', 'glow-image-cyan', 'glow-image-purple', 'glow-image-pink', 'glow-image-emerald', 'glow-image-amber'];
+    const removeAllGlow = () => {
+      glowClasses.forEach(cls => document.querySelectorAll(`[data-shape-id].${cls}`).forEach(e => e.classList.remove(cls)));
+    };
+
+    if (!isLocked || !editor) {
+      removeAllGlow();
+      return;
+    }
+
+    // Find all image shape IDs that are visible (revealed up to currentStep)
+    const visibleImageIds = new Set<string>();
+    for (let i = 0; i <= currentStep && i < animationSteps.length; i++) {
+      const step = animationSteps[i];
+      const action = step.action || 'enter';
+      if (action === 'exit') {
+        step.shapeIds.forEach(id => visibleImageIds.delete(id));
+      } else if (action !== 'none') {
+        for (const sid of step.shapeIds) {
+          if (sid.includes(':line:')) continue;
+          const shape = editor.getShape(sid as any) as any;
+          if (shape?.type === 'image') {
+            visibleImageIds.add(sid);
+          }
+        }
+      }
+    }
+
+    removeAllGlow();
+    for (const sid of visibleImageIds) {
+      const color = imageGlowColors[sid];
+      if (!color || color === 'none') continue;
+      const el = document.querySelector(`[data-shape-id="${sid}"]`);
+      if (el) el.classList.add(`glow-image-${color}`);
+    }
+
+    return () => { removeAllGlow(); };
+  }, [isLocked, currentStep, animationSteps, editor, imageGlowColors]);
+
+  // ─── Hide helper shapes when in Main mode ───────────────────────────────
+
+  // ─── Hide cursor + laser in fullscreen when audio is auto-playing or countdown active ─
+  const prevIsPresentingRef = useRef(isPresenting);
+  useEffect(() => {
+    const wasPresenting = prevIsPresentingRef.current;
+    prevIsPresentingRef.current = isPresenting;
+
+    if (isPresenting && (globalAudioPlaying || audioCountdown !== null)) {
+      document.body.classList.add('audio-playing-fullscreen');
+    } else {
+      document.body.classList.remove('audio-playing-fullscreen');
+      // Only stop audio when EXITING fullscreen (was presenting → not presenting)
+      if (wasPresenting && !isPresenting && (globalAudioPlaying || audioCountdown !== null)) {
+        if (audioCountdownRef.current) {
+          clearInterval(audioCountdownRef.current);
+          audioCountdownRef.current = null;
+        }
+        setAudioCountdown(null);
+        if (globalAudioRef.current) {
+          globalAudioRef.current.pause();
+        }
+        setGlobalAudioPlaying(false);
+        isAudioDrivenRef.current = false;
+        if (bgMusicRef.current) bgMusicRef.current.pause();
+      }
+    }
+    return () => { document.body.classList.remove('audio-playing-fullscreen'); };
+  }, [isPresenting, globalAudioPlaying, audioCountdown]);
+
+  useEffect(() => {
+    if (!editor) return;
+    for (const shapeId of helperShapeIds) {
+      const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+      if (el) {
+        if (roughMode) {
+          // Rough mode — show helpers with orange dashed border indicator
+          el.style.visibility = '';
+          el.style.opacity = '';
+          el.style.outline = '2px dashed rgba(234, 179, 8, 0.4)';
+          el.style.outlineOffset = '3px';
+        } else {
+          // Main mode — hide helpers completely
+          el.style.visibility = 'hidden';
+          el.style.opacity = '0';
+          el.style.outline = '';
+          el.style.outlineOffset = '';
+        }
+      }
+    }
+    return () => {
+      // Cleanup outlines
+      for (const shapeId of helperShapeIds) {
+        const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+        if (el) {
+          el.style.outline = '';
+          el.style.outlineOffset = '';
+        }
+      }
+    };
+  }, [editor, roughMode, helperShapeIds]);
+
   useEffect(() => {
     if (!editor || isLocked) return;
     const updateSelection = () => {
@@ -423,6 +707,10 @@ export default function LessonCanvas({
       if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
     });
 
+    // Collect which shape IDs should be visible after processing steps
+    const shouldBeVisible = new Set<string>();
+    const shouldBeHidden = new Set<string>();
+
     // Show/hide up to the given step
     for (let i = 0; i <= upToStep && i < steps.length; i++) {
       const stepAction = steps[i].action || 'enter';
@@ -430,6 +718,8 @@ export default function LessonCanvas({
 
       if (stepAction === 'exit') {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
+          shouldBeHidden.add(shapeId);
+          shouldBeVisible.delete(shapeId);
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
           if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
         });
@@ -439,6 +729,8 @@ export default function LessonCanvas({
         });
       } else if (stepAction === 'swap') {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
+          shouldBeVisible.add(shapeId);
+          shouldBeHidden.delete(shapeId);
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
           if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
         });
@@ -447,6 +739,8 @@ export default function LessonCanvas({
           if (el) { el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible'); }
         });
         (steps[i].exitShapeIds || []).filter(isTldrawId).forEach(shapeId => {
+          shouldBeHidden.add(shapeId);
+          shouldBeVisible.delete(shapeId);
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
           if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
         });
@@ -456,6 +750,8 @@ export default function LessonCanvas({
         });
       } else {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
+          shouldBeVisible.add(shapeId);
+          shouldBeHidden.delete(shapeId);
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
           if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
         });
@@ -464,6 +760,42 @@ export default function LessonCanvas({
           if (el) { el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible'); }
         });
       }
+    }
+
+    // Retry: check if any shapes that should be visible weren't found in DOM
+    // This handles the race condition where tldraw hasn't rendered shapes yet
+    const missingVisible = [...shouldBeVisible].filter(id => 
+      isTldrawId(id) && !document.querySelector(`[data-shape-id="${id}"]`)
+    );
+    if (missingVisible.length > 0) {
+      const retryApply = (attempt: number) => {
+        if (attempt > 5) return; // give up after 5 retries (~500ms total)
+        requestAnimationFrame(() => {
+          let stillMissing = false;
+          for (const shapeId of missingVisible) {
+            const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+            if (el) {
+              el.style.visibility = 'visible';
+              el.style.opacity = '1';
+            } else {
+              stillMissing = true;
+            }
+          }
+          // Also ensure hidden shapes stay hidden (tldraw may re-render them)
+          for (const shapeId of shouldBeHidden) {
+            if (!isTldrawId(shapeId)) continue;
+            const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+            if (el) {
+              el.style.visibility = 'hidden';
+              el.style.opacity = '0';
+            }
+          }
+          if (stillMissing) {
+            setTimeout(() => retryApply(attempt + 1), 100);
+          }
+        });
+      };
+      retryApply(0);
     }
   }, []);
 
@@ -517,7 +849,11 @@ export default function LessonCanvas({
             ...step,
             shapeIds: step.shapeIds.filter(id => {
               if (pasteFrameIdsRef.current.has(id)) return true; // don't clean frame shapes
-              if (id.includes(':line:')) return true; // don't clean glow-notes line references
+              if (id.includes(':line:')) {
+                // Keep glow-notes line refs only if the parent box still exists
+                const parentId = id.split(':line:')[0];
+                return existingShapeIds.has(parentId);
+              }
               if (isRfId(id)) return rfNodeIds.has(id) || rfEdgeIds.has(id);
               return existingShapeIds.has(id);
             }),
@@ -702,6 +1038,7 @@ export default function LessonCanvas({
 
   // ─── Sync glow-notes line steps when box content changes ────────────────
   const glowLinesCountRef = useRef<Record<string, number>>({}); // shapeId → line count
+  const glowFlickeredRef = useRef<Set<string>>(new Set()); // track which boxes already flickered
   useEffect(() => {
     if (!editor || isLocked) return;
 
@@ -1026,6 +1363,112 @@ export default function LessonCanvas({
     }
   }, [editor, pageSubtitles, pageSubtitleVisible]);
 
+  // ─── Global Audio control callbacks ──────────────────────────────────────
+  const handleGlobalAudioPlayPause = useCallback(() => {
+    const audio = globalAudioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => {});
+      setGlobalAudioPlaying(true);
+    } else {
+      audio.pause();
+      setGlobalAudioPlaying(false);
+    }
+  }, []);
+
+  const handleGlobalAudioSeek = useCallback((time: number) => {
+    const audio = globalAudioRef.current;
+    if (!audio) return;
+    audio.currentTime = time;
+    setGlobalAudioCurrentTime(time);
+  }, []);
+
+  const handleGlobalAudioFileChange = useCallback(async (file: File | null) => {
+    if (!file) {
+      // Remove audio
+      setGlobalAudioFileName('');
+      setGlobalAudioUrl(null);
+      setGlobalAudioDuration(0);
+      setGlobalAudioCurrentTime(0);
+      setGlobalAudioPlaying(false);
+      if (globalAudioRef.current) { globalAudioRef.current.pause(); globalAudioRef.current.src = ''; }
+      setGlobalAudioDurations({});
+      markDirty();
+      return;
+    }
+    // Upload audio file to disk
+    try {
+      const resp = await fetch(
+        `/__save-audio?siteId=${encodeURIComponent(siteId)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(subtopicSlug)}&fileName=${encodeURIComponent(file.name)}`,
+        { method: 'POST', body: file }
+      );
+      const result = await resp.json();
+      if (result.success && result.fileName) {
+        setGlobalAudioFileName(result.fileName);
+        markDirty();
+      }
+    } catch (err) {
+      console.error('Failed to upload audio:', err);
+    }
+  }, [siteId, topicSlug, subtopicSlug, markDirty]);
+
+  // ─── Audio Play with 10-sec countdown (for locked/presentation mode) ────
+  const startAudioWithCountdown = useCallback(() => {
+    if (!globalAudioRef.current || !globalAudioFileName) return;
+    // Reset audio to start
+    globalAudioRef.current.currentTime = 0;
+    setGlobalAudioCurrentTime(0);
+    // Start 10-second countdown
+    setAudioCountdown(10);
+    if (audioCountdownRef.current) clearInterval(audioCountdownRef.current);
+    audioCountdownRef.current = setInterval(() => {
+      setAudioCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          // Countdown done — start playing
+          clearInterval(audioCountdownRef.current!);
+          audioCountdownRef.current = null;
+          if (globalAudioRef.current) {
+            globalAudioRef.current.play().catch(() => {});
+            setGlobalAudioPlaying(true);
+            isAudioDrivenRef.current = true;
+          }
+          // Start background music if enabled
+          if (bgMusicRef.current && bgMusicEnabled) {
+            bgMusicRef.current.currentTime = 0;
+            bgMusicRef.current.play().catch(() => {});
+          }
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [globalAudioFileName]);
+
+  const pauseGlobalAudio = useCallback(() => {
+    if (audioCountdownRef.current) {
+      clearInterval(audioCountdownRef.current);
+      audioCountdownRef.current = null;
+      setAudioCountdown(null);
+    }
+    if (globalAudioRef.current) {
+      globalAudioRef.current.pause();
+      setGlobalAudioPlaying(false);
+      isAudioDrivenRef.current = false;
+    }
+    if (bgMusicRef.current) bgMusicRef.current.pause();
+  }, []);
+
+  const resumeGlobalAudio = useCallback(() => {
+    if (globalAudioRef.current && globalAudioRef.current.paused) {
+      globalAudioRef.current.play().catch(() => {});
+      setGlobalAudioPlaying(true);
+      isAudioDrivenRef.current = true;
+    }
+    if (bgMusicRef.current && bgMusicEnabled && bgMusicRef.current.paused) {
+      bgMusicRef.current.play().catch(() => {});
+    }
+  }, [bgMusicEnabled]);
+
   // ─── Build save data helper ──────────────────────────────────────────────
   const buildSaveData = useCallback((): LessonCanvasData => {
     const doc = editor ? getSnapshot(editor.store).document : (snapshot as any)?.document;
@@ -1055,8 +1498,15 @@ export default function LessonCanvas({
       pageTopicModes,
       pageSubtitleModes,
       bwMode,
+      guideBordersMap,
+      guideCount,
+      imageGlowColors,
+      roughMode: roughMode || undefined,
+      helperShapeIds: helperShapeIds.size > 0 ? [...helperShapeIds] : undefined,
+      globalAudioFile: globalAudioFileName || undefined,
+      globalAudioDurations: Object.keys(globalAudioDurations).length > 0 ? globalAudioDurations : undefined,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, helperShapeIds, guideBordersMap, guideCount, imageGlowColors, globalAudioFileName, globalAudioDurations]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -1099,7 +1549,7 @@ export default function LessonCanvas({
     // Run auto-save every 3 seconds via interval
     const interval = window.setInterval(async () => {
       const ed = editorRef.current;
-      if (!ed || isSavingRef.current || !isDirtyRef.current) return;
+      if (!ed || isSavingRef.current || !isDirtyRef.current || !canvasReadyRef.current) return;
       isSavingRef.current = true;
       isDirtyRef.current = false;
 
@@ -1116,7 +1566,7 @@ export default function LessonCanvas({
         camera: cam ? { x: cam.x, y: cam.y, z: cam.z } : undefined,
         animationSteps: animationStepsRef.current,
         subTopicLabels: subTopicLabelsRef.current,
-        sidebarTitle,
+        sidebarTitle: sidebarTitleRef.current,
         shapeAnimations: shapeAnimationsRef.current,
         diagramData: diagramDataRef.current,
         pageTopics: canvasTopicRef.current,
@@ -1130,6 +1580,13 @@ export default function LessonCanvas({
         pageTopicModes: pageTopicModesRef.current,
         pageSubtitleModes: pageSubtitleModesRef.current,
         bwMode,
+        guideBordersMap: guideBordersMapRef.current,
+        guideCount: guideCountRef.current,
+        imageGlowColors: imageGlowColorsRef.current,
+        roughMode: roughModeRef.current || undefined,
+        helperShapeIds: helperShapeIdsRef.current.size > 0 ? [...helperShapeIdsRef.current] : undefined,
+        globalAudioFile: globalAudioFileNameRef.current || undefined,
+        globalAudioDurations: Object.keys(globalAudioDurationsRef.current).length > 0 ? globalAudioDurationsRef.current : undefined,
       };
 
       // Strip audio base64 data
@@ -1285,15 +1742,7 @@ export default function LessonCanvas({
   }, [playBeep]);
 
   // ─── Glow Notes sound effects ───────────────────────────────────────────
-  // Box appears: soft pop/thud
-  const playGlowBoxSound = useCallback(() => {
-    playBeep(250, 120, 0.025);
-  }, [playBeep]);
-
-  // Line highlights: gentle tick
-  const playGlowLineSound = useCallback(() => {
-    playBeep(700, 80, 0.02);
-  }, [playBeep]);
+  // Box appears: handled by border_animation.mp3 in flicker effect
 
   // Box-to-box transition: rising swoosh (frequency sweep)
   const playGlowTransitionSound = useCallback(() => {
@@ -1330,8 +1779,7 @@ export default function LessonCanvas({
     const sid = step.shapeIds[0] || '';
 
     if (sid.includes(':line:')) {
-      // Line highlight — tick sound
-      playGlowLineSound();
+      // Line highlight — no sound
     } else if (editor) {
       const shape = editor.getShape(sid as any) as any;
       if (shape?.type === 'glow-notes') {
@@ -1350,11 +1798,10 @@ export default function LessonCanvas({
             return;
           }
         }
-        // First glow box or standalone — pop sound
-        playGlowBoxSound();
+        // Box appear sound handled by border_animation.mp3 in flicker effect
       }
     }
-  }, [animationSteps, editor, playGlowBoxSound, playGlowLineSound, playGlowTransitionSound]);
+  }, [animationSteps, editor, playGlowTransitionSound]);
 
   // Helper: check position relative to page end and play sounds
   const playPageCountdownSound = useCallback((stepIndex: number) => {
@@ -1366,9 +1813,10 @@ export default function LessonCanvas({
       setPageGlow({ pageId: pid, type: 'green' });
       setTimeout(() => setPageGlow(null), 1500);
     } else if (stepIndex === lastOnPage - 1) {
-      playCountdownBeep();
-      setPageGlow({ pageId: pid, type: 'orange' });
-      setTimeout(() => setPageGlow(null), 1500);
+      // DISABLED: countdown beep + orange glow on second-last element
+      // playCountdownBeep();
+      // setPageGlow({ pageId: pid, type: 'orange' });
+      // setTimeout(() => setPageGlow(null), 1500);
     }
   }, [editor, getLastStepIndexOnPage, playCountdownBeep, playCompletionChime]);
 
@@ -1407,6 +1855,18 @@ export default function LessonCanvas({
       // Unlock tldraw camera
       editor.setCameraOptions({ isLocked: false });
       setIsLocked(false);
+      // Stop global audio + bg music + clear countdown
+      if (globalAudioRef.current) {
+        globalAudioRef.current.pause();
+        setGlobalAudioPlaying(false);
+        isAudioDrivenRef.current = false;
+      }
+      if (bgMusicRef.current) bgMusicRef.current.pause();
+      if (audioCountdownRef.current) {
+        clearInterval(audioCountdownRef.current);
+        audioCountdownRef.current = null;
+        setAudioCountdown(null);
+      }
     } else {
       editor.updateInstanceState({ isReadonly: false });
       // Restore all saved move/teleport positions before locking
@@ -1455,16 +1915,20 @@ export default function LessonCanvas({
       setCurrentStep(-1);
       setRevealedTopicPages(new Set());
       setRevealedSubtitlePages(new Set());
+      glowFlickeredRef.current.clear();
       pendingCameraStepRef.current = null;
       applyAnimationState(editor, sortedSteps, -1);
-      // Re-apply after a frame to catch RF elements that might not be in DOM yet
+      // Re-apply after increasing delays to catch elements that might not be in DOM yet
       setTimeout(() => applyAnimationState(editor, sortedSteps, -1), 100);
+      setTimeout(() => applyAnimationState(editor, sortedSteps, -1), 300);
       editor.updateInstanceState({ isReadonly: true });
       // Lock tldraw camera to prevent any internal shifts during presentation
       editor.setCameraOptions({ isLocked: true });
       setIsLocked(true);
       setShowAnimBar(false);
       setShowNodes(false);
+      setShowGlobalTimeline(false);
+      // Do NOT auto-play audio — user clicks Play button manually
     }
   }, [isLocked, editor, animationSteps, applyAnimationState, stopStepAudio]);
 
@@ -1527,13 +1991,15 @@ export default function LessonCanvas({
     // Handle virtual topic step
     if (topicNeedsStep && !revealedTopicPages.has(pid)) {
       setRevealedTopicPages(prev => new Set(prev).add(pid));
+      // Play topic reveal sound
+      try { const a = new Audio('/sounds/border_animation.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
       return; // consume this arrow press for the topic reveal
     }
     // Handle virtual subtitle step
     if (subtitleNeedsStep && !revealedSubtitlePages.has(pid)) {
       setRevealedSubtitlePages(prev => new Set(prev).add(pid));
       // Play subtitle reveal sound
-      try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 0.3; a.play().catch(() => {}); } catch {}
+      try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
       return; // consume this arrow press for the subtitle reveal
     }
 
@@ -1576,7 +2042,26 @@ export default function LessonCanvas({
       }
       playStepAudio(pendingStep);
       playPageCountdownSound(pending.nextStep);
-      playGlowSound(pending.nextStep);
+      // Trigger glow box flicker + sound if this step reveals a glow-notes box
+      for (const sid of pendingStep.shapeIds) {
+        if (!sid.includes(':line:')) {
+          const shape = editor!.getShape(sid as any) as any;
+          if (shape?.type === 'glow-notes' && !glowFlickeredRef.current.has(sid)) {
+            glowFlickeredRef.current.add(sid);
+            const el = document.querySelector(`[data-shape-id="${sid}"] .glow-notes-box`) as HTMLElement;
+            if (el) {
+              el.classList.remove('glow-flicker-in');
+              void el.offsetWidth;
+              el.classList.add('glow-flicker-in');
+            }
+            try {
+              const audio = new Audio('/sounds/border_animation.mp3');
+              audio.volume = 0.3;
+              audio.play().catch(() => {});
+            } catch { /* ignore */ }
+          }
+        }
+      }
       return;
     }
 
@@ -1584,6 +2069,71 @@ export default function LessonCanvas({
     if (currentStep >= animationSteps.length - 1) return;
     editor.stopCameraAnimation();
     let nextStep = currentStep + 1;
+
+    // ─── Rough mode: batch advance to next camera group ───────────────
+    if (roughModeRef.current) {
+      // Skip preloaded steps first
+      while (nextStep < animationSteps.length &&
+             animationSteps[nextStep].animation === 'none' &&
+             (animationSteps[nextStep].action || 'enter') === 'enter') {
+        nextStep++;
+      }
+      if (nextStep >= animationSteps.length) {
+        setCurrentStep(animationSteps.length - 1);
+        return;
+      }
+
+      // Find the end of this camera group:
+      // A group = all steps from the current step until the next step that has a different camera position
+      let groupEnd = nextStep;
+      for (let i = nextStep + 1; i < animationSteps.length; i++) {
+        const s = animationSteps[i];
+        // If this step has a camera position set AND it's different from the group's camera, it starts a new group
+        if (s.cameraPosition) {
+          break;
+        }
+        groupEnd = i;
+      }
+
+      // Apply animation state showing all steps up to groupEnd
+      applyAnimationState(editor, animationSteps, groupEnd);
+
+      // Set camera to the first step in this group's camera position
+      const groupStep = animationSteps[nextStep];
+      if (groupStep.cameraPosition) {
+        editor.setCameraOptions({ isLocked: false });
+        editor.setCamera(groupStep.cameraPosition, { force: true, animation: { duration: 800 } });
+        setTimeout(() => editor.setCameraOptions({ isLocked: true }), 850);
+      }
+
+      // Trigger glow flicker for any glow-notes boxes in this group
+      for (let i = nextStep; i <= groupEnd; i++) {
+        const s = animationSteps[i];
+        for (const sid of s.shapeIds) {
+          if (!sid.includes(':line:')) {
+            const shape = editor.getShape(sid as any) as any;
+            if (shape?.type === 'glow-notes' && !glowFlickeredRef.current.has(sid)) {
+              glowFlickeredRef.current.add(sid);
+              const el = document.querySelector(`[data-shape-id="${sid}"] .glow-notes-box`) as HTMLElement;
+              if (el) {
+                el.classList.remove('glow-flicker-in');
+                void el.offsetWidth;
+                el.classList.add('glow-flicker-in');
+              }
+              try {
+                const audio = new Audio('/sounds/border_animation.mp3');
+                audio.volume = 0.7;
+                audio.play().catch(() => {});
+              } catch { /* ignore */ }
+            }
+          }
+        }
+      }
+
+      setCurrentStep(groupEnd);
+      return;
+    }
+    // ─── End Rough mode batch advance ─────────────────────────────────
 
     // Auto-skip consecutive "none" animation steps (preloaded — already visible)
     while (nextStep < animationSteps.length &&
@@ -1656,9 +2206,10 @@ export default function LessonCanvas({
           // Auto-reveal topic if it needs animate, otherwise auto-reveal subtitle
           if (targetTopicNeedsStep) {
             setRevealedTopicPages(prev => new Set(prev).add(targetPid));
+            try { const a = new Audio('/sounds/border_animation.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
           } else if (targetSubtitleNeedsStep) {
             setRevealedSubtitlePages(prev => new Set(prev).add(targetPid));
-            try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 0.3; a.play().catch(() => {}); } catch {}
+            try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
           }
           setCurrentStep(nextStep - 1);
         } else {
@@ -1685,11 +2236,18 @@ export default function LessonCanvas({
       Math.abs(currentCam.z - stepCam.z) > 0.01
     );
 
-    if (cameraWillMove) {
+    if (cameraWillMove && !isAudioDrivenRef.current) {
       // First press: move camera only, store step for second press
       handleCamera();
       setCurrentStep(nextStep);
       pendingCameraStepRef.current = { nextStep, step };
+    } else if (cameraWillMove && isAudioDrivenRef.current) {
+      // Audio-driven: move camera + run step together (no 2-press delay)
+      runStepAction();
+      handleCamera();
+      playPageCountdownSound(nextStep);
+      playGlowSound(nextStep);
+      setCurrentStep(nextStep);
     } else {
       runStepAction();
       handleCamera();
@@ -1833,6 +2391,7 @@ export default function LessonCanvas({
         editor.setCamera(presentationStartCameraRef.current, { force: true });
       }
       setCurrentStep(-1);
+      glowFlickeredRef.current.clear();
     } else {
       const prevStep = currentStep - 1;
       applyAnimationState(editor, animationSteps, prevStep);
@@ -1925,6 +2484,55 @@ export default function LessonCanvas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isLocked, goNext, goPrevious]);
 
+  // ─── Global audio auto-advance — fire steps at marker timestamps ────────
+  const lastAudioFiredStepRef = useRef(-1);
+  useEffect(() => {
+    if (!isLocked || !globalAudioPlaying || !globalAudioRef.current) {
+      lastAudioFiredStepRef.current = -1;
+      return;
+    }
+
+    const durations = globalAudioDurationsRef.current;
+    const steps = animationStepsRef.current;
+    if (steps.length === 0) return;
+
+    // Compute start times from durations (cumulative sum)
+    const DEFAULT_DUR = 3;
+    const startTimes: { idx: number; start: number }[] = [];
+    let cumulative = 0;
+    for (let i = 0; i < steps.length; i++) {
+      startTimes.push({ idx: i, start: cumulative });
+      cumulative += durations[steps[i].id] ?? DEFAULT_DUR;
+    }
+
+    const interval = setInterval(() => {
+      const audio = globalAudioRef.current;
+      if (!audio || audio.paused) return;
+      const now = audio.currentTime;
+
+      // Find the highest step whose start time has been crossed
+      let targetStepIdx = -1;
+      for (const st of startTimes) {
+        if (now >= st.start) {
+          targetStepIdx = st.idx;
+        } else {
+          break;
+        }
+      }
+
+      // Fire goNext for each step we haven't reached yet
+      if (targetStepIdx > lastAudioFiredStepRef.current) {
+        const stepsToAdvance = targetStepIdx - lastAudioFiredStepRef.current;
+        for (let i = 0; i < stepsToAdvance; i++) {
+          goNext();
+        }
+        lastAudioFiredStepRef.current = targetStepIdx;
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [isLocked, globalAudioPlaying, goNext]);
+
   // ─── Multi-line paste splitter ──────────────────────────────────────────
   // When pasting text with multiple lines, create separate text shapes for each line
   useEffect(() => {
@@ -1933,7 +2541,7 @@ export default function LessonCanvas({
     const handlePaste = (e: ClipboardEvent) => {
       // Only intercept when not editing a text shape (tldraw handles its own paste)
       const editingShapeId = editor.getEditingShapeId();
-      if (editingShapeId) return; // Let tldraw handle paste inside text shapes
+      if (editingShapeId) return;
 
       // Don't intercept if focus is on an input/textarea (e.g., timeline, sidebar)
       const active = document.activeElement;
@@ -1944,12 +2552,11 @@ export default function LessonCanvas({
 
       // Only split if there are multiple non-empty lines (real multi-line content)
       const lines = text.split('\n').filter(line => line.trim().length > 0);
-      if (lines.length <= 1) return; // Single line or empty — let tldraw handle normally
+      if (lines.length <= 1) return;
 
       // Also check: if clipboard has HTML or tldraw internal data, let tldraw handle it
-      // (user might be pasting shapes copied from tldraw itself)
       const tldrawData = e.clipboardData?.getData('application/tldraw');
-      if (tldrawData) return; // tldraw internal copy-paste
+      if (tldrawData) return;
       const html = e.clipboardData?.getData('text/html');
       if (html && html.includes('data-tldraw')) return;
 
@@ -2077,6 +2684,49 @@ export default function LessonCanvas({
             baseX: startX,
             textWidth: TEXT_WIDTH,
           });
+
+          // If Boundary is already ON, create the frame immediately
+          if (showTextBoundaryRef.current) {
+            setTimeout(() => {
+              const FRAME_PADDING = 12;
+              const sIds = pasteGroupsRef.current.get(groupId);
+              if (!sIds || sIds.length === 0) return;
+              let minX = Infinity, minY = Infinity, maxY = -Infinity;
+              for (const sid of sIds) {
+                const shape = editor.getShape(sid as any) as any;
+                const bounds = editor.getShapePageBounds(sid as any);
+                if (!shape || !bounds) continue;
+                minX = Math.min(minX, shape.x);
+                minY = Math.min(minY, shape.y);
+                maxY = Math.max(maxY, shape.y + bounds.h);
+              }
+              if (minX === Infinity) return;
+              const fInfo = pasteFrameRef.current.get(groupId);
+              if (!fInfo) return;
+              const frameId = createShapeId();
+              editor.createShape({
+                id: frameId,
+                type: 'geo',
+                x: minX - FRAME_PADDING,
+                y: minY - FRAME_PADDING,
+                opacity: 0.5,
+                meta: { isPasteBoundary: true },
+                props: {
+                  geo: 'rectangle',
+                  w: fInfo.textWidth + FRAME_PADDING * 2,
+                  h: (maxY - minY) + FRAME_PADDING * 2,
+                  fill: 'none',
+                  color: 'light-blue',
+                  dash: 'dashed',
+                  size: 's',
+                },
+              });
+              fInfo.frameId = frameId as string;
+              fInfo.baseX = minX;
+              pasteFrameIdsRef.current.add(frameId as string);
+              editor.sendToBack([frameId]);
+            }, 300);
+          }
 
           // Select all text shapes
           editor.select(...shapeIds as any);
@@ -2343,14 +2993,14 @@ export default function LessonCanvas({
           type: 'geo',
           x: minX - FRAME_PADDING,
           y: minY - FRAME_PADDING,
-          opacity: 0.25,
+          opacity: 0.5,
           meta: { isPasteBoundary: true },
           props: {
             geo: 'rectangle',
             w: frameInfo.textWidth + FRAME_PADDING * 2,
             h: (maxY - minY) + FRAME_PADDING * 2,
             fill: 'none',
-            color: 'grey',
+            color: 'light-blue',
             dash: 'dashed',
             size: 's',
           },
@@ -2485,6 +3135,20 @@ export default function LessonCanvas({
 
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
+  // Helper: convert PNG data URL to JPEG for smaller file size
+  const pngToJpeg = async (pngDataUrl: string, bgColor: string): Promise<string> => {
+    const img = new Image();
+    await new Promise<void>((resolve) => { img.onload = () => resolve(); img.src = pngDataUrl; });
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0);
+    return c.toDataURL('image/jpeg', 0.92);
+  };
+
   const handleExportPdf = useCallback(async () => {
     if (!editor || isExportingPdf) return;
     setIsExportingPdf(true);
@@ -2512,21 +3176,25 @@ export default function LessonCanvas({
         if (cl?.contains('timeline-bar-widget')) return false;
         if (cl?.contains('sub-topic-sidebar')) return false;
         if (node.getAttribute('data-drag-handle') !== null && node.closest?.('.timeline-bar-widget')) return false;
-        // Hide tldraw UI panels (zoom, navigation, toolbar)
         if (cl?.contains('tl-navigation-panel')) return false;
         if (cl?.contains('tl-zoom-menu')) return false;
         if (cl?.contains('tl-toolbar')) return false;
         if (cl?.contains('tl-style-panel')) return false;
         if (cl?.contains('tlui-navigation-panel')) return false;
         if (cl?.contains('tlui-menu-zone')) return false;
-        // Generic: hide anything with tl-ui or tlui prefix that's a panel
         if (node.className && typeof node.className === 'string' && (node.className.includes('tlui-navigation') || node.className.includes('tlui-toolbar') || node.className.includes('tlui-style-panel'))) return false;
         return true;
       };
 
-      // Capture each page
-      const pageImages: string[] = [];
-      const currentSteps = animationStepsRef.current;
+      // Calculate guide dimensions (page coordinates at 75% zoom)
+      const screenW = window.innerWidth * 0.85 - 6;
+      const fullscreenTotalH = window.innerHeight + 78;
+      const toolbarHeight = 47;
+      const guideW = screenW / 0.75;
+
+      // Capture each page, per guide boundary
+      const slideImages: string[] = [];
+
       for (const page of pages) {
         const pageId = page.id as string;
 
@@ -2535,13 +3203,7 @@ export default function LessonCanvas({
           editor.setCurrentPage(pageId as any);
         }
 
-        // Restore camera from first step's locked camera for this page (preserves user's zoom)
-        const pageStep = currentSteps.find(s => s.pageId === pageId && s.cameraPosition);
-        if (pageStep?.cameraPosition) {
-          editor.setCamera(pageStep.cameraPosition, { force: true });
-        }
-
-        // Make all shapes visible (remove any animation hiding)
+        // Make all shapes visible
         document.querySelectorAll('[data-shape-id]').forEach(el => {
           (el as HTMLElement).style.visibility = '';
           (el as HTMLElement).style.opacity = '';
@@ -2550,30 +3212,80 @@ export default function LessonCanvas({
           el.classList.remove('rf-anim-hidden');
         });
 
-        // Wait for render
-        await new Promise(r => setTimeout(r, 500));
+        // Get guide borders for this page
+        const pageBorders = getGuideBordersForPage(pageId);
 
-        // Capture
-        const dataUrl = await toPng(canvasArea, {
-          backgroundColor: '#f0ede8',
-          pixelRatio: 1.5,
-          filter: imageFilter,
-        });
-        // Convert PNG to JPEG for smaller file size
-        const img = new Image();
-        await new Promise<void>((resolve) => {
-          img.onload = () => resolve();
-          img.src = dataUrl;
-        });
-        const jpegCanvas = document.createElement('canvas');
-        jpegCanvas.width = img.width;
-        jpegCanvas.height = img.height;
-        const ctx = jpegCanvas.getContext('2d')!;
-        ctx.fillStyle = '#f0ede8';
-        ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
-        ctx.drawImage(img, 0, 0);
-        const jpegUrl = jpegCanvas.toDataURL('image/jpeg', 0.92);
-        pageImages.push(jpegUrl);
+        // Calculate strip height for this page
+        const hasTopic = pageTopicVisible.has(pageId);
+        const hasSubtitle = pageSubtitleVisible.has(pageId);
+        const topicLineH = 32;
+        const subtitleLineH = 28;
+        const stripContainerPy = 8;
+        const stripGap = 8;
+        let stripHeight = 0;
+        if (hasTopic && hasSubtitle) stripHeight = stripContainerPy + topicLineH + stripGap + subtitleLineH + 30;
+        else if (hasTopic) stripHeight = stripContainerPy + topicLineH + 10;
+        else if (hasSubtitle) stripHeight = stripContainerPy + subtitleLineH + 10;
+        const screenH = fullscreenTotalH - toolbarHeight - stripHeight - 47;
+        const guideH = screenH / 0.75;
+
+        // Check which guides have shapes inside them
+        const allShapeIds = [...editor.getCurrentPageShapeIds()];
+        const guidesWithContent: number[] = [];
+        for (let gi = 0; gi < pageBorders.length; gi++) {
+          const guide = pageBorders[gi];
+          const guideRect = { x: guide.x, y: guide.y, w: guideW, h: guideH };
+          const hasContent = allShapeIds.some(sid => {
+            const bounds = editor.getShapePageBounds(sid);
+            if (!bounds) return false;
+            // Check overlap
+            return bounds.x < guideRect.x + guideRect.w &&
+                   bounds.x + bounds.w > guideRect.x &&
+                   bounds.y < guideRect.y + guideRect.h &&
+                   bounds.y + bounds.h > guideRect.y;
+          });
+          if (hasContent) guidesWithContent.push(gi);
+        }
+
+        if (guidesWithContent.length === 0) {
+          // Page has no guides with content — capture entire page as-is (fallback)
+          const firstStep = animationStepsRef.current.find(s => s.pageId === pageId && s.cameraPosition);
+          if (firstStep?.cameraPosition) {
+            editor.setCamera(firstStep.cameraPosition, { force: true });
+          }
+          await new Promise(r => setTimeout(r, 400));
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          slideImages.push(jpegUrl);
+          continue;
+        }
+
+        // Capture each guide with content
+        for (const gi of guidesWithContent) {
+          const guide = pageBorders[gi];
+
+          // Set camera to frame this guide at 75% zoom
+          editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
+          await new Promise(r => setTimeout(r, 400));
+
+          // For guide #1 (first on page), capture with topic/subtitle strip visible
+          // For subsequent guides, hide the strip during capture
+          const stripEl = canvasArea.querySelector('.flex-shrink-0[style]') as HTMLElement | null;
+          const isFirstGuide = gi === guidesWithContent[0];
+
+          if (!isFirstGuide && stripEl) {
+            stripEl.style.display = 'none';
+          }
+
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          slideImages.push(jpegUrl);
+
+          // Restore strip
+          if (!isFirstGuide && stripEl) {
+            stripEl.style.display = '';
+          }
+        }
       }
 
       // Restore original page and camera
@@ -2583,8 +3295,7 @@ export default function LessonCanvas({
       editor.setCamera(originalCam, { force: true });
 
       // Build PDF
-      if (pageImages.length > 0) {
-        // Get canvas dimensions for PDF page size
+      if (slideImages.length > 0) {
         const canvasRect = canvasArea.getBoundingClientRect();
         const pdfWidth = canvasRect.width;
         const pdfHeight = canvasRect.height;
@@ -2595,9 +3306,9 @@ export default function LessonCanvas({
           format: [pdfWidth, pdfHeight],
         });
 
-        for (let i = 0; i < pageImages.length; i++) {
+        for (let i = 0; i < slideImages.length; i++) {
           if (i > 0) pdf.addPage([pdfWidth, pdfHeight], pdfWidth > pdfHeight ? 'landscape' : 'portrait');
-          pdf.addImage(pageImages[i], 'JPEG', 0, 0, pdfWidth, pdfHeight);
+          pdf.addImage(slideImages[i], 'JPEG', 0, 0, pdfWidth, pdfHeight);
         }
 
         pdf.save(`canvas-${topicSlug}-${subtopicSlug}.pdf`);
@@ -2609,12 +3320,11 @@ export default function LessonCanvas({
       }
     } catch (err) {
       console.error('PDF export failed:', err);
-      // Try to exit fullscreen on error
       if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch { /* */ } }
     } finally {
       setIsExportingPdf(false);
     }
-  }, [editor, isExportingPdf, topicSlug, subtopicSlug]);
+  }, [editor, isExportingPdf, topicSlug, subtopicSlug, getGuideBordersForPage, guideCount, pageTopicVisible, pageSubtitleVisible]);
 
   const [isExportingPpt, setIsExportingPpt] = useState(false);
 
@@ -2655,19 +3365,23 @@ export default function LessonCanvas({
         return true;
       };
 
-      // Capture each page
-      const pageImages: string[] = [];
-      const currentStepsPpt = animationStepsRef.current;
+      // Calculate guide dimensions (page coordinates at 75% zoom)
+      const screenW = window.innerWidth * 0.85 - 6;
+      const fullscreenTotalH = window.innerHeight + 78;
+      const toolbarHeight = 47;
+      const guideW = screenW / 0.75;
+
+      // Capture each page, per guide boundary
+      const slideImages: string[] = [];
+
       for (const page of pages) {
         const pageId = page.id as string;
+
         if (pageId !== (editor.getCurrentPageId() as string)) {
           editor.setCurrentPage(pageId as any);
         }
-        // Restore camera from first step's locked camera for this page
-        const pageStep = currentStepsPpt.find(s => s.pageId === pageId && s.cameraPosition);
-        if (pageStep?.cameraPosition) {
-          editor.setCamera(pageStep.cameraPosition, { force: true });
-        }
+
+        // Make all shapes visible
         document.querySelectorAll('[data-shape-id]').forEach(el => {
           (el as HTMLElement).style.visibility = '';
           (el as HTMLElement).style.opacity = '';
@@ -2675,25 +3389,74 @@ export default function LessonCanvas({
         document.querySelectorAll('.rf-anim-hidden').forEach(el => {
           el.classList.remove('rf-anim-hidden');
         });
-        await new Promise(r => setTimeout(r, 500));
 
-        const dataUrl = await toPng(canvasArea, {
-          backgroundColor: '#f0ede8',
-          pixelRatio: 1.5,
-          filter: imageFilter,
-        });
-        // Convert to JPEG for smaller size
-        const img = new Image();
-        await new Promise<void>((resolve) => { img.onload = () => resolve(); img.src = dataUrl; });
-        const jpegCanvas = document.createElement('canvas');
-        jpegCanvas.width = img.width;
-        jpegCanvas.height = img.height;
-        const ctx = jpegCanvas.getContext('2d')!;
-        ctx.fillStyle = '#f0ede8';
-        ctx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
-        ctx.drawImage(img, 0, 0);
-        const jpegUrl = jpegCanvas.toDataURL('image/jpeg', 0.92);
-        pageImages.push(jpegUrl);
+        // Get guide borders for this page
+        const pageBorders = getGuideBordersForPage(pageId);
+
+        // Calculate strip height for this page
+        const hasTopic = pageTopicVisible.has(pageId);
+        const hasSubtitle = pageSubtitleVisible.has(pageId);
+        const topicLineH = 32;
+        const subtitleLineH = 28;
+        const stripContainerPy = 8;
+        const stripGap = 8;
+        let stripHeight = 0;
+        if (hasTopic && hasSubtitle) stripHeight = stripContainerPy + topicLineH + stripGap + subtitleLineH + 30;
+        else if (hasTopic) stripHeight = stripContainerPy + topicLineH + 10;
+        else if (hasSubtitle) stripHeight = stripContainerPy + subtitleLineH + 10;
+        const screenH = fullscreenTotalH - toolbarHeight - stripHeight - 47;
+        const guideH = screenH / 0.75;
+
+        // Check which guides have shapes inside them
+        const allShapeIds = [...editor.getCurrentPageShapeIds()];
+        const guidesWithContent: number[] = [];
+        for (let gi = 0; gi < pageBorders.length; gi++) {
+          const guide = pageBorders[gi];
+          const guideRect = { x: guide.x, y: guide.y, w: guideW, h: guideH };
+          const hasContent = allShapeIds.some(sid => {
+            const bounds = editor.getShapePageBounds(sid);
+            if (!bounds) return false;
+            return bounds.x < guideRect.x + guideRect.w &&
+                   bounds.x + bounds.w > guideRect.x &&
+                   bounds.y < guideRect.y + guideRect.h &&
+                   bounds.y + bounds.h > guideRect.y;
+          });
+          if (hasContent) guidesWithContent.push(gi);
+        }
+
+        if (guidesWithContent.length === 0) {
+          // Fallback — capture entire page
+          const firstStep = animationStepsRef.current.find(s => s.pageId === pageId && s.cameraPosition);
+          if (firstStep?.cameraPosition) {
+            editor.setCamera(firstStep.cameraPosition, { force: true });
+          }
+          await new Promise(r => setTimeout(r, 400));
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          slideImages.push(jpegUrl);
+          continue;
+        }
+
+        for (const gi of guidesWithContent) {
+          const guide = pageBorders[gi];
+          editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
+          await new Promise(r => setTimeout(r, 400));
+
+          const stripEl = canvasArea.querySelector('.flex-shrink-0[style]') as HTMLElement | null;
+          const isFirstGuide = gi === guidesWithContent[0];
+
+          if (!isFirstGuide && stripEl) {
+            stripEl.style.display = 'none';
+          }
+
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          slideImages.push(jpegUrl);
+
+          if (!isFirstGuide && stripEl) {
+            stripEl.style.display = '';
+          }
+        }
       }
 
       // Restore original page and camera
@@ -2703,7 +3466,7 @@ export default function LessonCanvas({
       editor.setCamera(originalCam, { force: true });
 
       // Build PPTX
-      if (pageImages.length > 0) {
+      if (slideImages.length > 0) {
         const canvasRect = canvasArea.getBoundingClientRect();
         const aspectRatio = canvasRect.width / canvasRect.height;
         const slideW = 10; // inches
@@ -2713,7 +3476,7 @@ export default function LessonCanvas({
         pptx.defineLayout({ name: 'CUSTOM', width: slideW, height: slideH });
         pptx.layout = 'CUSTOM';
 
-        for (const imgData of pageImages) {
+        for (const imgData of slideImages) {
           const slide = pptx.addSlide();
           slide.addImage({
             data: imgData,
@@ -2737,7 +3500,7 @@ export default function LessonCanvas({
     } finally {
       setIsExportingPpt(false);
     }
-  }, [editor, isExportingPpt, topicSlug, subtopicSlug]);
+  }, [editor, isExportingPpt, topicSlug, subtopicSlug, getGuideBordersForPage, guideCount, pageTopicVisible, pageSubtitleVisible]);
 
   const handleImport = useCallback(() => {
     const input = window.document.createElement('input');
@@ -2787,19 +3550,19 @@ export default function LessonCanvas({
   return (
     <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}>
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
-      <div className="flex items-center px-4 py-3 bg-[#0f1b3d] border-b border-[#1a2a5e] flex-shrink-0 min-w-0">
+      <div className="flex items-center px-4 py-3 bg-[#1a1f35] border-b border-[#2a3055] flex-shrink-0 min-w-0">
         {/* Fixed left: Back + title (title hidden when unlocked for more button space) */}
         <div className="flex items-center gap-3 flex-shrink-0 mr-3" style={{ maxWidth: isLocked ? undefined : undefined }}>
-          <Link to={backPath} className="flex items-center gap-1.5 text-blue-100 hover:text-blue-100 text-sm transition-colors whitespace-nowrap">
+          <Link to={backPath} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors whitespace-nowrap">
             <ArrowLeft className="w-3.5 h-3.5" />Back
           </Link>
           {isLocked && (
             <>
-              <div className="w-px h-5 bg-blue-900 flex-shrink-0" />
+              <div className="w-px h-5 bg-[#1a1a2e] flex-shrink-0" />
               <div className="flex items-center gap-1 min-w-0 overflow-hidden">
-                <span className="text-blue-200 text-sm truncate">{topicTitle}</span>
-                <span className="text-blue-400 text-sm flex-shrink-0">/</span>
-                <span className="text-blue-100 text-sm font-medium truncate">{subtopicTitle}</span>
+                <span className="text-slate-400 text-sm truncate">{topicTitle}</span>
+                <span className="text-blue-400/70 text-sm flex-shrink-0">/</span>
+                <span className="text-slate-200 text-sm font-medium truncate">{subtopicTitle}</span>
               </div>
             </>
           )}
@@ -2807,24 +3570,24 @@ export default function LessonCanvas({
 
         {/* Scrollable right: all buttons — when locked, push to right with ml-auto */}
         <div className={`flex items-center gap-2 overflow-x-auto min-w-0 ${isLocked ? 'ml-auto flex-shrink-0' : 'flex-1'}`} style={{ scrollbarWidth: 'none', overscrollBehavior: 'contain' }}>
-          {/* Step counter (locked) */}
-          {isLocked && animationSteps.length > 0 && (
+          {/* Step counter (locked) — hidden when audio auto-play in fullscreen */}
+          {isLocked && animationSteps.length > 0 && !(isPresenting && (globalAudioPlaying || audioCountdown !== null)) && (
             <div className={`flex items-center gap-1.5 flex-shrink-0 ${!hideLockButton ? 'mr-2' : ''}`}>
-              <button onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-blue-900 hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
-                <ChevronLeft className="w-3.5 h-3.5 text-blue-100" />
+              <button onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-[#12121f] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                <ChevronLeft className="w-3.5 h-3.5 text-blue-300" />
               </button>
-              <span className="text-blue-100 text-xs font-medium min-w-[40px] text-center" style={{ display: isPresenting ? 'none' : undefined }}>
+              <span className="text-slate-300 text-xs font-medium min-w-[40px] text-center" style={{ display: isPresenting ? 'none' : undefined }}>
                 {currentStep + 1} / {animationSteps.length}
               </span>
-              <button onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-blue-900 hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
-                <ChevronRight className="w-3.5 h-3.5 text-blue-100" />
+              <button onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-[#12121f] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+                <ChevronRight className="w-3.5 h-3.5 text-blue-300" />
               </button>
               {/* Page jump — hidden in fullscreen presenting */}
               {!isPresenting && editor && editor.getPages().length > 1 && (
                 <select
                   value={currentStep >= 0 ? (animationSteps[currentStep]?.pageId || '') : ''}
                   onChange={(e) => { if (e.target.value) jumpToPage(e.target.value); }}
-                  className="ml-1 text-[9px] bg-blue-900 text-blue-200 border border-blue-700 rounded px-1 py-1 outline-none cursor-pointer"
+                  className="ml-1 text-[9px] bg-[#12121f] text-blue-300 border border-blue-500/20 rounded px-1 py-1 outline-none cursor-pointer hover:border-blue-400/40"
                   title="Jump to page"
                 >
                   <option value="" disabled>Jump to...</option>
@@ -2838,9 +3601,95 @@ export default function LessonCanvas({
             </div>
           )}
 
+          {/* Audio Sync Play/Pause — visible when locked + not presenting + audio file exists */}
+          {isLocked && !isPresenting && globalAudioFileName && (
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {audioCountdown !== null ? (
+                /* Countdown running */
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-bold text-yellow-300 min-w-[20px] text-center animate-pulse">{audioCountdown}</span>
+                  <button
+                    onClick={pauseGlobalAudio}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-red-400 border border-red-500/20 hover:bg-red-500/10 transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : globalAudioPlaying ? (
+                /* Audio playing */
+                <button
+                  onClick={pauseGlobalAudio}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/25 transition-all"
+                >
+                  ⏸ Pause
+                </button>
+              ) : globalAudioCurrentTime > 0 ? (
+                /* Audio paused mid-way — show Resume (no countdown) */
+                <button
+                  onClick={resumeGlobalAudio}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)] transition-all"
+                >
+                  ▶ Resume
+                </button>
+              ) : (
+                /* Initial state — show Play (with 10-sec countdown) */
+                <button
+                  onClick={startAudioWithCountdown}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)] transition-all"
+                >
+                  ▶ Play
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Background music controls — visible when locked + not presenting + bg music loaded */}
+          {isLocked && !isPresenting && bgMusicLoaded && (
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button
+                onClick={() => setBgMusicEnabled(v => !v)}
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                  bgMusicEnabled
+                    ? 'text-purple-300 bg-purple-500/15 border border-purple-500/30'
+                    : 'text-slate-500 border border-[#2a2a4e] hover:text-purple-300 hover:border-purple-500/30'
+                }`}
+                title={bgMusicEnabled ? 'Disable background music' : 'Enable background music'}
+              >
+                🎵 {bgMusicEnabled ? 'ON' : 'OFF'}
+              </button>
+              {bgMusicEnabled && (
+                <>
+                  <button
+                    onClick={() => setBgMusicLoop(v => !v)}
+                    className={`px-1.5 py-1 rounded text-[9px] transition-all ${
+                      bgMusicLoop
+                        ? 'text-blue-300 bg-blue-500/10 border border-blue-500/20'
+                        : 'text-slate-500 border border-[#2a2a4e] hover:text-blue-300'
+                    }`}
+                    title={bgMusicLoop ? 'Loop ON' : 'Loop OFF'}
+                  >
+                    🔁
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={Math.round(bgMusicVolume * 100)}
+                    onChange={(e) => setBgMusicVolume(Number(e.target.value) / 100)}
+                    className="w-14 h-1"
+                    style={{ accentColor: '#a78bfa' }}
+                    title={`Volume: ${Math.round(bgMusicVolume * 100)}%`}
+                  />
+                  <span className="text-[8px] text-slate-500 w-6">{Math.round(bgMusicVolume * 100)}%</span>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Lock/Unlock — hidden when presenting or public canvas is open */}
           {!hideLockButton && !isPresenting && !showPublicCanvas && (
-            <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ${isLocked ? 'bg-blue-900 text-blue-100 hover:bg-blue-800 border border-blue-800' : 'bg-emerald-600 text-white hover:bg-emerald-600/30 border border-emerald-500/30'}`}>
+            <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ${isLocked ? 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)]'}`}>
               {isLocked ? <><Lock className="w-3.5 h-3.5" />Locked</> : <><Unlock className="w-3.5 h-3.5" />Unlocked</>}
             </button>
           )}
@@ -2848,7 +3697,7 @@ export default function LessonCanvas({
           {/* Save + auto-save indicator */}
           {!isLocked && (
             <>
-            <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-blue-900 text-blue-300' : 'bg-blue-500 text-white hover:bg-blue-600'}`}>
+            <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-[#12121f] text-blue-400/60 border border-blue-500/10' : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:border-blue-400/50 hover:shadow-[0_0_8px_rgba(59,130,246,0.2)]'}`}>
               <Save className="w-3.5 h-3.5" />{isSaved ? 'Saved' : 'Save'}
             </button>
             {lastSavedAt !== null && (
@@ -2863,25 +3712,25 @@ export default function LessonCanvas({
           {/* Export / Import */}
           {!isLocked && (
             <>
-              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0" title="Export as JSON">
+              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as JSON">
                 <Download className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0" title="Export as PNG">
+              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as PNG">
                 <ImageDown className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PDF (all pages)">
+              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PDF (all pages)">
                 <FileText className="w-3.5 h-3.5" />{isExportingPdf ? '...' : 'PDF'}
               </button>
-              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPpt ? 'bg-amber-700 text-amber-200 cursor-wait' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Export as PowerPoint (all pages)">
+              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPpt ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PowerPoint (all pages)">
                 <Boxes className="w-3.5 h-3.5" />{isExportingPpt ? '...' : 'PPT'}
               </button>
-              <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0" title="Import JSON">
+              <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/60 text-red-200 hover:bg-red-800/60 transition-all flex-shrink-0" title="Reset this canvas">
+              <button onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0" title="Reset this canvas">
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleClearAllAppData} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-900/40 text-red-300 hover:bg-red-800/40 transition-all flex-shrink-0" title="Clear all app data">
+              <button onClick={handleClearAllAppData} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-300 border border-red-500/15 hover:border-red-400/30 hover:shadow-[0_0_8px_rgba(239,68,68,0.1)] transition-all flex-shrink-0" title="Clear all app data">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </>
@@ -2890,22 +3739,22 @@ export default function LessonCanvas({
           {/* Panel toggle buttons (unlocked) */}
           {!isLocked && (
             <>
-              <button onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLineConfig ? 'bg-cyan-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+              <button onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLineConfig ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 Lines
               </button>
-              <button onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showAnimBar ? 'bg-purple-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+              <button onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showAnimBar ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 <Palette className="w-3 h-3" />
                 Colors
               </button>
-              <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+              <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 <Boxes className="w-3 h-3" />
                 Nodes
               </button>
-              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showTextBoundary ? 'bg-amber-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`} title="Show/hide text paste boundaries">
+              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showTextBoundary ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Show/hide text paste boundaries">
                 <AlignJustify className="w-3 h-3" />
                 Boundary
               </button>
-              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-blue-900 text-blue-100 hover:bg-blue-800' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
+              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
                 <PanelRight className="w-3 h-3" />
               </button>
               <button
@@ -2915,7 +3764,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'code-block' as any, x: point.x - 250, y: point.y - 150 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
               >
                 <Code2 className="w-3 h-3" />
                 Code
@@ -2927,7 +3776,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'md-block' as any, x: point.x - 250, y: point.y - 175 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
               >
                 <FileText className="w-3 h-3" />
                 Markdown
@@ -2940,7 +3789,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'glow-notes' as any, x: point.x - 225, y: point.y - 175 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
               >
                 ✨ Glow
               </button>
@@ -2954,21 +3803,37 @@ export default function LessonCanvas({
                     editor.flipShapes(ids, 'horizontal');
                   }
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
                 title="Flip selected shapes horizontally"
               >
                 <FlipHorizontal2 className="w-3 h-3" />
                 Flip
               </button>
-              {/* Guide border toggle */}
+              {/* Guide border toggle + add/remove */}
               <button
                 onClick={() => setShowGuideBorder(v => !v)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuideBorder ? 'bg-orange-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
-                title="Show/hide presentation guide border (visible area at 75% zoom)"
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuideBorder ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+                title="Show/hide presentation guide borders (visible area at 75% zoom)"
               >
                 <Frame className="w-3 h-3" />
-                Guide
+                Guide {guideCount > 1 ? `(${guideCount})` : ''}
               </button>
+              {showGuideBorder && (
+                <>
+                  <button
+                    onClick={() => { setGuideCount(prev => prev + 1); markDirty(); }}
+                    className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-cyan-300 border border-cyan-500/20 hover:border-cyan-400/40 hover:shadow-[0_0_8px_rgba(6,182,212,0.15)] transition-all flex-shrink-0"
+                    title="Add guide border"
+                  >+</button>
+                  {guideCount > 1 && (
+                    <button
+                      onClick={() => { setGuideCount(prev => Math.max(1, prev - 1)); markDirty(); }}
+                      className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0"
+                      title="Remove last guide border"
+                    >−</button>
+                  )}
+                </>
+              )}
               {/* 75% zoom button */}
               <button
                 onClick={() => {
@@ -2976,7 +3841,7 @@ export default function LessonCanvas({
                   const cam = editor.getCamera();
                   editor.setCamera({ ...cam, z: 0.75 }, { force: true, animation: { duration: 300 } });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-900 text-blue-100 hover:bg-blue-800 transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
                 title="Set zoom to 75%"
               >
                 75%
@@ -2984,10 +3849,18 @@ export default function LessonCanvas({
               {/* B&W theme toggle */}
               <button
                 onClick={() => { setBwMode(v => !v); markDirty(); }}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${bwMode ? 'bg-gray-800 text-white border border-white/30' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${bwMode ? 'bg-slate-500/15 text-slate-200 border border-slate-400/30 shadow-[0_0_10px_rgba(148,163,184,0.15)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Toggle black & white theme"
               >
                 B&W
+              </button>
+              {/* Rough / Main mode toggle */}
+              <button
+                onClick={() => { setRoughMode(v => !v); markDirty(); }}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${roughMode ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+                title={roughMode ? 'Switch to Main mode' : 'Switch to Rough mode'}
+              >
+                {roughMode ? '📝 Rough' : 'Main'}
               </button>
               {/* Topic / Subtitle strip toggles */}
               <button
@@ -3003,7 +3876,7 @@ export default function LessonCanvas({
                   }
                   markDirty();
                 }}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageTopicVisible.has(editor.getCurrentPageId() as string) ? 'bg-rose-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageTopicVisible.has(editor.getCurrentPageId() as string) ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Show/hide topic for this page"
               >
                 Topic
@@ -3020,7 +3893,7 @@ export default function LessonCanvas({
                   }
                   markDirty();
                 }}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageSubtitleVisible.has(editor.getCurrentPageId() as string) ? 'bg-teal-500 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageSubtitleVisible.has(editor.getCurrentPageId() as string) ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_10px_rgba(20,184,166,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Show/hide subtitle for this page"
               >
                 Subtitle
@@ -3029,9 +3902,16 @@ export default function LessonCanvas({
           )}
           {/* Public canvas toggle — hidden when presenting */}
           {!isPresenting && (
-            <button onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showPublicCanvas ? 'bg-emerald-600 text-white' : 'bg-blue-900 text-blue-100 hover:bg-blue-800'}`}>
+            <button onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showPublicCanvas ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               <Eye className="w-3 h-3" />
               Public
+            </button>
+          )}
+          {/* Global Audio Timeline toggle */}
+          {!isPresenting && !isLocked && (
+            <button onClick={() => setShowGlobalTimeline(v => !v)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGlobalTimeline ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              <Music className="w-3 h-3" />
+              Audio Sync
             </button>
           )}
         </div>
@@ -3077,10 +3957,10 @@ export default function LessonCanvas({
             if (!hasTopic && !hasSubtitle) return null;
             const tText = pageTopics[pid] || '';
             const sText = pageSubtitles[pid] || '';
-            const tColor = pageTopicColors[pid] || '#1e293b';
-            const tBorder = pageTopicBorderColors[pid] || '#1e293b';
-            const sColor = pageSubtitleColors[pid] || '#1e293b';
-            const sBorder = pageSubtitleBorderColors[pid] || '#1e293b';
+            const tColor = pageTopicColors[pid] || '#e2e8f0';
+            const tBorder = pageTopicBorderColors[pid] || '#3b82f6';
+            const sColor = pageSubtitleColors[pid] || '#e2e8f0';
+            const sBorder = pageSubtitleBorderColors[pid] || '#3b82f6';
             const tAnim = pageTopicAnimations[pid] || 'none';
             const sAnim = pageSubtitleAnimations[pid] || 'none';
             const tMode = pageTopicModes[pid] || 'preload';
@@ -3091,10 +3971,21 @@ export default function LessonCanvas({
             const tPlayAnim = isLocked && tAnim !== 'none' && (tMode === 'preload' || revealedTopicPages.has(pid));
             const sPlayAnim = isLocked && sAnim !== 'none' && (sMode === 'preload' || revealedSubtitlePages.has(pid));
             return (
-              <div className="flex-shrink-0 bg-[#f0ede8] px-2 py-1 flex flex-col gap-2">
+              <div className="flex-shrink-0 px-2 py-1 flex flex-col gap-2 border-b border-[#1a1a2e]" style={{
+                backgroundColor: '#0b0b16',
+                backgroundImage: `radial-gradient(ellipse at 20% 25%, rgba(139, 92, 246, 0.06), transparent 50%), radial-gradient(ellipse at 80% 75%, rgba(6, 182, 212, 0.05), transparent 50%)`,
+                backgroundSize: '100% 100%, 100% 100%',
+              }}>
                 {hasTopic && (
                   <div key={`topic-${pid}`} className="flex justify-center" style={{ visibility: tVisible ? 'visible' : 'hidden', opacity: tVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
-                    <div className={`relative border-2 rounded inline-flex items-center ${tPlayAnim ? `step-anim-${tAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: tBorder }}>
+                    <div className={`relative inline-flex flex-col items-center ${tPlayAnim ? `step-anim-${tAnim}` : ''} ${isLocked && tMode === 'animate' && revealedTopicPages.has(pid) && tAnim === 'none' ? 'subtitle-flicker-in' : ''}`}
+                      onAnimationEnd={(e) => {
+                        if (e.animationName.startsWith('step-') && !e.currentTarget.classList.contains('subtitle-flicker-in')) {
+                          const el = e.currentTarget;
+                          el.classList.add('subtitle-flicker-in');
+                        }
+                      }}
+                    >
                       <div className="inline-grid items-center">
                         <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 26 }}>{tText || 'Topic'}</span>
                         <input
@@ -3103,32 +3994,34 @@ export default function LessonCanvas({
                           onChange={(e) => { setPageTopics(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
                           placeholder="Topic"
                           readOnly={isLocked}
-                          className="bg-transparent font-bold outline-none placeholder:text-[#94a3b8] placeholder:font-normal text-center col-start-1 row-start-1"
-                          style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 26, width: 0, minWidth: '100%', color: tColor }}
+                          className="bg-transparent font-bold outline-none placeholder:text-[#4a4a6a] placeholder:font-normal text-center col-start-1 row-start-1"
+                          style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 26, width: 0, minWidth: '100%', color: tColor, textShadow: `0 0 16px ${tColor}40, 0 0 6px ${tColor}25` }}
                         />
                       </div>
+                      {/* Glowing underline */}
+                      <div style={{ width: '100%', height: 2, marginTop: 2, borderRadius: 1, background: `linear-gradient(90deg, transparent, ${tBorder}, ${tBorder}, transparent)`, boxShadow: `0 0 8px ${tBorder}60, 0 2px 12px ${tBorder}30` }} />
                       {!isLocked && (
                         <button onClick={() => { setTopicColorPickerOpen(v => !v); setSubtitleColorPickerOpen(false); }} className="ml-1 w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: tColor }} title="Change color" />
                       )}
                       {topicColorPickerOpen && !isLocked && (
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
-                          <div className="text-[8px] text-slate-500 font-medium">Text</div>
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-[#1a1a2e] border border-[#2a2a4e] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="text-[8px] text-slate-400 font-medium">Text</div>
                           <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
                             {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','#ffffff'].map(c => (
                               <button key={`tt-${c}`} onClick={() => { setPageTopicColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${tColor === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'}`} style={{ background: c }} />
                             ))}
                           </div>
-                          <div className="text-[8px] text-slate-500 font-medium mt-1">Border</div>
+                          <div className="text-[8px] text-slate-400 font-medium mt-1">Border</div>
                           <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
                             {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','transparent'].map(c => (
                               <button key={`tb-${c}`} onClick={() => { setPageTopicBorderColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${tBorder === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'} ${c === 'transparent' ? 'bg-[repeating-conic-gradient(#ccc_0%_25%,#fff_0%_50%)] bg-[length:8px_8px]' : ''}`} style={c !== 'transparent' ? { background: c } : {}} />
                             ))}
                           </div>
-                          <div className="text-[8px] text-slate-500 font-medium mt-1">Animation</div>
+                          <div className="text-[8px] text-slate-400 font-medium mt-1">Animation</div>
                           <select
                             value={pageTopicAnimations[pid] || 'none'}
                             onChange={(e) => { setPageTopicAnimations(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
-                            className="text-[9px] border border-slate-300 rounded px-1 py-0.5 bg-white text-slate-700 w-full"
+                            className="text-[9px] border border-[#2a2a4e] rounded px-1 py-0.5 bg-[#12121f] text-slate-300 w-full"
                           >
                             <option value="none">None</option>
                             <option value="appear">Appear</option>
@@ -3138,15 +4031,15 @@ export default function LessonCanvas({
                             <option value="revealBottom">Reveal B→U</option>
                             <option value="revealCenter">Reveal Center</option>
                           </select>
-                          <div className="text-[8px] text-slate-500 font-medium mt-1">Step</div>
+                          <div className="text-[8px] text-slate-400 font-medium mt-1">Step</div>
                           <div className="flex gap-2">
                             <label className="flex items-center gap-1 cursor-pointer">
                               <input type="radio" name={`topic-mode-${pid}`} checked={(pageTopicModes[pid] || 'preload') === 'preload'} onChange={() => { setPageTopicModes(prev => ({ ...prev, [pid]: 'preload' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
-                              <span className="text-[8px] text-slate-600">Preload</span>
+                              <span className="text-[8px] text-slate-400">Preload</span>
                             </label>
                             <label className="flex items-center gap-1 cursor-pointer">
                               <input type="radio" name={`topic-mode-${pid}`} checked={(pageTopicModes[pid] || 'preload') === 'animate'} onChange={() => { setPageTopicModes(prev => ({ ...prev, [pid]: 'animate' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
-                              <span className="text-[8px] text-slate-600">Animate</span>
+                              <span className="text-[8px] text-slate-400">Animate</span>
                             </label>
                           </div>
                         </div>
@@ -3156,15 +4049,16 @@ export default function LessonCanvas({
                 )}
                 {hasSubtitle && (
                   <div key={`subtitle-${pid}`} className="flex justify-start" style={{ visibility: sVisible ? 'visible' : 'hidden', opacity: sVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
-                    <div className={`relative border-2 rounded inline-flex items-center ${sPlayAnim ? `step-anim-${sAnim}` : ''}`} style={{ padding: '1px 4px', borderColor: sBorder, boxShadow: sVisible ? `0 0 8px ${sBorder}44, 0 0 20px ${sBorder}18` : 'none' }}
+                    <div className={`relative inline-flex items-center rounded-full ${sPlayAnim ? `step-anim-${sAnim}` : ''} ${isLocked && sMode === 'animate' && revealedSubtitlePages.has(pid) && sAnim === 'none' ? 'subtitle-flicker-in' : ''}`} style={{ padding: '4px 16px 4px 0', background: `rgba(255,255,255,0.03)`, backdropFilter: 'blur(8px)', boxShadow: sVisible ? `0 0 12px ${sBorder}30, 0 0 1px ${sBorder}40` : 'none' }}
                       onAnimationEnd={(e) => {
-                        // After reveal animation completes, trigger flicker once
                         if (e.animationName.startsWith('step-') && !e.currentTarget.classList.contains('subtitle-flicker-in')) {
                           const el = e.currentTarget;
                           el.classList.add('subtitle-flicker-in');
                         }
                       }}
                     >
+                      {/* Left accent bar */}
+                      <div style={{ width: 3, height: '60%', minHeight: 16, borderRadius: 2, background: sBorder, boxShadow: `0 0 6px ${sBorder}80`, marginLeft: 10, marginRight: 10, flexShrink: 0 }} />
                       <div className="inline-grid items-center">
                         <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22 }}>{sText || 'Subtitle'}</span>
                         <input
@@ -3173,32 +4067,32 @@ export default function LessonCanvas({
                           onChange={(e) => { setPageSubtitles(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
                           placeholder="Subtitle"
                           readOnly={isLocked}
-                          className="bg-transparent font-bold outline-none placeholder:text-[#94a3b8] placeholder:font-normal col-start-1 row-start-1"
-                          style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22, width: 0, minWidth: '100%', color: sColor }}
+                          className="bg-transparent font-bold outline-none placeholder:text-[#4a4a6a] placeholder:font-normal col-start-1 row-start-1"
+                          style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22, width: 0, minWidth: '100%', color: sColor, textShadow: `0 0 10px ${sColor}50, 0 0 4px ${sColor}30` }}
                         />
                       </div>
                       {!isLocked && (
                         <button onClick={() => { setSubtitleColorPickerOpen(v => !v); setTopicColorPickerOpen(false); }} className="ml-1 w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: sColor }} title="Change color" />
                       )}
                       {subtitleColorPickerOpen && !isLocked && (
-                        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
-                          <div className="text-[8px] text-slate-500 font-medium">Text</div>
+                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1a2e] border border-[#2a2a4e] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="text-[8px] text-slate-400 font-medium">Text</div>
                           <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
                             {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','#ffffff'].map(c => (
                               <button key={`st-${c}`} onClick={() => { setPageSubtitleColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${sColor === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'}`} style={{ background: c }} />
                             ))}
                           </div>
-                          <div className="text-[8px] text-slate-500 font-medium mt-1">Border</div>
+                          <div className="text-[8px] text-slate-400 font-medium mt-1">Border</div>
                           <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
                             {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','transparent'].map(c => (
                               <button key={`sb-${c}`} onClick={() => { setPageSubtitleBorderColors(prev => ({ ...prev, [pid]: c })); markDirty(); }} className={`w-5 h-5 rounded-full border ${sBorder === c ? 'border-blue-500 ring-1 ring-blue-500' : 'border-slate-300'} ${c === 'transparent' ? 'bg-[repeating-conic-gradient(#ccc_0%_25%,#fff_0%_50%)] bg-[length:8px_8px]' : ''}`} style={c !== 'transparent' ? { background: c } : {}} />
                             ))}
                           </div>
-                          <div className="text-[8px] text-slate-500 font-medium mt-1">Animation</div>
+                          <div className="text-[8px] text-slate-400 font-medium mt-1">Animation</div>
                           <select
                             value={pageSubtitleAnimations[pid] || 'none'}
                             onChange={(e) => { setPageSubtitleAnimations(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
-                            className="text-[9px] border border-slate-300 rounded px-1 py-0.5 bg-white text-slate-700 w-full"
+                            className="text-[9px] border border-[#2a2a4e] rounded px-1 py-0.5 bg-[#12121f] text-slate-300 w-full"
                           >
                             <option value="none">None</option>
                             <option value="appear">Appear</option>
@@ -3208,15 +4102,15 @@ export default function LessonCanvas({
                             <option value="revealBottom">Reveal B→U</option>
                             <option value="revealCenter">Reveal Center</option>
                           </select>
-                          <div className="text-[8px] text-slate-500 font-medium mt-1">Step</div>
+                          <div className="text-[8px] text-slate-400 font-medium mt-1">Step</div>
                           <div className="flex gap-2">
                             <label className="flex items-center gap-1 cursor-pointer">
                               <input type="radio" name={`subtitle-mode-${pid}`} checked={(pageSubtitleModes[pid] || 'preload') === 'preload'} onChange={() => { setPageSubtitleModes(prev => ({ ...prev, [pid]: 'preload' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
-                              <span className="text-[8px] text-slate-600">Preload</span>
+                              <span className="text-[8px] text-slate-400">Preload</span>
                             </label>
                             <label className="flex items-center gap-1 cursor-pointer">
                               <input type="radio" name={`subtitle-mode-${pid}`} checked={(pageSubtitleModes[pid] || 'preload') === 'animate'} onChange={() => { setPageSubtitleModes(prev => ({ ...prev, [pid]: 'animate' })); markDirty(); }} className="w-3 h-3 accent-blue-500" />
-                              <span className="text-[8px] text-slate-600">Animate</span>
+                              <span className="text-[8px] text-slate-400">Animate</span>
                             </label>
                           </div>
                         </div>
@@ -3268,7 +4162,7 @@ export default function LessonCanvas({
 
           {/* Destination picker — drag shape then confirm */}
           {pickingDestinationForStep && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-slate-900/95 backdrop-blur-md text-blue-100 text-xs font-medium px-4 py-2.5 rounded-lg border border-blue-800/40 shadow-xl">
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-[#0a0a14]/95 backdrop-blur-md text-blue-100 text-xs font-medium px-4 py-2.5 rounded-lg border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
               <span className="text-blue-300">Drag the shape to its destination</span>
               <button
                 onClick={() => {
@@ -3340,7 +4234,7 @@ export default function LessonCanvas({
           {/* Nodes Catalog */}
           {!isLocked && showNodes && (
             <DraggableWidget defaultPosition={{ x: 16, y: 16 }} zIndex={50}>
-              <div className="bg-[#0f1b3d]/95 backdrop-blur-xl rounded-xl border border-emerald-400/25 shadow-2xl shadow-emerald-500/5 overflow-hidden w-72">
+              <div className="bg-[#0a0a14]/95 backdrop-blur-xl rounded-xl border border-emerald-400/25 shadow-2xl shadow-emerald-500/5 overflow-hidden w-72">
                 <div data-drag-handle className="flex items-center justify-between px-3 py-2.5 border-b border-emerald-400/15 bg-emerald-500/8 cursor-grab active:cursor-grabbing">
                   <span className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
                     <Boxes className="w-3 h-3" />
@@ -3352,15 +4246,15 @@ export default function LessonCanvas({
             </DraggableWidget>
           )}
 
-          {/* Laser pointer overlay — only in presentation mode with laser tool */}
-          {isPresenting && isLocked && presentationTool === 'laser' && <LaserPointer />}
+          {/* Laser pointer overlay — only in presentation mode with laser tool, hidden during audio auto-play */}
+          {isPresenting && isLocked && presentationTool === 'laser' && !globalAudioPlaying && <LaserPointer />}
 
           {/* Timeline pill — when fully collapsed, draggable anywhere on canvas */}
           {!isLocked && timelineFullyCollapsed && (
             <DraggableWidget defaultPosition={{ x: 16, y: 60 }} zIndex={35}>
               <div
                 data-drag-handle
-                className="flex items-center gap-1.5 px-3 py-2 bg-[#0a1230] border border-[#1a2a5e] rounded-lg text-[10px] text-slate-400 hover:text-slate-200 hover:bg-[#0f1b3d] transition-all shadow-lg cursor-grab active:cursor-grabbing"
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#0a0a14] border border-[#1a1a2e] rounded-lg text-[10px] text-slate-400 hover:text-blue-300 hover:border-blue-500/30 hover:shadow-[0_0_8px_rgba(59,130,246,0.1)] transition-all shadow-lg cursor-grab active:cursor-grabbing"
                 title="Click to expand timeline"
                 onMouseDown={(e) => { (e.currentTarget as any)._dragStartX = e.clientX; (e.currentTarget as any)._dragStartY = e.clientY; }}
                 onMouseUp={(e) => {
@@ -3376,6 +4270,55 @@ export default function LessonCanvas({
             </DraggableWidget>
           )}
 
+          {/* Image glow color popup — appears when a single image is selected */}
+          {!isLocked && editor && (() => {
+            const selIds = editor.getSelectedShapeIds() as string[];
+            if (selIds.length !== 1) return null;
+            const shape = editor.getShape(selIds[0] as any) as any;
+            if (!shape || shape.type !== 'image') return null;
+            const sid = selIds[0] as string;
+            const bounds = editor.getShapePageBounds(sid as any);
+            if (!bounds || !tldrawCamera) return null;
+            const cam = tldrawCamera;
+            const screenX = (bounds.x + bounds.w + cam.x) * cam.z + 10;
+            const screenY = (bounds.y + bounds.h / 2 + cam.y) * cam.z;
+            const currentColor = imageGlowColors[sid] || 'none';
+            const GLOW_OPTIONS = [
+              { id: 'none', color: '#475569', label: 'None' },
+              { id: 'blue', color: '#3b82f6', label: 'Blue' },
+              { id: 'cyan', color: '#06b6d4', label: 'Cyan' },
+              { id: 'purple', color: '#8b5cf6', label: 'Purple' },
+              { id: 'pink', color: '#ec4899', label: 'Pink' },
+              { id: 'emerald', color: '#10b981', label: 'Emerald' },
+              { id: 'amber', color: '#f59e0b', label: 'Amber' },
+            ];
+            return (
+              <div
+                className="absolute z-[50] flex flex-col items-center gap-1.5 px-1.5 py-2 rounded-lg bg-[#12121f] border border-[#2a2a4e] shadow-xl"
+                style={{ left: screenX, top: screenY, transform: 'translateY(-50%)' }}
+              >
+                <span className="text-[8px] text-slate-500">Glow</span>
+                {GLOW_OPTIONS.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      setImageGlowColors(prev => ({ ...prev, [sid]: c.id }));
+                      markDirty();
+                    }}
+                    className="rounded-full transition-all hover:scale-125"
+                    style={{
+                      width: 16, height: 16,
+                      background: c.id === 'none' ? 'transparent' : c.color,
+                      border: currentColor === c.id ? '2px solid #fff' : c.id === 'none' ? '1.5px dashed #475569' : `1.5px solid ${c.color}50`,
+                      boxShadow: currentColor === c.id && c.id !== 'none' ? `0 0 8px ${c.color}60` : 'none',
+                    }}
+                    title={c.label}
+                  />
+                ))}
+              </div>
+            );
+          })()}
+
           {/* Guide border — shows visible area at 75% zoom, hidden when locked */}
           {showGuideBorder && !isLocked && tldrawCamera && (() => {
             void guideResizeTick; // re-render on window resize
@@ -3385,11 +4328,9 @@ export default function LessonCanvas({
             const pid = editor.getCurrentPageId() as string;
 
             // Calculate fullscreen canvas dimensions
-            // In fullscreen: window.innerHeight + 78px (app header gone) = total height
-            // Then subtract toolbar and topic/subtitle strip
-            const fullscreenTotalH = window.innerHeight + 78; // app header removed in fullscreen
-            const screenW = window.innerWidth * 0.85 - 6; // 85% canvas column minus 3px each side
-            const toolbarHeight = 47; // toolbar py-3 + content + border
+            const fullscreenTotalH = window.innerHeight + 78;
+            const screenW = window.innerWidth * 0.85 - 6;
+            const toolbarHeight = 47;
             const hasTopic = pageTopicVisible.has(pid);
             const hasSubtitle = pageSubtitleVisible.has(pid);
             const topicLineH = 32;
@@ -3402,18 +4343,40 @@ export default function LessonCanvas({
             else if (hasSubtitle) stripHeight = stripContainerPy + subtitleLineH + 10;
 
             const screenH = fullscreenTotalH - toolbarHeight - stripHeight - 47;
-
-            // Page-coordinate dimensions of the viewport at 75% zoom
             const guideW = screenW / 0.75;
             const guideH = screenH / 0.75;
             const cam = tldrawCamera;
-            // Convert page coords to screen coords, applying guide offset
-            const screenX = (guideOffset.x + cam.x) * cam.z;
-            const screenY = (guideOffset.y + cam.y) * cam.z;
-            const screenWPx = guideW * cam.z;
-            const screenHPx = guideH * cam.z;
-            return (
+
+            const startGuideDrag = (e: React.MouseEvent, idx: number) => {
+              e.stopPropagation(); e.preventDefault();
+              const pageBorders = getGuideBordersForPage(pid);
+              guideDragRef.current = { idx, startX: e.clientX, startY: e.clientY, origOffX: pageBorders[idx].x, origOffY: pageBorders[idx].y };
+              const c = tldrawCamera;
+              const currentPid = pid;
+              const move = (ev: MouseEvent) => {
+                if (!guideDragRef.current || !c) return;
+                const d = guideDragRef.current;
+                const newX = d.origOffX + (ev.clientX - d.startX) / c.z;
+                const newY = d.origOffY + (ev.clientY - d.startY) / c.z;
+                setGuideBordersMap(prev => {
+                  const pageBorders = getGuideBordersForPage(currentPid);
+                  const updated = pageBorders.map((g, i) => i === d.idx ? { x: newX, y: newY } : g);
+                  return { ...prev, [currentPid]: updated };
+                });
+              };
+              const up = () => { guideDragRef.current = null; markDirty(); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+              document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+            };
+
+            const currentPageBorders = getGuideBordersForPage(pid);
+            return currentPageBorders.map((guide, idx) => {
+              const screenX = (guide.x + cam.x) * cam.z;
+              const screenY = (guide.y + cam.y) * cam.z;
+              const screenWPx = guideW * cam.z;
+              const screenHPx = guideH * cam.z;
+              return (
               <div
+                key={`guide-${idx}`}
                 className="absolute z-[5] pointer-events-none"
                 style={{
                   left: screenX,
@@ -3422,69 +4385,81 @@ export default function LessonCanvas({
                   height: screenHPx,
                 }}
               >
+                {/* Label */}
+                <div className="absolute -top-4 left-1 pointer-events-none" style={{ fontSize: 9, color: 'rgba(34, 211, 238, 0.5)', fontWeight: 600 }}>
+                  #{idx + 1}
+                </div>
                 {/* Top border - draggable */}
-                <div className="absolute top-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderTop: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation(); e.preventDefault();
-                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
-                    const c = tldrawCamera;
-                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
-                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
-                  }}
+                <div className="absolute top-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderTop: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
                 {/* Bottom border */}
-                <div className="absolute bottom-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderBottom: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation(); e.preventDefault();
-                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
-                    const c = tldrawCamera;
-                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
-                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
-                  }}
+                <div className="absolute bottom-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderBottom: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
                 {/* Left border */}
-                <div className="absolute top-0 bottom-0 left-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderLeft: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation(); e.preventDefault();
-                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
-                    const c = tldrawCamera;
-                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
-                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
-                  }}
+                <div className="absolute top-0 bottom-0 left-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderLeft: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
                 {/* Right border */}
-                <div className="absolute top-0 bottom-0 right-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderRight: '2px dashed rgba(251, 146, 60, 0.5)', pointerEvents: 'auto' }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation(); e.preventDefault();
-                    guideDragRef.current = { startX: e.clientX, startY: e.clientY, origOffX: guideOffset.x, origOffY: guideOffset.y };
-                    const c = tldrawCamera;
-                    const move = (ev: MouseEvent) => { if (!guideDragRef.current || !c) return; setGuideOffset({ x: guideDragRef.current.origOffX + (ev.clientX - guideDragRef.current.startX) / c.z, y: guideDragRef.current.origOffY + (ev.clientY - guideDragRef.current.startY) / c.z }); };
-                    const up = () => { guideDragRef.current = null; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-                    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
-                  }}
+                <div className="absolute top-0 bottom-0 right-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderRight: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                  onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
               </div>
-            );
+              );
+            });
           })()}
         </div>
 
         {!isLocked && !timelineFullyCollapsed && (
           <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
-            <div className="overflow-hidden shadow-2xl border border-[#1a2a5e]" style={{ width: '85vw' }}>
-              <TimelineBar
-                steps={animationSteps}
-                onStepsChange={handleStepsChange}
-                onDeleteRfElements={handleDeleteRfElements}
-                editor={editor}
-                isLocked={isLocked}
-                diagramData={diagramData}
-                selectedShapeIds={selectedShapeIds}
-                fullyCollapsed={timelineFullyCollapsed}
-                onFullyCollapsedChange={setTimelineFullyCollapsed}
-              />
+            <div className="overflow-hidden shadow-2xl border border-[#1a1a2e]" style={{ width: '85vw' }}>
+              {showGlobalTimeline ? (
+                <GlobalAudioTimeline
+                  steps={animationSteps}
+                  audioDurations={globalAudioDurations}
+                  onDurationsChange={(d) => { setGlobalAudioDurations(d); markDirty(); }}
+                  audioFileUrl={globalAudioUrl}
+                  onAudioFileChange={handleGlobalAudioFileChange}
+                  isPlaying={globalAudioPlaying}
+                  onPlayPause={handleGlobalAudioPlayPause}
+                  currentTime={globalAudioCurrentTime}
+                  duration={globalAudioDuration}
+                  onSeek={handleGlobalAudioSeek}
+                  editor={editor}
+                  diagramData={diagramData}
+                  selectedShapeIds={selectedShapeIds || []}
+                  pageTopicVisible={pageTopicVisible}
+                  pageSubtitleVisible={pageSubtitleVisible}
+                  pageTopics={pageTopics}
+                  pageSubtitles={pageSubtitles}
+                  pageTopicModes={pageTopicModes}
+                  pageSubtitleModes={pageSubtitleModes}
+                />
+              ) : (
+                <TimelineBar
+                  steps={animationSteps}
+                  onStepsChange={handleStepsChange}
+                  onDeleteRfElements={handleDeleteRfElements}
+                  editor={editor}
+                  isLocked={isLocked}
+                  diagramData={diagramData}
+                  selectedShapeIds={selectedShapeIds}
+                  fullyCollapsed={timelineFullyCollapsed}
+                  onFullyCollapsedChange={setTimelineFullyCollapsed}
+                  roughMode={roughMode}
+                  helperShapeIds={helperShapeIds}
+                  onHelperToggle={(shapeId) => {
+                    setHelperShapeIds(prev => {
+                      const next = new Set(prev);
+                      if (next.has(shapeId)) next.delete(shapeId);
+                      else next.add(shapeId);
+                      return next;
+                    });
+                    markDirty();
+                  }}
+                />
+              )}
             </div>
           </DraggableWidget>
         )}
@@ -3492,7 +4467,7 @@ export default function LessonCanvas({
         </div>
 
         {/* Sidebar (right 15%) — always rendered for layout, content conditional */}
-        <div className="w-[15%] min-w-[180px] border-l border-[#1a2a5e] bg-[#0a1230] flex flex-col overflow-hidden flex-shrink-0">
+        <div className="w-[15%] min-w-[180px] border-l border-[#1a1a2e] bg-[#0a0a14] flex flex-col overflow-hidden flex-shrink-0">
           {showSidebar ? (
             isLocked ? (
               // Locked: always show Sub-topics
@@ -3505,7 +4480,7 @@ export default function LessonCanvas({
                 editor={editor}
                 sidebar
                 sidebarTitle={sidebarTitle}
-                onSidebarTitleChange={setSidebarTitle}
+                onSidebarTitleChange={(v) => { setSidebarTitle(v); markDirty(); }}
                 collapsed={false}
                 pageGlow={pageGlow}
               />
@@ -3523,7 +4498,7 @@ export default function LessonCanvas({
                 editor={editor}
                 sidebar
                 sidebarTitle={sidebarTitle}
-                onSidebarTitleChange={setSidebarTitle}
+                onSidebarTitleChange={(v) => { setSidebarTitle(v); markDirty(); }}
                 collapsed={sidebarCollapsed}
                 onCollapsedChange={setSidebarCollapsed}
                 pageGlow={pageGlow}

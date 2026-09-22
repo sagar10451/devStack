@@ -21,17 +21,17 @@ export default function PdfViewer({ url, title }: PdfViewerProps) {
 
   if (error) {
     return (
-      <div className="w-full h-[calc(100vh-78px)] flex items-center justify-center bg-gray-50">
+      <div className="w-full h-[calc(100vh-78px)] flex items-center justify-center bg-[#0a0a14]">
         <div className="text-center">
-          <p className="text-lg font-semibold text-gray-700">No notes available yet</p>
-          <p className="text-sm text-gray-500 mt-1">PDF for "{title}" has not been uploaded.</p>
+          <p className="text-lg font-semibold text-slate-300">No notes available yet</p>
+          <p className="text-sm text-slate-500 mt-1">PDF for "{title}" has not been uploaded.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-[calc(100vh-78px)] overflow-y-auto bg-gray-100">
+    <div className="w-full h-[calc(100vh-78px)] overflow-y-auto bg-[#0a0a14]">
       <div className="max-w-4xl mx-auto py-6">
         <Document
           file={url}

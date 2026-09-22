@@ -26,6 +26,9 @@ interface TimelineBarProps {
   selectedShapeIds?: string[];
   fullyCollapsed?: boolean;
   onFullyCollapsedChange?: (v: boolean) => void;
+  roughMode?: boolean;
+  helperShapeIds?: Set<string>;
+  onHelperToggle?: (shapeId: string) => void;
 }
 
 const ANIMATION_OPTIONS: { value: string; label: string; group: string }[] = [
@@ -77,7 +80,7 @@ const PAGE_COLORS = [
   { border: 'border-indigo-500/40', bg: 'bg-indigo-500/8', text: 'text-indigo-400', label: 'bg-indigo-500/20' },
 ];
 
-function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: DiagramData): { icon: React.ReactNode; label: string } {
+export function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: DiagramData): { icon: React.ReactNode; label: string } {
   const cls = "w-3.5 h-3.5";
 
   if (!shapeId.includes(':')) {
@@ -183,6 +186,9 @@ export default function TimelineBar({
   selectedShapeIds = [],
   fullyCollapsed: _fullyCollapsed = false,
   onFullyCollapsedChange,
+  roughMode = false,
+  helperShapeIds,
+  onHelperToggle,
 }: TimelineBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [minimized, setMinimized] = useState(false);
@@ -596,7 +602,12 @@ export default function TimelineBar({
   }, [editor]);
 
   // ─── Filter steps to current page ──────────────────────────────────────
-  const currentPageSteps = steps.filter(s => (s.pageId || 'page:page') === currentPageId);
+  const currentPageSteps = steps.filter(s => {
+    if ((s.pageId || 'page:page') !== currentPageId) return false;
+    // In Main mode, hide steps whose primary shape is a helper
+    if (!roughMode && helperShapeIds && s.shapeIds.length > 0 && helperShapeIds.has(s.shapeIds[0])) return false;
+    return true;
+  });
   const pages = editor ? editor.getPages() : [];
   const currentPage = pages.find(p => (p.id as string) === currentPageId);
   const currentPageName = currentPage?.name || 'Page 1';
@@ -606,9 +617,9 @@ export default function TimelineBar({
   const pageColor = PAGE_COLORS[Math.max(0, pageColorIdx)];
 
   return (
-    <div className="flex-shrink-0 bg-[#0a1230] border-t border-[#1a2a5e]">
+    <div className="flex-shrink-0 bg-[#0a0a14] border-t border-[#1a1a2e]">
       {/* Timeline header — drag handle */}
-      <div data-drag-handle className="flex items-center justify-between px-3 py-1.5 border-b border-slate-800 cursor-grab active:cursor-grabbing">
+      <div data-drag-handle className="flex items-center justify-between px-3 py-1.5 border-b border-[#1a1a2e] cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Timeline</span>
           {hasMultiplePages && (
@@ -644,7 +655,7 @@ export default function TimelineBar({
           </button>
           <button
             onClick={() => setMinimized(m => !m)}
-            className="p-0.5 rounded hover:bg-slate-700/50 text-slate-400 hover:text-slate-300"
+            className="p-0.5 rounded hover:bg-[#12121f] text-slate-500 hover:text-blue-300"
             title={minimized ? 'Expand timeline' : 'Minimize timeline'}
           >
             {minimized ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -652,7 +663,7 @@ export default function TimelineBar({
           {minimized && (
             <button
               onClick={() => onFullyCollapsedChange?.(true)}
-              className="p-0.5 rounded hover:bg-slate-700/50 text-slate-400 hover:text-slate-300"
+              className="p-0.5 rounded hover:bg-[#12121f] text-slate-500 hover:text-blue-300"
               title="Collapse to pill"
             >
               <ChevronsLeft className="w-3.5 h-3.5" />
@@ -691,6 +702,7 @@ export default function TimelineBar({
               const isManualCard = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
               const isMultiShape = step.shapeIds.length > 1;
               const displayNum = pageLocalIndex + 1;
+              const isHelper = roughMode && helperShapeIds?.has(step.shapeIds[0]);
               const isMoveMenuOpen = moveMenuStepId === step.id;
               const isPreloaded = step.animation === 'none' && (step.action || 'enter') === 'enter';
               // Find the global index for data-timeline-index (used by auto-scroll)
@@ -707,16 +719,18 @@ export default function TimelineBar({
                     }}
                     className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all cursor-pointer mx-1 ${
                       selectedCardIds.has(step.id)
-                        ? 'border-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-400/50'
+                        ? 'border-emerald-400/50 bg-emerald-500/8 ring-1 ring-emerald-400/30 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
+                        : isHelper
+                        ? 'border-yellow-500/40 bg-yellow-500/5 hover:border-yellow-400/50 shadow-[0_0_6px_rgba(234,179,8,0.08)]'
                         : isSelected
-                        ? 'border-amber-400 bg-amber-500/10'
+                        ? 'border-amber-400/50 bg-amber-500/8 shadow-[0_0_8px_rgba(245,158,11,0.1)]'
                         : isManualCard
-                        ? 'border-orange-700/60 bg-orange-900/20 hover:border-orange-600'
-                        : 'border-slate-700/60 bg-slate-800/40 hover:border-slate-600'
+                        ? 'border-orange-500/30 bg-orange-500/5 hover:border-orange-400/40 hover:shadow-[0_0_8px_rgba(249,115,22,0.1)]'
+                        : 'border-[#2a2a4e] bg-[#12121f] hover:border-blue-500/30 hover:shadow-[0_0_8px_rgba(59,130,246,0.1)]'
                     }`}
                   >
                     {/* Step header */}
-                    <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-slate-700/40 bg-slate-800/60">
+                    <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[#1a1a2e] bg-[#0d0d18]">
                       <input
                         type="checkbox"
                         checked={selectedCardIds.has(step.id)}
@@ -749,7 +763,7 @@ export default function TimelineBar({
                           onChange={(e) => updateStep(step.id, { action: e.target.value as StepAction })}
                           disabled={isMultiShape}
                           onClick={(e) => e.stopPropagation()}
-                          className={`w-full text-[9px] border border-orange-600/50 rounded px-1 py-1 bg-slate-800/50 text-orange-300 ${isMultiShape ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          className={`w-full text-[9px] border border-orange-500/30 rounded px-1 py-1 bg-[#0d0d18] text-orange-300 ${isMultiShape ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                           {isMultiShape ? (
                             <option value="exit">Erase</option>
@@ -771,7 +785,7 @@ export default function TimelineBar({
                             }
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          className="w-full text-[9px] border border-slate-600/50 rounded px-1 py-1 bg-slate-800/50 text-slate-300"
+                          className="w-full text-[9px] border border-[#2a2a4e] rounded px-1 py-1 bg-[#0d0d18] text-slate-300"
                         >
                           {ANIMATION_OPTIONS.map(a => (
                             <option key={a.value} value={a.value}>{a.label}</option>
@@ -785,8 +799,8 @@ export default function TimelineBar({
                           onClick={(e) => { e.stopPropagation(); captureCamera(step.id); }}
                           className={`flex items-center gap-0.5 px-1 py-1 rounded text-[8px] font-medium transition-all justify-center ${
                             hasCamera
-                              ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                              : 'bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700'
+                              ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shadow-[0_0_6px_rgba(99,102,241,0.15)]'
+                              : 'bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:border-blue-500/30 hover:text-blue-300'
                           }`}
                           title="Lock current camera view"
                         >
@@ -836,7 +850,7 @@ export default function TimelineBar({
                               }
                             }}
                             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
-                            className="w-14 text-[8px] border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-indigo-300"
+                            className="w-14 text-[8px] border border-[#2a2a4e] rounded px-0.5 py-0.5 text-center bg-[#0d0d18] text-indigo-300"
                           />
                           <span className="text-[7px] text-slate-600">y</span>
                           <input
@@ -852,7 +866,7 @@ export default function TimelineBar({
                               }
                             }}
                             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
-                            className="w-14 text-[8px] border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-indigo-300"
+                            className="w-14 text-[8px] border border-[#2a2a4e] rounded px-0.5 py-0.5 text-center bg-[#0d0d18] text-indigo-300"
                           />
                           <span className="text-[7px] text-slate-600">z</span>
                           <input
@@ -868,7 +882,7 @@ export default function TimelineBar({
                               }
                             }}
                             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
-                            className="w-12 text-[8px] border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-indigo-300"
+                            className="w-12 text-[8px] border border-[#2a2a4e] rounded px-0.5 py-0.5 text-center bg-[#0d0d18] text-indigo-300"
                           />
                         </div>
                       </details>
@@ -880,7 +894,7 @@ export default function TimelineBar({
                         onClick={(e) => { e.stopPropagation(); toggleAudioExpanded(step.id); }}
                         className={`flex items-center gap-1 w-full px-1 py-0.5 rounded text-[8px] font-medium transition-all ${
                           step.audio?.data ? 'text-emerald-300' : audioExpandedSteps.has(step.id) ? 'text-slate-300' : 'text-slate-500'
-                        } hover:bg-slate-700/30`}
+                        } hover:bg-[#12121f]`}
                       >
                         {step.audio?.data ? <Volume2 className="w-2.5 h-2.5" /> : <VolumeX className="w-2.5 h-2.5" />}
                         {step.audio?.data ? step.audio.fileName || 'Audio' : 'Audio'}
@@ -892,14 +906,14 @@ export default function TimelineBar({
                             <>
                               <div className="flex items-center gap-1">
                                 <button onClick={() => previewAudio(step)} className="px-1 py-0.5 rounded text-[8px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">▶</button>
-                                <button onClick={() => stopAudioPreview()} className="px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-300 border border-slate-600/30">⏹</button>
+                                <button onClick={() => stopAudioPreview()} className="px-1 py-0.5 rounded text-[8px] bg-[#12121f] text-slate-300 border border-[#2a2a4e]">⏹</button>
                                 <button onClick={() => updateStep(step.id, { audio: undefined })} className="px-1 py-0.5 rounded text-[8px] text-red-400 border border-red-500/20">✕</button>
                               </div>
                               <div className="flex items-center gap-1 text-[8px] text-slate-500">
                                 <span>Start</span>
-                                <input type="number" value={step.audio.startTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, startTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
+                                <input type="number" value={step.audio.startTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, startTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-[#2a2a4e] rounded px-0.5 py-0.5 text-center bg-[#0d0d18] text-slate-300 text-[8px]" min={0} step={0.5} />
                                 <span>End</span>
-                                <input type="number" value={step.audio.endTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, endTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-slate-600/50 rounded px-0.5 py-0.5 text-center bg-slate-800/50 text-slate-300 text-[8px]" min={0} step={0.5} />
+                                <input type="number" value={step.audio.endTime} onChange={(e) => updateStep(step.id, { audio: { ...step.audio!, endTime: Math.max(0, Number(e.target.value)) } })} className="w-8 border border-[#2a2a4e] rounded px-0.5 py-0.5 text-center bg-[#0d0d18] text-slate-300 text-[8px]" min={0} step={0.5} />
                                 <span>s</span>
                               </div>
                               <div className="flex items-center gap-1 text-[8px] text-slate-500">
@@ -917,7 +931,7 @@ export default function TimelineBar({
                               🔊 Re-add: {step.audio.fileName || 'audio'}
                             </button>
                           ) : (
-                            <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700">
+                            <button onClick={() => { audioUploadStepRef.current = step.id; audioFileRef.current?.click(); }} className="flex items-center gap-1 px-1 py-0.5 rounded text-[8px] bg-[#12121f] text-slate-400 border border-[#2a2a4e] hover:border-blue-500/30 hover:text-blue-300">
                               <VolumeX className="w-2.5 h-2.5" /> Add Audio
                             </button>
                           )}
@@ -926,7 +940,7 @@ export default function TimelineBar({
                     </div>
 
                     {/* Step footer — move, delete, ungroup */}
-                    <div className="flex items-center justify-between px-1.5 py-1 border-t border-slate-700/40 bg-slate-800/60">
+                    <div className="flex items-center justify-between px-1.5 py-1 border-t border-[#1a1a2e] bg-[#0d0d18]">
                       <div className="flex items-center gap-1">
                         {step.shapeIds.length > 1 && (
                           <button
@@ -939,13 +953,27 @@ export default function TimelineBar({
                         <button
                           onClick={(e) => { e.stopPropagation(); setMoveMenuStepId(isMoveMenuOpen ? null : step.id); setMoveInput(''); }}
                           className={`flex items-center gap-0.5 text-[8px] px-1 py-0.5 rounded transition-all ${
-                            isMoveMenuOpen ? 'text-blue-300 bg-blue-500/15 border border-blue-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/30'
+                            isMoveMenuOpen ? 'text-blue-300 bg-blue-500/15 border border-blue-500/30' : 'text-slate-500 hover:text-blue-300 hover:bg-[#12121f]'
                           }`}
                           title="Move card position"
                         >
                           <MoveHorizontal className="w-2.5 h-2.5" />
                         </button>
                       </div>
+                      {/* Helper toggle — Rough mode only */}
+                      {roughMode && onHelperToggle && step.shapeIds.length > 0 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onHelperToggle(step.shapeIds[0]); }}
+                          className={`text-[7px] px-1 py-0.5 rounded transition-all ${
+                            helperShapeIds?.has(step.shapeIds[0])
+                              ? 'text-yellow-300 bg-yellow-500/15 border border-yellow-500/30'
+                              : 'text-slate-500 hover:text-yellow-300 hover:bg-yellow-500/10 border border-transparent'
+                          }`}
+                          title={helperShapeIds?.has(step.shapeIds[0]) ? 'Unmark as helper' : 'Mark as helper (hidden in Main mode)'}
+                        >
+                          {helperShapeIds?.has(step.shapeIds[0]) ? '📝 Helper' : '📝'}
+                        </button>
+                      )}
                       <button onClick={(e) => { e.stopPropagation(); removeStep(step.id); }} className="p-0.5 rounded hover:bg-red-500/10">
                         <Trash2 className="w-3 h-3 text-red-400/60 hover:text-red-400" />
                       </button>
@@ -953,17 +981,17 @@ export default function TimelineBar({
 
                     {/* Move menu — dropdown below footer */}
                     {isMoveMenuOpen && (
-                      <div className="px-2 py-1.5 border-t border-blue-500/20 bg-slate-900/80 space-y-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                      <div className="px-2 py-1.5 border-t border-blue-500/20 bg-[#0a0a14]/90 space-y-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
                         <div className="flex gap-1">
                           <button
                             onClick={() => moveToStart(step.id)}
-                            className="flex-1 text-[8px] px-1 py-1 rounded bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600/30"
+                            className="flex-1 text-[8px] px-1 py-1 rounded bg-[#12121f] text-slate-300 hover:text-blue-300 border border-[#2a2a4e] hover:border-blue-500/30"
                           >
                             ⇤ Start
                           </button>
                           <button
                             onClick={() => moveToEnd(step.id)}
-                            className="flex-1 text-[8px] px-1 py-1 rounded bg-slate-700/50 text-slate-300 hover:bg-slate-700 border border-slate-600/30"
+                            className="flex-1 text-[8px] px-1 py-1 rounded bg-[#12121f] text-slate-300 hover:text-blue-300 border border-[#2a2a4e] hover:border-blue-500/30"
                           >
                             End ⇥
                           </button>
@@ -972,7 +1000,7 @@ export default function TimelineBar({
                           <select
                             value={moveMode}
                             onChange={(e) => setMoveMode(e.target.value as 'after' | 'before')}
-                            className="text-[8px] border border-slate-600/50 rounded px-0.5 py-1 bg-slate-800/50 text-slate-300"
+                            className="text-[8px] border border-[#2a2a4e] rounded px-0.5 py-1 bg-[#0d0d18] text-slate-300"
                           >
                             <option value="after">After #</option>
                             <option value="before">Before #</option>
@@ -983,7 +1011,7 @@ export default function TimelineBar({
                             onChange={(e) => setMoveInput(e.target.value)}
                             placeholder="#"
                             min={1}
-                            className="w-8 text-[8px] border border-slate-600/50 rounded px-0.5 py-1 text-center bg-slate-800/50 text-slate-300"
+                            className="w-8 text-[8px] border border-[#2a2a4e] rounded px-0.5 py-1 text-center bg-[#0d0d18] text-slate-300"
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' && moveInput) {
                                 moveToPosition(step.id, Number(moveInput), moveMode);

@@ -33,7 +33,7 @@ export default function ProgressiveDisclosure({ tree }: ProgressiveDisclosurePro
       {/* Title + Expand All button */}
       <div className="flex items-start justify-between mb-6">
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900">{tree.title}</h1>
+          <h1 className="text-2xl font-bold text-gray-100">{tree.title}</h1>
           {/* Intro content */}
           {tree.introContent.length > 0 && (
             <div className="mt-3">
@@ -49,8 +49,8 @@ export default function ProgressiveDisclosure({ tree }: ProgressiveDisclosurePro
           onClick={() => setExpandAll(!expandAll)}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 ml-4 ${
             expandAll
-              ? 'bg-blue-100 text-blue-700 border border-blue-200'
-              : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+              ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+              : 'bg-[#12121f] text-slate-400 border border-[#2a2a4e] hover:border-blue-500/30 hover:text-blue-300'
           }`}
           title={expandAll ? 'Collapse to progressive mode' : 'Expand all sections'}
         >
@@ -92,31 +92,31 @@ function SectionCard({ node, isExpanded, onToggle, expandAll, expandedSections, 
   const isLeaf = isLeafNode(node);
 
   return (
-    <div className="rounded-xl border-2 border-gray-200 bg-white overflow-hidden shadow-sm hover:border-blue-200 transition-colors">
+    <div className="rounded-xl border border-[#2a2a4e] bg-[#12121f] overflow-hidden shadow-sm hover:border-blue-500/30 hover:shadow-[0_0_8px_rgba(59,130,246,0.1)] transition-colors">
       {/* Section header — always clickable */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50/50 transition-colors group"
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-[#0d0d18] transition-colors group"
       >
         <div className="flex items-center gap-3">
           <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
-            isExpanded ? 'bg-blue-100' : 'bg-gray-100 group-hover:bg-blue-50'
+            isExpanded ? 'bg-blue-500/15' : 'bg-[#0d0d18] group-hover:bg-blue-500/10'
           }`}>
             {isExpanded ? (
-              <ChevronDown className="w-4 h-4 text-blue-600" />
+              <ChevronDown className="w-4 h-4 text-blue-400" />
             ) : (
-              <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-blue-500" />
+              <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-blue-400" />
             )}
           </div>
           <h2 className={`font-semibold transition-colors ${
-            isExpanded ? 'text-blue-700' : 'text-gray-800 group-hover:text-blue-600'
+            isExpanded ? 'text-blue-300' : 'text-slate-200 group-hover:text-blue-300'
           }`}>
             {node.title}
           </h2>
         </div>
 
         {/* Indicator: how many children or content blocks */}
-        <span className="text-xs text-gray-400">
+        <span className="text-xs text-slate-500">
           {hasChildren ? `${node.children.length} sub-topics` : hasContent ? `${node.content.length} points` : ''}
         </span>
       </button>
@@ -131,10 +131,10 @@ function SectionCard({ node, isExpanded, onToggle, expandAll, expandedSections, 
             transition={{ duration: 0.25, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <div className="px-5 pb-5 border-t border-gray-200">
+            <div className="px-5 pb-5 border-t border-[#1a1a2e]">
               {/* If this section has direct content AND children, show content first */}
               {hasContent && hasChildren && (
-                <div className="mt-3 mb-4 pl-2 border-l-2 border-blue-100">
+                <div className="mt-3 mb-4 pl-2 border-l-2 border-blue-500/20">
                   <LeafContentReveal content={node.content} expandAll={expandAll} />
                 </div>
               )}
@@ -182,24 +182,24 @@ function ChildSectionCard({ node, isExpanded, onToggle, expandAll }: ChildSectio
   const hasContent = node.content.length > 0;
 
   return (
-    <div className="rounded-lg border-2 border-gray-200 bg-gray-50/50 overflow-hidden hover:border-blue-200 transition-colors">
+    <div className="rounded-lg border border-[#2a2a4e] bg-[#0d0d18] overflow-hidden hover:border-blue-500/30 transition-colors">
       {/* Child header */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/80 transition-colors group"
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-[#12121f] transition-colors group"
       >
         <div className="flex items-center gap-2.5">
           <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${
-            isExpanded ? 'bg-blue-100' : 'bg-gray-200/60 group-hover:bg-blue-50'
+            isExpanded ? 'bg-blue-500/15' : 'bg-[#12121f] group-hover:bg-blue-500/10'
           }`}>
             {isExpanded ? (
-              <ChevronDown className="w-3 h-3 text-blue-600" />
+              <ChevronDown className="w-3 h-3 text-blue-400" />
             ) : (
-              <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-blue-500" />
+              <ChevronRight className="w-3 h-3 text-slate-500 group-hover:text-blue-400" />
             )}
           </div>
           <h3 className={`text-sm font-medium transition-colors ${
-            isExpanded ? 'text-blue-700' : 'text-gray-700 group-hover:text-blue-600'
+            isExpanded ? 'text-blue-300' : 'text-slate-300 group-hover:text-blue-300'
           }`}>
             {node.title}
           </h3>
@@ -219,7 +219,7 @@ function ChildSectionCard({ node, isExpanded, onToggle, expandAll }: ChildSectio
             transition={{ duration: 0.2, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-4 border-t border-gray-200">
+            <div className="px-4 pb-4 border-t border-[#1a1a2e]">
               <LeafContentReveal content={node.content} expandAll={expandAll} />
             </div>
           </motion.div>

@@ -271,9 +271,9 @@ export default function SubTopicTracker({
   if (sidebar) {
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <div className={`flex items-center justify-between px-3 py-2.5 ${isLocked ? 'border-b border-indigo-100 bg-gradient-to-r from-indigo-500 to-blue-500' : 'border-b border-indigo-400/15 bg-indigo-500/8'}`}>
+        <div className={`flex items-center justify-between px-3 py-2.5 ${isLocked ? 'border-b border-indigo-500/20 bg-indigo-500/10' : 'border-b border-indigo-400/15 bg-indigo-500/8'}`}>
           {isLocked ? (
-            <span className="text-xs font-semibold text-white">📋 {sidebarTitle}</span>
+            <span className="text-xs font-semibold text-indigo-300">📋 {sidebarTitle}</span>
           ) : (
             <select
               value={sidebarTitle}
@@ -281,7 +281,7 @@ export default function SubTopicTracker({
               className="text-xs font-semibold text-indigo-300 bg-transparent border-none outline-none cursor-pointer hover:text-indigo-200"
             >
               {SIDEBAR_TITLE_OPTIONS.map(t => (
-                <option key={t} value={t} className="bg-[#0a1230] text-slate-300">{t}</option>
+                <option key={t} value={t} className="bg-[#0a0a14] text-slate-300">{t}</option>
               ))}
             </select>
           )}
@@ -321,12 +321,12 @@ export default function SubTopicTracker({
                   isLocked
                     ? (glowType === 'green' ? 'border-2 border-emerald-400 bg-emerald-950/60 shadow-lg shadow-emerald-500/30' :
                        glowType === 'orange' ? 'border-2 border-orange-400 bg-orange-950/40 shadow-lg shadow-orange-500/30' :
-                       status === 'complete' ? 'border border-emerald-500/40 bg-emerald-950/40' :
-                       status === 'active' ? 'border border-orange-400/30 bg-slate-800/60' :
-                       'border border-slate-700/40 bg-slate-800/30')
-                    : (status === 'complete' ? 'bg-emerald-500/10 border border-emerald-400/40' :
-                       status === 'active' ? 'bg-indigo-500/10 border border-indigo-400/40' :
-                       'bg-slate-800/30 border border-slate-600/30')
+                       status === 'complete' ? 'border border-emerald-500/30 bg-emerald-500/8' :
+                       status === 'active' ? 'border border-indigo-400/30 bg-indigo-500/8' :
+                       'border border-[#2a2a4e] bg-[#12121f]')
+                    : (status === 'complete' ? 'bg-emerald-500/8 border border-emerald-400/30' :
+                       status === 'active' ? 'bg-indigo-500/8 border border-indigo-400/30' :
+                       'bg-[#12121f] border border-[#2a2a4e]')
                 }`}
               >
                 <div className="flex items-center gap-2 relative z-10">
@@ -392,7 +392,7 @@ export default function SubTopicTracker({
                           type="number"
                           value={startP + 1}
                           onChange={(e) => updateFirstStartPage(Math.max(0, Number(e.target.value) - 1))}
-                          className="w-7 border border-slate-600/50 rounded px-0.5 py-0.5 text-center text-[9px] bg-slate-800/50 text-slate-300"
+                          className="w-7 border border-[#2a2a4e] rounded px-0.5 py-0.5 text-center text-[9px] bg-[#0d0d18] text-slate-300"
                           min={1}
                           max={endP + 1}
                         />
@@ -405,7 +405,7 @@ export default function SubTopicTracker({
                       type="number"
                       value={endP + 1}
                       onChange={(e) => updateEndPage(label.id, Number(e.target.value) - 1)}
-                      className="w-7 border border-slate-600/50 rounded px-0.5 py-0.5 text-center text-[9px] bg-slate-800/50 text-slate-300"
+                      className="w-7 border border-[#2a2a4e] rounded px-0.5 py-0.5 text-center text-[9px] bg-[#0d0d18] text-slate-300"
                       min={startP + 1}
                       max={totalPages}
                     />
@@ -421,7 +421,7 @@ export default function SubTopicTracker({
           })}
         </div>
         {!isLocked && labels.length > 0 && !collapsed && (
-          <div className="px-2 py-1.5 border-t border-slate-700/30 text-[9px] text-slate-600 text-center">
+          <div className="px-2 py-1.5 border-t border-[#1a1a2e] text-[9px] text-slate-600 text-center">
             Set page ranges for each sub topic
           </div>
         )}
@@ -439,9 +439,9 @@ export default function SubTopicTracker({
       style={position ? { left: position.x, top: position.y, width: isLocked ? 'max-content' : '14rem' } : undefined}
       onMouseDown={handleMouseDown}
     >
-      <div className={`${isLocked ? 'bg-gradient-to-br from-white to-indigo-50' : 'bg-[#0f1b3d]/95'} backdrop-blur-xl rounded-xl ${isLocked ? 'border-2 border-indigo-300 shadow-xl shadow-indigo-100/50' : 'border border-indigo-400/25 shadow-2xl shadow-indigo-500/5'} overflow-hidden`}>
-        <div data-drag-handle className={`flex items-center justify-between px-3 py-2.5 cursor-grab active:cursor-grabbing ${isLocked ? 'border-b border-indigo-100 bg-gradient-to-r from-indigo-500 to-blue-500' : 'border-b border-indigo-400/15 bg-indigo-500/8'}`}>
-          <span className={`text-xs font-semibold ${isLocked ? 'text-white' : 'text-indigo-300'}`}>
+      <div className={`${isLocked ? 'bg-[#0a0a14]/95' : 'bg-[#0a0a14]/95'} backdrop-blur-xl rounded-xl ${isLocked ? 'border border-indigo-500/30 shadow-2xl shadow-indigo-500/10' : 'border border-indigo-400/25 shadow-2xl shadow-indigo-500/5'} overflow-hidden`}>
+        <div data-drag-handle className={`flex items-center justify-between px-3 py-2.5 cursor-grab active:cursor-grabbing ${isLocked ? 'border-b border-indigo-500/20 bg-indigo-500/10' : 'border-b border-indigo-400/15 bg-indigo-500/8'}`}>
+          <span className={`text-xs font-semibold ${isLocked ? 'text-indigo-300' : 'text-indigo-300'}`}>
             {isLocked ? '✨ Progress' : 'Sub Topics'}
           </span>
           {!isLocked && (
@@ -453,7 +453,7 @@ export default function SubTopicTracker({
 
         <div ref={listRef} className="p-2 space-y-1.5 max-h-[300px] overflow-y-auto">
           {labels.length === 0 && !isLocked && (
-            <p className="text-[10px] text-gray-400 text-center py-2">Click + to add sub-topics</p>
+            <p className="text-[10px] text-slate-500 text-center py-2">Click + to add sub-topics</p>
           )}
           {computedLabels.map((label, i) => {
             const status = getStatus(label, i);
@@ -463,15 +463,15 @@ export default function SubTopicTracker({
               <div
                 key={label.id}
                 className={`rounded-lg px-2.5 py-2 transition-colors ${
-                  status === 'complete' ? 'bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-300' :
-                  status === 'active' ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-300' :
-                  'bg-white border border-gray-200'
+                  status === 'complete' ? 'bg-emerald-500/10 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.1)]' :
+                  status === 'active' ? 'bg-indigo-500/10 border border-indigo-500/30 shadow-[0_0_8px_rgba(99,102,241,0.1)]' :
+                  'bg-[#12121f] border border-[#2a2a4e]'
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <div className="relative flex-shrink-0">
                     <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                      status === 'complete' ? 'bg-emerald-500' : status === 'active' ? 'bg-blue-500' : 'bg-gray-300'
+                      status === 'complete' ? 'bg-emerald-500 shadow-md shadow-emerald-400/40' : status === 'active' ? 'bg-indigo-500 shadow-md shadow-indigo-400/40' : 'bg-slate-600'
                     } ${justCompletedId === label.id ? 'celebrate-glow' : ''}`}>
                       {status === 'complete' && <Check className="w-2.5 h-2.5 text-white" />}
                     </div>
@@ -482,44 +482,44 @@ export default function SubTopicTracker({
                   {!isLocked ? (
                     <input type="text" value={label.title} onChange={(e) => updateLabelTitle(label.id, e.target.value)}
                       readOnly={label.id.startsWith('auto-')}
-                      className="text-xs font-medium text-gray-700 bg-transparent border-none outline-none flex-1 min-w-0" />
+                      className="text-xs font-medium text-slate-300 bg-transparent border-none outline-none flex-1 min-w-0" />
                   ) : (
                     <span className={`text-xs font-medium whitespace-nowrap ${
-                      status === 'complete' ? 'text-emerald-700' : status === 'active' ? 'text-blue-700' : 'text-gray-500'
+                      status === 'complete' ? 'text-emerald-300' : status === 'active' ? 'text-indigo-300' : 'text-slate-500'
                     }`}>{label.title}</span>
                   )}
                   {!isLocked && !label.id.startsWith('auto-') && (
-                    <button onClick={() => removeLabel(label.id)} className="p-0.5 rounded hover:bg-red-100 flex-shrink-0">
-                      <Trash2 className="w-2.5 h-2.5 text-red-400" />
+                    <button onClick={() => removeLabel(label.id)} className="p-0.5 rounded hover:bg-red-500/10 flex-shrink-0">
+                      <Trash2 className="w-2.5 h-2.5 text-red-400/60" />
                     </button>
                   )}
                 </div>
                 {!isLocked && !label.id.startsWith('auto-') && (
-                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-gray-500">
+                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-500">
                     {i === 0 ? (
                       <>
-                        <span className="text-gray-400">Pages</span>
+                        <span className="text-slate-600">Pages</span>
                         <input type="number" value={startP + 1}
                           onChange={(e) => updateFirstStartPage(Math.max(0, Number(e.target.value) - 1))}
-                          className="w-8 border border-gray-200 rounded px-1 py-0.5 text-center text-[10px]"
+                          className="w-8 border border-[#2a2a4e] rounded px-1 py-0.5 text-center text-[10px] bg-[#0d0d18] text-slate-300"
                           min={1} max={endP + 1} />
-                        <span className="text-gray-400">to</span>
+                        <span className="text-slate-600">to</span>
                       </>
                     ) : (
-                      <span className="text-gray-400">P{startP + 1} to</span>
+                      <span className="text-slate-600">P{startP + 1} to</span>
                     )}
                     <input type="number" value={endP + 1}
                       onChange={(e) => updateEndPage(label.id, Number(e.target.value) - 1)}
-                      className="w-8 border border-gray-200 rounded px-1 py-0.5 text-center text-[10px]"
+                      className="w-8 border border-[#2a2a4e] rounded px-1 py-0.5 text-center text-[10px] bg-[#0d0d18] text-slate-300"
                       min={startP + 1} max={totalPages} />
-                    <span className="text-gray-400">/{totalPages} pages</span>
+                    <span className="text-slate-600">/{totalPages} pages</span>
                   </div>
                 )}
 
                 {/* Progress bar (floating mode) */}
                 {/* Progress bar — water fill effect (floating mode) */}
                 {isLocked && (
-                  <div className="mt-1.5 w-full h-[6px] rounded-full bg-gray-200/30 overflow-hidden relative">
+                  <div className="mt-1.5 w-full h-[6px] rounded-full bg-white/5 overflow-hidden relative">
                     <div
                       className={`h-full rounded-full transition-all duration-700 ease-out relative overflow-hidden ${
                         status === 'complete' ? 'water-fill-complete' : status === 'active' ? 'water-fill-active' : ''

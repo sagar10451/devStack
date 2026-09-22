@@ -156,7 +156,7 @@ function TocSidebar({ headings, activeId, sidebarRef }: { headings: TocItem[]; a
                       top: 0,
                       bottom: isLastAtThisDepth ? '50%' : 0,
                       width: 1,
-                      backgroundColor: '#cbd5e1',
+                      backgroundColor: '#2a2a4e',
                     }}
                   />
                 );
@@ -198,9 +198,9 @@ function TocSidebar({ headings, activeId, sidebarRef }: { headings: TocItem[]; a
                 data-toc-id={item.id}
                 className={`block w-full text-left transition-all duration-200 rounded-md py-[5px] ${
                   isActive
-                    ? 'text-emerald-700 font-semibold bg-emerald-50/80'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/60'
-                } ${depth === 0 ? 'font-semibold text-[12.5px] text-slate-800' : 'text-[11px]'}`}
+                    ? 'text-emerald-400 font-semibold bg-emerald-500/10'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-[#12121f]'
+                } ${depth === 0 ? 'font-semibold text-[12.5px] text-slate-300' : 'text-[11px]'}`}
                 style={{ paddingLeft: depth > 0 ? 12 : 6 }}
               >
                 {item.text}
@@ -255,11 +255,11 @@ export default function PublicMarkdownViewer({ data, title }: PublicMarkdownView
   }
 
   return (
-    <div className="w-full h-[calc(100vh-78px)] bg-white flex overflow-hidden">
+    <div className="w-full h-[calc(100vh-78px)] bg-[#0d0d14] flex overflow-hidden">
       {/* Main content — own scroll container; full-width on mobile, 80% when sidebar visible */}
       <div ref={contentRef} className="overflow-y-auto h-full flex-1 lg:flex-none lg:basis-[80%]">
         <article className="px-4 sm:px-10 md:px-14 lg:px-20 py-6 sm:py-10 md:py-14">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-gray-900 tracking-tight leading-tight mb-6 sm:mb-8 pb-4 sm:pb-6 border-b-2 border-gray-100">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-gray-100 tracking-tight leading-tight mb-6 sm:mb-8 pb-4 sm:pb-6 border-b-2 border-[#1a1a2e]">
             {title}
           </h1>
           <div className="public-md-content">
@@ -311,8 +311,8 @@ export default function PublicMarkdownViewer({ data, title }: PublicMarkdownView
         className="hidden lg:block h-full overflow-y-auto"
         style={{
           flex: '0 0 20%',
-          borderLeft: '2px solid #e2e8f0',
-          background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+          borderLeft: '2px solid #1a1a2e',
+          background: '#0a0a14',
         }}
       >
         <div className="px-4 py-6">

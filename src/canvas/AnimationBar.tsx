@@ -59,11 +59,11 @@ export default function AnimationBar({ editor, shapeAnimations, onShapeAnimation
 
   return (
     <div className="flex items-center gap-3 px-3 py-2">
-      <span className="text-xs font-medium text-gray-600">Idle</span>
+      <span className="text-xs font-medium text-slate-400">Idle</span>
       <select
         value={config.idle}
         onChange={(e) => handleIdleChange(e.target.value as IdleAnimation)}
-        className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white"
+        className="text-xs border border-[#2a2a4e] rounded-md px-2 py-1 bg-[#12121f] text-slate-300"
       >
         {idleOptions.map(o => (
           <option key={o.value} value={o.value}>{o.label}</option>

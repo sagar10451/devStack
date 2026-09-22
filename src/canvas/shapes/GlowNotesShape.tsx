@@ -159,7 +159,7 @@ function GlowNotesView({
           width: w, height: h,
           borderRadius: editBorderRadius,
           border: `2px solid ${editBorderColor}`,
-          background: editBgColor === 'transparent' ? '#fff' : editBgColor,
+          background: editBgColor === 'transparent' ? '#0d0d14' : editBgColor,
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}
@@ -168,13 +168,13 @@ function GlowNotesView({
         onKeyDown={e => e.stopPropagation()}
       >
         {/* Toolbar */}
-        <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 4, padding: '6px 8px', borderBottom: '1px solid #1a1a2e', background: '#12121f', flexWrap: 'wrap', alignItems: 'center' }}>
           <input
             type="text"
             value={editTitle}
             onChange={e => setEditTitle(e.target.value)}
             placeholder="Title (optional)"
-            style={{ fontSize: 11, border: '1px solid #cbd5e1', borderRadius: 4, padding: '2px 6px', width: 100, outline: 'none' }}
+            style={{ fontSize: 11, border: '1px solid #2a2a4e', borderRadius: 4, padding: '2px 6px', width: 100, outline: 'none', background: '#0d0d14', color: '#e2e8f0' }}
           />
           <div style={{ display: 'flex', gap: 2 }}>
             {BORDER_COLORS.map(c => (
@@ -183,27 +183,27 @@ function GlowNotesView({
                 onClick={() => setEditBorderColor(c.id)}
                 title={c.label}
                 style={{
-                  width: 14, height: 14, borderRadius: '50%', background: c.id, border: editBorderColor === c.id ? '2px solid #000' : '1px solid #ccc',
+                  width: 14, height: 14, borderRadius: '50%', background: c.id, border: editBorderColor === c.id ? '2px solid #60a5fa' : '1px solid #333',
                   cursor: 'pointer',
                 }}
               />
             ))}
           </div>
-          <select value={editBgColor} onChange={e => setEditBgColor(e.target.value)} style={{ fontSize: 10, border: '1px solid #cbd5e1', borderRadius: 4, padding: '1px 4px' }}>
+          <select value={editBgColor} onChange={e => setEditBgColor(e.target.value)} style={{ fontSize: 10, border: '1px solid #2a2a4e', borderRadius: 4, padding: '1px 4px', background: '#0d0d14', color: '#e2e8f0' }}>
             {BG_COLORS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
           <input type="color" value={editTextColor} onChange={e => setEditTextColor(e.target.value)} style={{ width: 20, height: 18, border: 'none', padding: 0, cursor: 'pointer' }} title="Text color" />
-          <label style={{ fontSize: 9, color: '#64748b', display: 'flex', alignItems: 'center', gap: 2 }}>
+          <label style={{ fontSize: 9, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 2 }}>
             Size
-            <input type="number" value={editFontSize} onChange={e => setEditFontSize(Number(e.target.value))} min={10} max={48} style={{ width: 32, fontSize: 10, border: '1px solid #cbd5e1', borderRadius: 3, padding: '1px 3px', textAlign: 'center' }} />
+            <input type="number" value={editFontSize} onChange={e => setEditFontSize(Number(e.target.value))} min={10} max={48} style={{ width: 32, fontSize: 10, border: '1px solid #2a2a4e', borderRadius: 3, padding: '1px 3px', textAlign: 'center', background: '#0d0d14', color: '#e2e8f0' }} />
           </label>
-          <label style={{ fontSize: 9, color: '#64748b', display: 'flex', alignItems: 'center', gap: 2 }}>
+          <label style={{ fontSize: 9, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 2 }}>
             Radius
-            <input type="number" value={editBorderRadius} onChange={e => setEditBorderRadius(Number(e.target.value))} min={0} max={50} style={{ width: 32, fontSize: 10, border: '1px solid #cbd5e1', borderRadius: 3, padding: '1px 3px', textAlign: 'center' }} />
+            <input type="number" value={editBorderRadius} onChange={e => setEditBorderRadius(Number(e.target.value))} min={0} max={50} style={{ width: 32, fontSize: 10, border: '1px solid #2a2a4e', borderRadius: 3, padding: '1px 3px', textAlign: 'center', background: '#0d0d14', color: '#e2e8f0' }} />
           </label>
-          <label style={{ fontSize: 9, color: '#64748b', display: 'flex', alignItems: 'center', gap: 2 }}>
+          <label style={{ fontSize: 9, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 2 }}>
             Gap
-            <input type="number" value={editLineSpacing} onChange={e => setEditLineSpacing(Number(e.target.value))} min={0} max={30} style={{ width: 28, fontSize: 10, border: '1px solid #cbd5e1', borderRadius: 3, padding: '1px 3px', textAlign: 'center' }} />
+            <input type="number" value={editLineSpacing} onChange={e => setEditLineSpacing(Number(e.target.value))} min={0} max={30} style={{ width: 28, fontSize: 10, border: '1px solid #2a2a4e', borderRadius: 3, padding: '1px 3px', textAlign: 'center', background: '#0d0d14', color: '#e2e8f0' }} />
           </label>
           <button onClick={handleDone} style={{ fontSize: 10, background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontWeight: 600, marginLeft: 'auto' }}>
             Done
@@ -220,7 +220,7 @@ function GlowNotesView({
             flex: 1, resize: 'none', border: 'none', outline: 'none',
             padding: '10px 14px', fontSize: editFontSize, lineHeight: 1.6,
             fontFamily: 'tldraw_serif, Georgia, serif',
-            color: editTextColor, background: 'transparent',
+            color: '#e2e8f0', background: 'transparent',
           }}
         />
       </div>
@@ -235,7 +235,7 @@ function GlowNotesView({
         width: w, height: h,
         borderRadius,
         border: `1.5px solid ${borderColor}`,
-        background: bgColor === '#ffffff' || bgColor === 'transparent' ? 'rgba(10, 15, 30, 0.92)' : bgColor,
+        background: bgColor === '#ffffff' || bgColor === '#0d0d14' ? 'transparent' : bgColor === 'transparent' ? 'transparent' : bgColor,
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
         boxShadow: `0 0 8px ${borderColor}66, 0 0 24px ${borderColor}22, inset 0 1px 0 rgba(255,255,255,0.06)`,
@@ -272,13 +272,12 @@ function GlowNotesView({
               style={{
                 fontSize: isSubPoint ? fontSize * 0.88 : fontSize,
                 lineHeight: 1.5,
-                color: isSubPoint ? '#94a3b8' : '#e2e8f0',
+                color: '#e2e8f0',
                 fontFamily: 'tldraw_serif, Georgia, serif',
                 padding: isSubPoint ? '2px 8px 2px 24px' : '4px 8px',
                 borderRadius: 6,
-                transition: 'all 0.3s ease',
                 whiteSpace: 'pre-wrap',
-                fontWeight: isSubPoint ? 400 : 600,
+                fontWeight: 400,
               }}
             >
               {line}
@@ -315,8 +314,8 @@ export class GlowNotesShapeUtil extends ShapeUtil<IGlowNotesShape> {
       lines: '[]',
       borderColor: '#3b82f6',
       borderRadius: 16,
-      bgColor: '#ffffff',
-      textColor: '#1e293b',
+      bgColor: 'transparent',
+      textColor: '#e2e8f0',
       fontSize: 18,
       lineSpacing: 4,
       title: '',

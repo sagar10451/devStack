@@ -67,26 +67,26 @@ export default function LeafContentReveal({ content, expandAll }: LeafContentRev
 
       {/* Navigation controls — only show when not in expand-all mode */}
       {!expandAll && content.length > 1 && (
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
-          <span className="text-xs text-gray-400">
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-[#1a1a2e]">
+          <span className="text-xs text-slate-500">
             {visibleCount} / {content.length} blocks
           </span>
           <div className="flex items-center gap-2">
             <button
               onClick={showPrev}
               disabled={visibleCount <= 1}
-              className="p-1.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="p-1.5 rounded-lg border border-[#2a2a4e] hover:border-blue-500/30 hover:bg-blue-500/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               aria-label="Show previous"
             >
-              <ChevronLeft className="w-3.5 h-3.5 text-gray-600" />
+              <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
             </button>
             <button
               onClick={showNext}
               disabled={allVisible}
-              className="p-1.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              className="p-1.5 rounded-lg border border-[#2a2a4e] hover:border-blue-500/30 hover:bg-blue-500/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
               aria-label="Show next"
             >
-              <ChevronRight className="w-3.5 h-3.5 text-gray-600" />
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
             </button>
           </div>
         </div>
