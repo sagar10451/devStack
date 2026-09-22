@@ -25,3 +25,7 @@ dist-ssr
 
 # Canvas data (saved to disk by Vite plugin, not committed)
 data/canvases/
+
+# Audio files (global audio, background music — local only)
+data/audio/
+public/sounds/bgmusic.mp3
