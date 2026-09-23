@@ -5,7 +5,7 @@
  * Topic/subtitle cards: 3s default if animate mode, 0s if preload.
  */
 
-import { useCallback, useRef, useState, useMemo } from 'react';
+import { useCallback, useRef, useState, useMemo, useEffect } from 'react';
 import { Play, Pause, Upload, Trash2, ChevronDown, Minus, Plus } from 'lucide-react';
 import type { AnimationStep } from './types';
 import type { Editor } from 'tldraw';
@@ -166,13 +166,6 @@ export default function GlobalAudioTimeline({
     onDurationsChange({ ...audioDurations, [id]: Math.max(0, Math.round((current + delta) * 10) / 10) });
   }, [audioDurations, onDurationsChange]);
 
-  // ─── Play from a specific card ──────────────────────────────────────────
-  const playFromStep = useCallback((id: string) => {
-    const start = startTimesMap.get(id) ?? 0;
-    onSeek(start);
-    if (!isPlaying) onPlayPause();
-  }, [startTimesMap, onSeek, isPlaying, onPlayPause]);
-
   // ─── Reset ──────────────────────────────────────────────────────────────
   const resetDefaults = useCallback(() => {
     const newDur: Record<string, number> = {};
@@ -187,6 +180,75 @@ export default function GlobalAudioTimeline({
     if (file) onAudioFileChange(file);
     e.target.value = '';
   }, [onAudioFileChange]);
+
+  // ─── Per-card audio preview (independent of global audio) ───────────────
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewEndTimeRef = useRef<number>(0);
+  const [previewingStepId, setPreviewingStepId] = useState<string | null>(null);
+
+  // Create persistent preview audio element once when audioFileUrl is available
+  // Use Blob URL for reliable seeking (range request issues with dev server)
+  const previewBlobUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!audioFileUrl) { previewBlobUrlRef.current = null; previewAudioRef.current = null; return; }
+    let cancelled = false;
+    fetch(audioFileUrl)
+      .then(r => r.blob())
+      .then(blob => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        previewBlobUrlRef.current = url;
+        const audio = new Audio(url);
+        audio.preload = 'auto';
+        previewAudioRef.current = audio;
+
+        const handleTimeUpdate = () => {
+          if (previewEndTimeRef.current > 0 && audio.currentTime >= previewEndTimeRef.current) {
+            audio.pause();
+            previewEndTimeRef.current = 0;
+            setPreviewingStepId(null);
+          }
+        };
+        audio.addEventListener('timeupdate', handleTimeUpdate);
+        audio.addEventListener('ended', () => { previewEndTimeRef.current = 0; setPreviewingStepId(null); });
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current.src = '';
+        previewAudioRef.current = null;
+      }
+      if (previewBlobUrlRef.current) URL.revokeObjectURL(previewBlobUrlRef.current);
+      previewBlobUrlRef.current = null;
+      previewAudioRef.current = null;
+    };
+  }, [audioFileUrl]);
+
+  const stopPreview = useCallback(() => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+    }
+    previewEndTimeRef.current = 0;
+    setPreviewingStepId(null);
+  }, []);
+
+  const playCardPreview = useCallback((id: string) => {
+    const audio = previewAudioRef.current;
+    if (!audio || !audioFileUrl) return;
+
+    const start = startTimesMap.get(id) ?? 0;
+    const isPreloaded = unifiedSteps.find(s => s.id === id)?.isPreloaded ?? false;
+    const dur = audioDurations[id] ?? (isPreloaded ? 0.5 : 3);
+
+    audio.pause();
+    audio.currentTime = start;
+    previewEndTimeRef.current = start + dur;
+    setPreviewingStepId(id);
+    audio.play().catch(() => {});
+  }, [audioFileUrl, startTimesMap, audioDurations, unifiedSteps]);
 
   // ─── Track page boundaries for separators ───────────────────────────────
   let lastPageId = '';
@@ -317,15 +379,22 @@ export default function GlobalAudioTimeline({
                       <div className="px-2 py-2 flex items-center gap-1.5">
                         {audioFileUrl && (
                           <button
-                            onClick={(e) => { e.stopPropagation(); playFromStep(us.id); }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (previewingStepId === us.id) {
+                                stopPreview();
+                              } else {
+                                playCardPreview(us.id);
+                              }
+                            }}
                             className={`flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0 transition-all ${
-                              isActive
+                              previewingStepId === us.id
                                 ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
                                 : 'bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30'
                             }`}
-                            title={`Play from ${formatMMSSss(stepStart)}`}
+                            title={previewingStepId === us.id ? 'Stop' : `Play from ${formatMMSSss(stepStart)}`}
                           >
-                            <Play className="w-2.5 h-2.5 ml-0.5" />
+                            {previewingStepId === us.id ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5 ml-0.5" />}
                           </button>
                         )}
 

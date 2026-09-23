@@ -248,23 +248,35 @@ export default function LessonCanvas({
     if (!globalAudioFileName || !siteId || !topicSlug) return;
     const url = `/__load-audio?siteId=${encodeURIComponent(siteId)}&topicSlug=${encodeURIComponent(topicSlug)}&fileName=${encodeURIComponent(globalAudioFileName)}`;
     setGlobalAudioUrl(url);
-    // Create audio element
-    const audio = new Audio(url);
-    audio.preload = 'metadata';
-    audio.addEventListener('loadedmetadata', () => {
-      setGlobalAudioDuration(audio.duration);
-    });
-    audio.addEventListener('timeupdate', () => {
-      setGlobalAudioCurrentTime(audio.currentTime);
-    });
-    audio.addEventListener('ended', () => {
-      setGlobalAudioPlaying(false);
-    });
-    globalAudioRef.current = audio;
+    let cancelled = false;
+    // Fetch as blob for reliable seeking (dev server doesn't support Range requests)
+    fetch(url)
+      .then(r => r.blob())
+      .then(blob => {
+        if (cancelled) return;
+        const blobUrl = URL.createObjectURL(blob);
+        setGlobalAudioUrl(blobUrl);
+        const audio = new Audio(blobUrl);
+        audio.preload = 'auto';
+        audio.addEventListener('loadedmetadata', () => {
+          setGlobalAudioDuration(audio.duration);
+        });
+        audio.addEventListener('timeupdate', () => {
+          setGlobalAudioCurrentTime(audio.currentTime);
+        });
+        audio.addEventListener('ended', () => {
+          setGlobalAudioPlaying(false);
+        });
+        globalAudioRef.current = audio;
+      })
+      .catch(() => {});
     return () => {
-      audio.pause();
-      audio.src = '';
-      globalAudioRef.current = null;
+      cancelled = true;
+      if (globalAudioRef.current) {
+        globalAudioRef.current.pause();
+        globalAudioRef.current.src = '';
+        globalAudioRef.current = null;
+      }
     };
   }, [globalAudioFileName, siteId, topicSlug]);
 
@@ -1418,6 +1430,25 @@ export default function LessonCanvas({
     // Reset audio to start
     globalAudioRef.current.currentTime = 0;
     setGlobalAudioCurrentTime(0);
+
+    // Force-preload all images by briefly making all shapes visible
+    // This triggers tldraw to load image data for shapes that are currently hidden
+    document.querySelectorAll('[data-shape-id]').forEach(el => {
+      const htmlEl = el as HTMLElement;
+      if (htmlEl.style.visibility === 'hidden') {
+        htmlEl.style.visibility = 'visible';
+        htmlEl.style.opacity = '0.001'; // near-invisible but triggers image load
+      }
+    });
+    // Re-hide after a frame (images start loading)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (editorRef.current) {
+          applyAnimationState(editorRef.current, animationStepsRef.current, -1);
+        }
+      });
+    });
+
     // Start 10-second countdown
     setAudioCountdown(10);
     if (audioCountdownRef.current) clearInterval(audioCountdownRef.current);
@@ -2083,13 +2114,33 @@ export default function LessonCanvas({
         return;
       }
 
+      const nextStepData = animationSteps[nextStep];
+
+      // Handle page switch if needed
+      if (nextStepData.pageId && (editor.getCurrentPageId() as string) !== nextStepData.pageId) {
+        editor.setCameraOptions({ isLocked: false });
+        editor.setCurrentPage(nextStepData.pageId as any);
+        // Auto-reveal topic/subtitle on new page
+        const targetPid = nextStepData.pageId;
+        if (pageTopicVisibleRef.current.has(targetPid)) {
+          setRevealedTopicPages(prev => new Set(prev).add(targetPid));
+        }
+        if (pageSubtitleVisibleRef.current.has(targetPid)) {
+          setRevealedSubtitlePages(prev => new Set(prev).add(targetPid));
+        }
+      }
+
       // Find the end of this camera group:
       // A group = all steps from the current step until the next step that has a different camera position
       let groupEnd = nextStep;
       for (let i = nextStep + 1; i < animationSteps.length; i++) {
         const s = animationSteps[i];
-        // If this step has a camera position set AND it's different from the group's camera, it starts a new group
+        // If this step has a camera position set, it starts a new group
         if (s.cameraPosition) {
+          break;
+        }
+        // If this step is on a different page, it starts a new group
+        if (s.pageId && s.pageId !== nextStepData.pageId) {
           break;
         }
         groupEnd = i;
@@ -2136,9 +2187,15 @@ export default function LessonCanvas({
     // ─── End Rough mode batch advance ─────────────────────────────────
 
     // Auto-skip consecutive "none" animation steps (preloaded — already visible)
+    // When audio-driven, also skip steps with 0-second audio duration (instant preload)
     while (nextStep < animationSteps.length &&
-           animationSteps[nextStep].animation === 'none' &&
-           (animationSteps[nextStep].action || 'enter') === 'enter') {
+           ((animationSteps[nextStep].animation === 'none' &&
+           (animationSteps[nextStep].action || 'enter') === 'enter') ||
+           (isAudioDrivenRef.current && (globalAudioDurationsRef.current[animationSteps[nextStep].id] ?? 3) <= 0))) {
+      // For audio-driven 0-duration steps, make them visible immediately
+      if (isAudioDrivenRef.current && animationSteps[nextStep].animation !== 'none') {
+        applyAnimationState(editor!, animationSteps, nextStep);
+      }
       nextStep++;
     }
     // If we skipped past the end, stay at the last step
@@ -2262,9 +2319,23 @@ export default function LessonCanvas({
         case 'none': break;
         case 'enter': {
           applyAnimationState(editor!, animationSteps, nextStep);
-          // Skip CSS animation if animation is 'none' — shape just appears instantly
-          if (step.animation !== 'none') {
-            applyStepAnimation(step.shapeIds, step.animation, step.duration);
+          // When audio-driven, respect audio duration for animation speed
+          if (isAudioDrivenRef.current) {
+            const audioDur = globalAudioDurationsRef.current[step.id] ?? 3;
+            if (audioDur <= 0) {
+              // Duration 0 → instant preload, no animation
+            } else {
+              // Animation duration = min(audio duration in ms, default animation duration)
+              const animDuration = Math.min(audioDur * 1000, step.duration);
+              if (step.animation !== 'none') {
+                applyStepAnimation(step.shapeIds, step.animation, animDuration);
+              }
+            }
+          } else {
+            // Normal mode — use step's animation as-is
+            if (step.animation !== 'none') {
+              applyStepAnimation(step.shapeIds, step.animation, step.duration);
+            }
           }
           step.shapeIds.forEach(shapeId => {
             const config = shapeAnimations[shapeId];
@@ -2496,13 +2567,51 @@ export default function LessonCanvas({
     const steps = animationStepsRef.current;
     if (steps.length === 0) return;
 
-    // Compute start times from durations (cumulative sum)
+    // Build unified list matching Audio Sync timeline (including virtual topic/subtitle)
+    const pages = editorRef.current?.getPages() || [];
+    const pageIdsList = pages.map(p => p.id as string);
     const DEFAULT_DUR = 3;
-    const startTimes: { idx: number; start: number }[] = [];
+
+    const stepsByPage = new Map<string, AnimationStep[]>();
+    for (const step of steps) {
+      const pid = step.pageId || 'page:page';
+      if (!stepsByPage.has(pid)) stepsByPage.set(pid, []);
+      stepsByPage.get(pid)!.push(step);
+    }
+
+    // Each entry = one goNext() call. Virtual cards also trigger goNext (consumed by topic/subtitle reveal).
+    const goNextTimes: number[] = [];
     let cumulative = 0;
-    for (let i = 0; i < steps.length; i++) {
-      startTimes.push({ idx: i, start: cumulative });
-      cumulative += durations[steps[i].id] ?? DEFAULT_DUR;
+
+    for (let pi = 0; pi < pageIdsList.length; pi++) {
+      const pid = pageIdsList[pi];
+
+      // Topic (page 1 only)
+      if (pi === 0 && pageTopicVisibleRef.current.has(pid)) {
+        const topicMode = pageTopicModesRef.current[pid] || 'preload';
+        const topicId = `__topic__${pid}`;
+        const topicDur = durations[topicId] ?? (topicMode === 'preload' ? 0 : DEFAULT_DUR);
+        goNextTimes.push(cumulative);
+        cumulative += topicDur;
+      }
+
+      // Subtitle (every page)
+      if (pageSubtitleVisibleRef.current.has(pid)) {
+        const subMode = pageSubtitleModesRef.current[pid] || 'preload';
+        const subId = `__subtitle__${pid}`;
+        const subDur = durations[subId] ?? (subMode === 'preload' ? 0 : DEFAULT_DUR);
+        goNextTimes.push(cumulative);
+        cumulative += subDur;
+      }
+
+      // Real steps
+      const pageSteps = stepsByPage.get(pid) || [];
+      for (const step of pageSteps) {
+        const isPreloaded = step.animation === 'none' && (step.action || 'enter') === 'enter';
+        const stepDur = durations[step.id] ?? (isPreloaded ? 0 : DEFAULT_DUR);
+        goNextTimes.push(cumulative);
+        cumulative += stepDur;
+      }
     }
 
     const interval = setInterval(() => {
@@ -2510,23 +2619,23 @@ export default function LessonCanvas({
       if (!audio || audio.paused) return;
       const now = audio.currentTime;
 
-      // Find the highest step whose start time has been crossed
-      let targetStepIdx = -1;
-      for (const st of startTimes) {
-        if (now >= st.start) {
-          targetStepIdx = st.idx;
+      // Find how many goNext calls should have happened by now
+      let targetCallIdx = -1;
+      for (let i = 0; i < goNextTimes.length; i++) {
+        if (now >= goNextTimes[i]) {
+          targetCallIdx = i;
         } else {
           break;
         }
       }
 
-      // Fire goNext for each step we haven't reached yet
-      if (targetStepIdx > lastAudioFiredStepRef.current) {
-        const stepsToAdvance = targetStepIdx - lastAudioFiredStepRef.current;
-        for (let i = 0; i < stepsToAdvance; i++) {
+      // Fire goNext for each call we haven't made yet
+      if (targetCallIdx > lastAudioFiredStepRef.current) {
+        const callsToMake = targetCallIdx - lastAudioFiredStepRef.current;
+        for (let i = 0; i < callsToMake; i++) {
           goNext();
         }
-        lastAudioFiredStepRef.current = targetStepIdx;
+        lastAudioFiredStepRef.current = targetCallIdx;
       }
     }, 100);
 

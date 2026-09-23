@@ -10,6 +10,7 @@ import { findNodeByPath, isLeaf } from '../data/contentTree';
 import type { ContentNode } from '../data/contentTree';
 import TopicIcon from '../components/TopicIcon';
 import LessonPage from './LessonPage';
+import ChapterDashboard from './ChapterDashboard';
 import { usePresentation } from '../data/presentationContext';
 
 const LABEL_OPTIONS = ['Topics', 'Chapters', 'Modules', 'Subjects'] as const;
@@ -22,8 +23,13 @@ interface PortalPageProps {
 export default function PortalPage({ searchQuery, onSearchChange }: PortalPageProps) {
   const { site, content, slugs } = usePortalSafe();
 
-  // If no slugs → landing page (show top-level cards)
+  // If no slugs → landing page
   if (slugs.length === 0) {
+    // ChapterBreakdown portal → dashboard overview
+    if (site.id === 'flowchart-notes') {
+      return <ChapterDashboard classes={content} basePath={site.basePath} searchQuery={searchQuery} />;
+    }
+    // Other portals → card grid
     return <CardGrid key="root" nodes={content} searchQuery={searchQuery} onSearchChange={onSearchChange} basePath={site.basePath} breadcrumbs={[]} site={site} isTopLevel />;
   }
 
