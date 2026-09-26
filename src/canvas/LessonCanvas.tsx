@@ -158,9 +158,19 @@ export default function LessonCanvas({
   const [showSidebar, setShowSidebar] = useState(true);
   const [showGuideBorder, setShowGuideBorder] = useState(true);
   const [bwMode, setBwMode] = useState(initialData?.bwMode || false);
-  const [roughMode, setRoughMode] = useState(initialData?.roughMode || false);
+  const [canvasMode, setCanvasMode] = useState<'main' | 'rough' | 'kids'>(
+    (() => {
+      const saved = initialData?.canvasMode || (initialData?.roughMode ? 'rough' : 'main');
+      // Kids mode removed — fall back to main
+      return saved === 'kids' ? 'main' : saved;
+    })()
+  );
+  const roughMode = canvasMode === 'rough';
   const roughModeRef = useRef(roughMode);
   roughModeRef.current = roughMode;
+  const [showModeDropdown, setShowModeDropdown] = useState(false);
+  const canvasModeRef = useRef(canvasMode);
+  canvasModeRef.current = canvasMode;
   const [helperShapeIds, setHelperShapeIds] = useState<Set<string>>(new Set(initialData?.helperShapeIds || []));
   const helperShapeIdsRef = useRef(helperShapeIds);
   helperShapeIdsRef.current = helperShapeIds;
@@ -632,35 +642,61 @@ export default function LessonCanvas({
 
   useEffect(() => {
     if (!editor) return;
-    for (const shapeId of helperShapeIds) {
-      const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
-      if (el) {
-        if (roughMode) {
-          // Rough mode — show helpers with orange dashed border indicator
-          el.style.visibility = '';
-          el.style.opacity = '';
-          el.style.outline = '2px dashed rgba(234, 179, 8, 0.4)';
-          el.style.outlineOffset = '3px';
-        } else {
-          // Main mode — hide helpers completely
-          el.style.visibility = 'hidden';
-          el.style.opacity = '0';
-          el.style.outline = '';
-          el.style.outlineOffset = '';
-        }
-      }
-    }
-    return () => {
-      // Cleanup outlines
+
+    const applyHelperStyles = () => {
+      const pid = editor.getCurrentPageId() as string;
       for (const shapeId of helperShapeIds) {
         const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
         if (el) {
-          el.style.outline = '';
-          el.style.outlineOffset = '';
+          if (roughMode) {
+            if (isLocked) {
+              // Locked Rough mode — follow the same topic/subtitle gate as regular elements
+              const tMode = pageTopicModes[pid] || 'preload';
+              const sMode = pageSubtitleModes[pid] || 'preload';
+              const topicOk = tMode === 'preload' || revealedTopicPages.has(pid) || !pageTopicVisible.has(pid);
+              const subtitleOk = sMode === 'preload' || revealedSubtitlePages.has(pid) || !pageSubtitleVisible.has(pid);
+              const gateOpen = currentStep >= 0 && topicOk && subtitleOk;
+              if (gateOpen) {
+                el.style.visibility = '';
+                el.style.opacity = '';
+              } else {
+                el.style.visibility = 'hidden';
+                el.style.opacity = '0';
+              }
+            } else {
+              // Unlocked Rough mode — always show (editing)
+              el.style.visibility = '';
+              el.style.opacity = '';
+            }
+          } else {
+            // Main mode — always hide helpers
+            el.style.visibility = 'hidden';
+            el.style.opacity = '0';
+          }
         }
       }
     };
-  }, [editor, roughMode, helperShapeIds]);
+
+    // Apply immediately
+    applyHelperStyles();
+    // Re-apply after delays to catch applyAnimationState overwriting styles on lock/unlock
+    const t1 = setTimeout(applyHelperStyles, 200);
+    const t2 = setTimeout(applyHelperStyles, 500);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [editor, roughMode, helperShapeIds, isLocked, currentStep, revealedTopicPages, revealedSubtitlePages, pageTopicModes, pageSubtitleModes, pageTopicVisible, pageSubtitleVisible]);
+
+  // ─── Notify tldraw when layout changes (strip visibility) ───────────────
+  useEffect(() => {
+    if (!editor) return;
+    // tldraw caches viewport bounds — recalculate when strip height changes
+    requestAnimationFrame(() => {
+      try { editor.updateViewportScreenBounds(); } catch { /* ignore if method doesn't exist */ }
+    });
+  }, [editor, pageTopicVisible, pageSubtitleVisible]);
 
   useEffect(() => {
     if (!editor || isLocked) return;
@@ -891,6 +927,20 @@ export default function LessonCanvas({
           }
         }
         setShapeAnimations(cleanedAnims);
+
+        // Clean up helperShapeIds for deleted shapes
+        setHelperShapeIds(prev => {
+          const next = new Set(prev);
+          let changed = false;
+          for (const id of prev) {
+            if (!existingShapeIds.has(id)) {
+              next.delete(id);
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+
         markDirty();
       }
     };
@@ -933,6 +983,20 @@ export default function LessonCanvas({
 
       if (newIds.length === 0) return;
 
+      // Auto-flag any new sticky-note shapes as helpers (before filtering them out of timeline)
+      const newStickyIds = newIds.filter(id => {
+        const shape = editor.getShape(id as any) as any;
+        return shape?.type === 'sticky-note';
+      });
+      if (newStickyIds.length > 0) {
+        setHelperShapeIds(prev => {
+          const next = new Set(prev);
+          newStickyIds.forEach(id => next.add(id));
+          return next;
+        });
+        markDirty();
+      }
+
       // Use ref for fresh steps (avoids stale closure)
       const currentSteps = animationStepsRef.current;
       const existingStepShapeIds = new Set(currentSteps.flatMap(s => s.shapeIds));
@@ -942,6 +1006,8 @@ export default function LessonCanvas({
         // Exclude boundary frames by meta
         const shape = editor.getShape(id as any) as any;
         if (shape?.meta?.isPasteBoundary) return false;
+        // Exclude sticky notes — they are static helpers, not timeline steps
+        if (shape?.type === 'sticky-note') return false;
         return true;
       });
       if (trulyNew.length === 0) return;
@@ -1533,11 +1599,12 @@ export default function LessonCanvas({
       guideCount,
       imageGlowColors,
       roughMode: roughMode || undefined,
+      canvasMode: canvasMode !== 'main' ? canvasMode : undefined,
       helperShapeIds: helperShapeIds.size > 0 ? [...helperShapeIds] : undefined,
       globalAudioFile: globalAudioFileName || undefined,
       globalAudioDurations: Object.keys(globalAudioDurations).length > 0 ? globalAudioDurations : undefined,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, helperShapeIds, guideBordersMap, guideCount, imageGlowColors, globalAudioFileName, globalAudioDurations]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, imageGlowColors, globalAudioFileName, globalAudioDurations]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -1615,6 +1682,7 @@ export default function LessonCanvas({
         guideCount: guideCountRef.current,
         imageGlowColors: imageGlowColorsRef.current,
         roughMode: roughModeRef.current || undefined,
+        canvasMode: canvasModeRef.current !== 'main' ? canvasModeRef.current : undefined,
         helperShapeIds: helperShapeIdsRef.current.size > 0 ? [...helperShapeIdsRef.current] : undefined,
         globalAudioFile: globalAudioFileNameRef.current || undefined,
         globalAudioDurations: Object.keys(globalAudioDurationsRef.current).length > 0 ? globalAudioDurationsRef.current : undefined,
@@ -2153,8 +2221,14 @@ export default function LessonCanvas({
       const groupStep = animationSteps[nextStep];
       if (groupStep.cameraPosition) {
         editor.setCameraOptions({ isLocked: false });
-        editor.setCamera(groupStep.cameraPosition, { force: true, animation: { duration: 800 } });
-        setTimeout(() => editor.setCameraOptions({ isLocked: true }), 850);
+        if (currentStep < 0) {
+          // First group — set camera instantly, no fly-in
+          editor.setCamera(groupStep.cameraPosition, { force: true });
+          editor.setCameraOptions({ isLocked: true });
+        } else {
+          editor.setCamera(groupStep.cameraPosition, { force: true, animation: { duration: 800 } });
+          setTimeout(() => editor.setCameraOptions({ isLocked: true }), 850);
+        }
       }
 
       // Trigger glow flicker for any glow-notes boxes in this group
@@ -2427,6 +2501,65 @@ export default function LessonCanvas({
     editor.stopCameraAnimation();
     // Stop any playing audio
     stopStepAudio();
+
+    // ─── Rough mode: batch rewind to previous camera group ────────────
+    if (roughModeRef.current) {
+      // Find the start of the current camera group
+      let currentGroupStart = currentStep;
+      for (let i = currentStep; i >= 0; i--) {
+        if (animationSteps[i].cameraPosition) {
+          currentGroupStart = i;
+          break;
+        }
+        if (i === 0) currentGroupStart = 0;
+      }
+
+      if (currentGroupStart === 0) {
+        // Already at the first group — go to step -1 (before everything)
+        applyAnimationState(editor, animationSteps, -1);
+        if (presentationStartCameraRef.current) {
+          editor.setCameraOptions({ isLocked: false });
+          editor.setCamera(presentationStartCameraRef.current, { force: true });
+          editor.setCameraOptions({ isLocked: true });
+        }
+        setCurrentStep(-1);
+        glowFlickeredRef.current.clear();
+        return;
+      }
+
+      // Find the previous camera group: go back from currentGroupStart - 1
+      // to find where that group started and ended
+      const prevGroupEnd = currentGroupStart - 1;
+      let prevGroupStart = 0;
+      for (let i = prevGroupEnd; i >= 0; i--) {
+        if (animationSteps[i].cameraPosition) {
+          prevGroupStart = i;
+          break;
+        }
+      }
+
+      // Page switch if needed
+      const targetStep = animationSteps[prevGroupStart];
+      if (targetStep.pageId && (editor.getCurrentPageId() as string) !== targetStep.pageId) {
+        editor.setCameraOptions({ isLocked: false });
+        editor.setCurrentPage(targetStep.pageId as any);
+        editor.setCameraOptions({ isLocked: true });
+      }
+
+      // Apply animation state showing all steps up to prevGroupEnd
+      applyAnimationState(editor, animationSteps, prevGroupEnd);
+
+      // Set camera to the previous group's camera position
+      if (targetStep.cameraPosition) {
+        editor.setCameraOptions({ isLocked: false });
+        editor.setCamera(targetStep.cameraPosition, { force: true, animation: { duration: 800 } });
+        setTimeout(() => editor.setCameraOptions({ isLocked: true }), 850);
+      }
+
+      setCurrentStep(prevGroupEnd);
+      return;
+    }
+    // ─── End Rough mode batch rewind ──────────────────────────────────
 
     const step = animationSteps[currentStep];
     const action = step.action || 'enter';
@@ -3796,12 +3929,7 @@ export default function LessonCanvas({
             </div>
           )}
 
-          {/* Lock/Unlock — hidden when presenting or public canvas is open */}
-          {!hideLockButton && !isPresenting && !showPublicCanvas && (
-            <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ${isLocked ? 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)]'}`}>
-              {isLocked ? <><Lock className="w-3.5 h-3.5" />Locked</> : <><Unlock className="w-3.5 h-3.5" />Unlocked</>}
-            </button>
-          )}
+          {/* Lock/Unlock button removed from scrollable area — placed below as fixed */}
 
           {/* Save + auto-save indicator */}
           {!isLocked && (
@@ -3902,6 +4030,21 @@ export default function LessonCanvas({
               >
                 ✨ Glow
               </button>
+              {/* Sticky Note (helper) */}
+              <button
+                onClick={() => {
+                  if (!editor) return;
+                  const { x, y } = editor.getViewportScreenCenter();
+                  const point = editor.screenToPage({ x, y });
+                  const shapeId = createShapeId();
+                  editor.createShape({ id: shapeId, type: 'sticky-note' as any, x: point.x - 130, y: point.y - 130 });
+                  editor.sendToFront([shapeId]);
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 hover:border-yellow-400/50 hover:shadow-[0_0_8px_rgba(234,179,8,0.25)] transition-all flex-shrink-0"
+                title="Add sticky note (helper — visible only in Rough mode)"
+              >
+                📌 Sticky Note
+              </button>
               {/* Flip selected shapes horizontally */}
               <button
                 onClick={() => {
@@ -3963,14 +4106,55 @@ export default function LessonCanvas({
               >
                 B&W
               </button>
-              {/* Rough / Main mode toggle */}
-              <button
-                onClick={() => { setRoughMode(v => !v); markDirty(); }}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${roughMode ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-                title={roughMode ? 'Switch to Main mode' : 'Switch to Rough mode'}
-              >
-                {roughMode ? '📝 Rough' : 'Main'}
-              </button>
+              {/* Modes dropdown */}
+              <div className="relative flex-shrink-0">
+                <button
+                  data-mode-btn
+                  onClick={() => setShowModeDropdown(v => !v)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    canvasMode === 'rough' ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.2)]' :
+                    canvasMode === 'kids' ? 'bg-pink-500/15 text-pink-300 border border-pink-500/30 shadow-[0_0_10px_rgba(236,72,153,0.2)]' :
+                    'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'
+                  }`}
+                >
+                  {canvasMode === 'rough' ? '📝 Rough' : canvasMode === 'kids' ? '🧒 Kids' : '🎯 Main'}
+                  <svg className={`w-3 h-3 transition-transform ${showModeDropdown ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5l3 3 3-3" /></svg>
+                </button>
+                {showModeDropdown && (
+                  <>
+                    <div className="fixed inset-0 z-[99]" onClick={() => setShowModeDropdown(false)} />
+                    <div
+                      className="fixed z-[100] bg-[#12121f] border border-[#2a2a4e] rounded-lg shadow-xl py-1 min-w-[110px]"
+                      ref={(el) => {
+                        if (!el) return;
+                        const btn = document.querySelector('[data-mode-btn]');
+                        if (btn) {
+                          const r = btn.getBoundingClientRect();
+                          el.style.top = `${r.bottom + 4}px`;
+                          el.style.left = `${r.left}px`;
+                        }
+                      }}
+                    >
+                      {[
+                        { id: 'main' as const, label: '🎯 Main', color: 'text-blue-300' },
+                        { id: 'rough' as const, label: '📝 Rough', color: 'text-yellow-300' },
+                      ].map(mode => (
+                        <button
+                          key={mode.id}
+                          onClick={() => { setCanvasMode(mode.id); setShowModeDropdown(false); markDirty(); }}
+                          className={`w-full text-left px-3 py-1.5 text-xs font-medium transition-colors ${
+                            canvasMode === mode.id
+                              ? `${mode.color} bg-white/5`
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.03]'
+                          }`}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               {/* Topic / Subtitle strip toggles */}
               <button
                 onClick={() => {
@@ -4024,6 +4208,13 @@ export default function LessonCanvas({
             </button>
           )}
         </div>
+
+        {/* Lock/Unlock — fixed, always visible, not inside scrollable area */}
+        {!hideLockButton && !isPresenting && !showPublicCanvas && (
+          <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ml-2 ${isLocked ? 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)]'}`}>
+            {isLocked ? <><Lock className="w-3.5 h-3.5" />Locked</> : <><Unlock className="w-3.5 h-3.5" />Unlocked</>}
+          </button>
+        )}
       </div>
 
 

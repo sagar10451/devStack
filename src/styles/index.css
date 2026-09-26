@@ -426,6 +426,20 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
   display: none !important;
 }
 
+/* ─── Helper/Rough text — Post-it Sticky Note style ────────────────────────── */
+/* Note: Sticky notes are now a dedicated tldraw shape (StickyNoteShape.tsx).
+   The helper-marker-highlight class is kept for legacy compatibility but
+   the visual styling is built into the shape component itself. */
+.helper-marker-highlight {
+  position: relative;
+}
+.helper-marker-highlight::before {
+  display: none;
+}
+.helper-marker-highlight::after {
+  display: none;
+}
+
 /* (hand mode removed — presentation uses normal pointer by default, laser is opt-in) */
 
 

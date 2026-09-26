@@ -288,7 +288,7 @@ export default function GlobalAudioTimeline({
 
       {/* ─── Cards track ────────────────────────────────────────────────── */}
       {!minimized && (
-        <div className="flex items-stretch gap-0 px-3 py-2 overflow-x-auto" style={{ minHeight: 90, overscrollBehavior: 'contain' }}>
+        <div className="flex items-stretch gap-0 px-3 py-3 overflow-x-auto" style={{ minHeight: 140, overscrollBehavior: 'contain' }}>
           {unifiedSteps.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-[11px] text-slate-600">No steps or topics/subtitles</p>

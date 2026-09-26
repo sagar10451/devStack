@@ -187,6 +187,8 @@ export interface LessonCanvasData {
   imageGlowColors?: Record<string, string>;
   /** Rough/Main mode */
   roughMode?: boolean;
+  /** Canvas mode: 'main' | 'rough' | 'kids' */
+  canvasMode?: 'main' | 'rough' | 'kids';
   /** Shape IDs marked as helper (visible only in Rough mode) */
   helperShapeIds?: string[];
   /** Global audio file name (stored on disk at /data/audio/{siteId}/{topic}/{subtopic}.mp3) */

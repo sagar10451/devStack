@@ -172,6 +172,7 @@ export function getShapeIcon(editor: Editor | null, shapeId: string, diagramData
     case 'code-block': return { icon: <Square className={cls} />, label: 'Code' };
     case 'md-block': return { icon: <Square className={cls} />, label: 'Markdown' };
     case 'glow-notes': return { icon: <Square className={cls} />, label: 'Glow Notes' };
+    case 'sticky-note': return { icon: <span className="text-[11px]">📌</span>, label: 'Sticky Note' };
     default: return { icon: <Square className={cls} />, label: shape.type };
   }
 }
@@ -721,7 +722,7 @@ export default function TimelineBar({
                       selectedCardIds.has(step.id)
                         ? 'border-emerald-400/50 bg-emerald-500/8 ring-1 ring-emerald-400/30 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
                         : isHelper
-                        ? 'border-yellow-500/40 bg-yellow-500/5 hover:border-yellow-400/50 shadow-[0_0_6px_rgba(234,179,8,0.08)]'
+                        ? 'border-cyan-500/40 bg-cyan-500/5 hover:border-cyan-400/50 shadow-[0_0_6px_rgba(6,182,212,0.08)]'
                         : isSelected
                         ? 'border-amber-400/50 bg-amber-500/8 shadow-[0_0_8px_rgba(245,158,11,0.1)]'
                         : isManualCard
@@ -960,20 +961,6 @@ export default function TimelineBar({
                           <MoveHorizontal className="w-2.5 h-2.5" />
                         </button>
                       </div>
-                      {/* Helper toggle — Rough mode only */}
-                      {roughMode && onHelperToggle && step.shapeIds.length > 0 && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onHelperToggle(step.shapeIds[0]); }}
-                          className={`text-[7px] px-1 py-0.5 rounded transition-all ${
-                            helperShapeIds?.has(step.shapeIds[0])
-                              ? 'text-yellow-300 bg-yellow-500/15 border border-yellow-500/30'
-                              : 'text-slate-500 hover:text-yellow-300 hover:bg-yellow-500/10 border border-transparent'
-                          }`}
-                          title={helperShapeIds?.has(step.shapeIds[0]) ? 'Unmark as helper' : 'Mark as helper (hidden in Main mode)'}
-                        >
-                          {helperShapeIds?.has(step.shapeIds[0]) ? '📝 Helper' : '📝'}
-                        </button>
-                      )}
                       <button onClick={(e) => { e.stopPropagation(); removeStep(step.id); }} className="p-0.5 rounded hover:bg-red-500/10">
                         <Trash2 className="w-3 h-3 text-red-400/60 hover:text-red-400" />
                       </button>

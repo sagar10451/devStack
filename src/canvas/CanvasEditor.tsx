@@ -5,8 +5,9 @@ import 'tldraw/tldraw.css';
 import { CodeBlockShapeUtil } from './shapes/CodeBlockShape';
 import { MarkdownBlockShapeUtil } from './shapes/MarkdownBlockShape';
 import { GlowNotesShapeUtil } from './shapes/GlowNotesShape';
+import { StickyNoteShapeUtil } from './shapes/StickyNoteShape';
 
-const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesShapeUtil];
+const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesShapeUtil, StickyNoteShapeUtil];
 
 interface CanvasEditorProps {
   snapshot: unknown | null;
