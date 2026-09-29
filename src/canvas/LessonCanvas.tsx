@@ -137,7 +137,7 @@ export default function LessonCanvas({
   const [publicCanvasData, setPublicCanvasData] = useState<PublicCanvasData | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const editorRef = useRef<Editor | null>(null);
-  const [snapshot, setSnapshot] = useState<unknown>(initialData?.snapshot || null);
+  const [snapshot] = useState<unknown>(initialData?.snapshot || null);
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
   const [sidebarTitle, setSidebarTitle] = useState(initialData?.sidebarTitle || 'Topics');
@@ -712,7 +712,7 @@ export default function LessonCanvas({
     if (!editor) return;
     // tldraw caches viewport bounds — recalculate when strip height changes
     requestAnimationFrame(() => {
-      try { editor.updateViewportScreenBounds(); } catch { /* ignore if method doesn't exist */ }
+      try { (editor as any).updateViewportScreenBounds(); } catch { /* ignore if method doesn't exist */ }
     });
   }, [editor, pageTopicVisible, pageSubtitleVisible]);
 
@@ -4102,7 +4102,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   const shapeId = createShapeId();
                   editor.createShape({ id: shapeId, type: 'sticky-note' as any, x: point.x - 130, y: point.y - 130 });
-                  editor.sendToFront([shapeId]);
+                  (editor as any).sendToFront([shapeId]);
                 }}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 hover:border-yellow-400/50 hover:shadow-[0_0_8px_rgba(234,179,8,0.25)] transition-all flex-shrink-0"
                 title="Add sticky note (helper — visible only in Rough mode)"

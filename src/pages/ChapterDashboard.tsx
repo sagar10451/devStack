@@ -146,7 +146,7 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
 
                   {/* Subject switcher */}
                   <div className="ml-auto flex items-center rounded-full" style={{ background: 'rgba(5,10,22,0.6)', border: '1px solid #253453', padding: '3px' }}>
-                    {subjects.map((s, si) => {
+                    {subjects.map((s, _si) => {
                       const isActive = s.id === activeSubj;
                       const st = SUBJECT_STYLES[s.title] || { bg: '#3b82f6', text: '#fff', icon: 'BookOpen' };
                       return (

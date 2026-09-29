@@ -191,6 +191,8 @@ export interface LessonCanvasData {
   canvasMode?: 'main' | 'rough' | 'kids';
   /** Shape IDs marked as helper (visible only in Rough mode) */
   helperShapeIds?: string[];
+  /** Pages excluded from animation flow */
+  excludedPages?: string[];
   /** Global audio file name (stored on disk at /data/audio/{siteId}/{topic}/{subtopic}.mp3) */
   globalAudioFile?: string;
   /** Global audio durations — stepId → seconds (how long this step lasts before next fires) */

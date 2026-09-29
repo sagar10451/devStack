@@ -189,7 +189,7 @@ export default function TimelineBar({
   onFullyCollapsedChange,
   roughMode = false,
   helperShapeIds,
-  onHelperToggle,
+  onHelperToggle: _onHelperToggle,
 }: TimelineBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [minimized, setMinimized] = useState(false);

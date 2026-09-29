@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { Tldraw, loadSnapshot } from 'tldraw';
 import type { Editor } from 'tldraw';
 import 'tldraw/tldraw.css';
