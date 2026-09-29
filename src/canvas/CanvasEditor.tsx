@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { Tldraw, getSnapshot, loadSnapshot } from 'tldraw';
+import { Tldraw, loadSnapshot } from 'tldraw';
 import type { Editor } from 'tldraw';
 import 'tldraw/tldraw.css';
 import { CodeBlockShapeUtil } from './shapes/CodeBlockShape';
@@ -12,7 +12,7 @@ const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesS
 interface CanvasEditorProps {
   snapshot: unknown | null;
   onEditorReady: (editor: Editor) => void;
-  onSnapshotChange: (snapshot: unknown) => void;
+  onDocumentChange: () => void;
   onSeedCanvas?: (editor: Editor) => void;
   hideUi?: boolean;
 }
@@ -20,12 +20,11 @@ interface CanvasEditorProps {
 export default function CanvasEditor({
   snapshot,
   onEditorReady,
-  onSnapshotChange,
+  onDocumentChange,
   onSeedCanvas,
   hideUi = false,
 }: CanvasEditorProps) {
   const editorRef = useRef<Editor | null>(null);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleMount = useCallback((editor: Editor) => {
     editorRef.current = editor;
@@ -46,29 +45,9 @@ export default function CanvasEditor({
       onSeedCanvas(editor);
     }
 
-    // Auto-save on changes (throttled)
-    const handleChange = () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-      saveTimeoutRef.current = setTimeout(() => {
-        if (editorRef.current) {
-          const { document } = getSnapshot(editorRef.current.store);
-          onSnapshotChange({ document });
-        }
-      }, 1000);
-    };
-
-    editor.store.listen(handleChange, { scope: 'document' });
-  }, [snapshot, onEditorReady, onSnapshotChange]);
-
-  useEffect(() => {
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, []);
+    // Lightweight change listener — just marks dirty, no serialization
+    editor.store.listen(onDocumentChange, { scope: 'document' });
+  }, [snapshot, onEditorReady, onDocumentChange]);
 
   return (
     <div className="w-full h-full">

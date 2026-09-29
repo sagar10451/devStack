@@ -88,7 +88,7 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
       initialData={canvasData}
       siteId={site.id}
       watermark={site.watermark}
-      backPath={basePath ? basePath.replace(`/${subtopicSlug}`, '') : '/'}
+      backPath={site.basePath || '/'}
     />
   );
 }

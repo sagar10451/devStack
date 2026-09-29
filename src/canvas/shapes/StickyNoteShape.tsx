@@ -52,6 +52,8 @@ function StickyNoteView({
   const { content, w, h } = shape.props;
   const [editContent, setEditContent] = useState(content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
 
   useEffect(() => {
     if (isEditing) {
@@ -59,6 +61,30 @@ function StickyNoteView({
       setTimeout(() => textareaRef.current?.focus(), 50);
     }
   }, [isEditing, content]);
+
+  // Measure natural text size then compute scale to fit container
+  useEffect(() => {
+    if (isEditing || !measureRef.current || !content) {
+      setScale(1);
+      return;
+    }
+    // Let the browser render at natural size, then measure
+    requestAnimationFrame(() => {
+      const el = measureRef.current;
+      if (!el) return;
+      const pad = 40; // 20px padding each side
+      const availW = w - pad;
+      const availH = h - pad;
+      const naturalW = el.scrollWidth;
+      const naturalH = el.scrollHeight;
+      if (naturalW <= 0 || naturalH <= 0 || availW <= 0 || availH <= 0) {
+        setScale(1);
+        return;
+      }
+      const s = Math.min(1, availW / naturalW, availH / naturalH);
+      setScale(Math.max(0.3, s));
+    });
+  }, [content, w, h, isEditing]);
 
   const handleSave = useCallback(() => {
     onEditComplete(editContent);
@@ -177,7 +203,7 @@ function StickyNoteView({
                 background: 'rgba(0, 0, 0, 0.03)',
               }}
             >
-              <span style={{ fontSize: 11, color: '#555', fontWeight: 700, fontFamily: 'Satisfy, cursive, sans-serif' }}>Sticky Note</span>
+              <span style={{ fontSize: 11, color: '#555', fontWeight: 700, fontFamily: 'Caveat, sans-serif' }}>Sticky Note</span>
               <div style={{ flex: 1 }} />
               <button
                 onClick={handleSave}
@@ -209,10 +235,10 @@ function StickyNoteView({
                 outline: 'none',
                 resize: 'none',
                 padding: '16px 20px',
-                fontSize: Math.max(14, Math.min(22, w / 14)),
-                lineHeight: 1.6,
-                fontFamily: "'Satisfy', 'Patrick Hand', cursive, sans-serif",
-                fontWeight: 400,
+                fontSize: 22,
+                lineHeight: 1.4,
+                fontFamily: "'Caveat', sans-serif",
+                fontWeight: 600,
               }}
             />
           </div>
@@ -222,21 +248,52 @@ function StickyNoteView({
               width: '100%',
               height: '100%',
               padding: '20px',
-              overflow: 'auto',
-              color: '#333',
-              fontSize: Math.max(14, Math.min(22, w / 14)),
-              lineHeight: 1.6,
-              fontFamily: "'Satisfy', 'Patrick Hand', cursive, sans-serif",
-              fontWeight: 400,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
+              overflow: 'hidden',
+              position: 'relative',
             }}
           >
+            {/* Hidden measurer — renders at natural size to get scrollWidth/scrollHeight */}
+            <div
+              ref={measureRef}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: w - 40,
+                visibility: 'hidden',
+                pointerEvents: 'none',
+                color: '#333',
+                fontSize: 22,
+                lineHeight: 1.4,
+                fontFamily: "'Caveat', sans-serif",
+                fontWeight: 600,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {content || 'X'}
+            </div>
+            {/* Visible scaled text */}
+            <div
+              style={{
+                color: '#333',
+                fontSize: 22,
+                lineHeight: 1.4,
+                fontFamily: "'Caveat', sans-serif",
+                fontWeight: 600,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                width: `${100 / scale}%`,
+              }}
+            >
             {content || (
               <span style={{ color: 'rgba(0, 0, 0, 0.25)', fontStyle: 'italic' }}>
                 Double-click to write...
               </span>
             )}
+            </div>
           </div>
         )}
       </div>

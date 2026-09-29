@@ -5,13 +5,15 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { Plus, Trash2, Copy, FileText, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, Copy, FileText, ChevronUp, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import type { Editor } from 'tldraw';
 
 interface PagePanelProps {
   editor: Editor | null;
   isLocked: boolean;
   onShowTopics?: () => void;
+  excludedPages?: Set<string>;
+  onToggleExclude?: (pageId: string) => void;
 }
 
 interface PageInfo {
@@ -22,7 +24,7 @@ interface PageInfo {
   isCurrent: boolean;
 }
 
-export default function PagePanel({ editor, isLocked, onShowTopics }: PagePanelProps) {
+export default function PagePanel({ editor, isLocked, onShowTopics, excludedPages, onToggleExclude }: PagePanelProps) {
   const [pages, setPages] = useState<PageInfo[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -172,7 +174,7 @@ export default function PagePanel({ editor, isLocked, onShowTopics }: PagePanelP
               page.isCurrent
                 ? 'bg-cyan-500/15 border border-cyan-400/40 shadow-sm shadow-cyan-500/10'
                 : 'bg-slate-800/30 border border-slate-700/30 hover:border-slate-600/50 hover:bg-slate-800/50'
-            }`}
+            } ${excludedPages?.has(page.id) ? 'opacity-50' : ''}`}
           >
             <div className="flex items-center gap-2">
               {/* Page number */}
@@ -212,6 +214,21 @@ export default function PagePanel({ editor, isLocked, onShowTopics }: PagePanelP
               <span className={`text-[8px] ${page.isCurrent ? 'text-cyan-500/60' : 'text-slate-600'}`}>
                 {page.shapeCount}
               </span>
+
+              {/* Include/Exclude from animation toggle */}
+              {onToggleExclude && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleExclude(page.id); }}
+                  className={`p-0.5 rounded transition-colors ${
+                    excludedPages?.has(page.id)
+                      ? 'text-red-400/70 hover:text-red-300 hover:bg-red-500/10'
+                      : 'text-emerald-400/50 hover:text-emerald-300 hover:bg-emerald-500/10'
+                  }`}
+                  title={excludedPages?.has(page.id) ? 'Excluded from animation — click to include' : 'Included in animation — click to exclude'}
+                >
+                  {excludedPages?.has(page.id) ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </button>
+              )}
             </div>
 
             {/* Action buttons — always visible */}

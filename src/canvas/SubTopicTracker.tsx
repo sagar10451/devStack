@@ -22,6 +22,7 @@ interface SubTopicTrackerProps {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   pageGlow?: { pageId: string; type: 'orange' | 'green' } | null;
+  excludedPages?: Set<string>;
 }
 
 const SIDEBAR_TITLE_OPTIONS = ['Outline', 'Scenes', 'Topics', 'Contents', 'Agenda', 'Chapter Breakdown', 'Progress', 'Sections'];
@@ -44,7 +45,7 @@ function getOrderedPageIds(steps: AnimationStep[], editor?: Editor | null): stri
 export default function SubTopicTracker({
   labels, onLabelsChange, steps, isLocked, currentStep, editor,
   sidebar, sidebarTitle = 'Outline', onSidebarTitleChange,
-  collapsed: collapsedProp = false, onCollapsedChange, pageGlow,
+  collapsed: collapsedProp = false, onCollapsedChange, pageGlow, excludedPages,
 }: SubTopicTrackerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -271,17 +272,17 @@ export default function SubTopicTracker({
   if (sidebar) {
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <div className={`flex items-center justify-between px-3 py-2.5 ${isLocked ? 'border-b border-indigo-500/20 bg-indigo-500/10' : 'border-b border-indigo-400/15 bg-indigo-500/8'}`}>
+        <div className={`flex items-center justify-between px-3 py-2.5 ${isLocked ? 'border-b border-white/[0.08]' : 'border-b border-white/[0.06]'}`} style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.025), transparent)' }}>
           {isLocked ? (
-            <span className="text-xs font-semibold text-indigo-300">📋 {sidebarTitle}</span>
+            <span className="text-xs font-semibold text-white/90">🎬 {sidebarTitle}</span>
           ) : (
             <select
               value={sidebarTitle}
               onChange={(e) => onSidebarTitleChange?.(e.target.value)}
-              className="text-xs font-semibold text-indigo-300 bg-transparent border-none outline-none cursor-pointer hover:text-indigo-200"
+              className="text-xs font-semibold text-white/80 bg-transparent border-none outline-none cursor-pointer hover:text-white"
             >
               {SIDEBAR_TITLE_OPTIONS.map(t => (
-                <option key={t} value={t} className="bg-[#0a0a14] text-slate-300">{t}</option>
+                <option key={t} value={t} className="bg-[#08090B] text-slate-300">{t}</option>
               ))}
             </select>
           )}
@@ -307,6 +308,14 @@ export default function SubTopicTracker({
             const status = getStatus(label, i);
             const startP = label.startPage ?? 0;
             const endP = label.endPage ?? label.endStep ?? 0;
+            // Skip labels whose pages are all excluded (when locked)
+            if (isLocked && excludedPages && excludedPages.size > 0) {
+              let allExcluded = true;
+              for (let pi = startP; pi <= endP && pi < pageIds.length; pi++) {
+                if (!excludedPages.has(pageIds[pi])) { allExcluded = false; break; }
+              }
+              if (allExcluded) return null;
+            }
             // Check if this card should glow
             const labelPageId = label.id.startsWith('auto-') ? label.id.replace('auto-', '') : pageIds[startP];
             const glowType = pageGlow && pageGlow.pageId === labelPageId ? pageGlow.type : null;
@@ -322,12 +331,13 @@ export default function SubTopicTracker({
                     ? (glowType === 'green' ? 'border-2 border-emerald-400 bg-emerald-950/60 shadow-lg shadow-emerald-500/30' :
                        glowType === 'orange' ? 'border-2 border-orange-400 bg-orange-950/40 shadow-lg shadow-orange-500/30' :
                        status === 'complete' ? 'border border-emerald-500/30 bg-emerald-500/8' :
-                       status === 'active' ? 'border border-indigo-400/30 bg-indigo-500/8' :
-                       'border border-[#2a2a4e] bg-[#12121f]')
+                       status === 'active' ? 'border border-amber-400/30 shadow-[0_0_12px_rgba(255,170,60,0.10)]' :
+                       'border border-white/[0.12]')
                     : (status === 'complete' ? 'bg-emerald-500/8 border border-emerald-400/30' :
-                       status === 'active' ? 'bg-indigo-500/8 border border-indigo-400/30' :
-                       'bg-[#12121f] border border-[#2a2a4e]')
+                       status === 'active' ? 'border border-amber-400/30' :
+                       'border border-white/[0.12]')
                 }`}
+                style={{ background: status === 'active' ? 'linear-gradient(90deg, rgba(255,170,60,0.08), rgba(255,255,255,0.015))' : 'linear-gradient(180deg, #14171A, #0D0F11)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.035)' }}
               >
                 <div className="flex items-center gap-2 relative z-10">
                   <div className="relative flex-shrink-0">
@@ -368,7 +378,7 @@ export default function SubTopicTracker({
 
                 {/* Progress bar — slim glowing bar at bottom */}
                 {isLocked && (
-                  <div className="mt-1.5 w-full h-[3px] rounded-full bg-white/5 overflow-hidden">
+                  <div className="mt-1.5 w-full h-[3px] rounded-full bg-white/[0.06] overflow-hidden">
                     <div
                       className={`h-full rounded-full relative transition-all duration-700 ease-out ${
                         status === 'complete'
@@ -439,9 +449,9 @@ export default function SubTopicTracker({
       style={position ? { left: position.x, top: position.y, width: isLocked ? 'max-content' : '14rem' } : undefined}
       onMouseDown={handleMouseDown}
     >
-      <div className={`${isLocked ? 'bg-[#0a0a14]/95' : 'bg-[#0a0a14]/95'} backdrop-blur-xl rounded-xl ${isLocked ? 'border border-indigo-500/30 shadow-2xl shadow-indigo-500/10' : 'border border-indigo-400/25 shadow-2xl shadow-indigo-500/5'} overflow-hidden`}>
-        <div data-drag-handle className={`flex items-center justify-between px-3 py-2.5 cursor-grab active:cursor-grabbing ${isLocked ? 'border-b border-indigo-500/20 bg-indigo-500/10' : 'border-b border-indigo-400/15 bg-indigo-500/8'}`}>
-          <span className={`text-xs font-semibold ${isLocked ? 'text-indigo-300' : 'text-indigo-300'}`}>
+      <div className={`${isLocked ? 'bg-[#08090B]/95' : 'bg-[#08090B]/95'} backdrop-blur-xl rounded-xl ${isLocked ? 'border border-white/[0.16] shadow-2xl shadow-black/30' : 'border border-white/[0.12] shadow-2xl shadow-black/20'} overflow-hidden`}>
+        <div data-drag-handle className={`flex items-center justify-between px-3 py-2.5 cursor-grab active:cursor-grabbing border-b border-white/[0.08]`} style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.025), transparent)' }}>
+          <span className="text-xs font-semibold text-white/90">
             {isLocked ? '✨ Progress' : 'Sub Topics'}
           </span>
           {!isLocked && (
@@ -459,13 +469,21 @@ export default function SubTopicTracker({
             const status = getStatus(label, i);
             const startP = label.startPage ?? 0;
             const endP = label.endPage ?? label.endStep ?? 0;
+            // Skip labels whose pages are all excluded (when locked)
+            if (isLocked && excludedPages && excludedPages.size > 0) {
+              let allExcluded = true;
+              for (let pi = startP; pi <= endP && pi < pageIds.length; pi++) {
+                if (!excludedPages.has(pageIds[pi])) { allExcluded = false; break; }
+              }
+              if (allExcluded) return null;
+            }
             return (
               <div
                 key={label.id}
                 className={`rounded-lg px-2.5 py-2 transition-colors ${
                   status === 'complete' ? 'bg-emerald-500/10 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.1)]' :
-                  status === 'active' ? 'bg-indigo-500/10 border border-indigo-500/30 shadow-[0_0_8px_rgba(99,102,241,0.1)]' :
-                  'bg-[#12121f] border border-[#2a2a4e]'
+                  status === 'active' ? 'border border-amber-400/30 shadow-[0_0_8px_rgba(255,170,60,0.08)]' :
+                  'border border-white/[0.12]'
                 }`}
               >
                 <div className="flex items-center gap-2">

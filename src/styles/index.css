@@ -12,9 +12,21 @@
   --color-primary-800: #1e40af;
   --color-primary-900: #1e3a8a;
 
-  --color-surface: #0a0a14;
-  --color-surface-card: #12121f;
-  --color-surface-hover: #0d0d18;
+  --color-surface: #050607;
+  --color-surface-card: #101214;
+  --color-surface-hover: #0B0D0F;
+
+  /* Smoky-black theme tokens */
+  --smoke-950: #050607;
+  --smoke-900: #08090B;
+  --smoke-850: #0B0D0F;
+  --smoke-800: #101214;
+  --smoke-750: #14171A;
+  --smoke-700: #191C20;
+  --smoke-border-soft: rgba(255,255,255,0.10);
+  --smoke-border-med: rgba(255,255,255,0.16);
+  --smoke-reflection: rgba(255,255,255,0.06);
+  --smoke-warm-glow: rgba(255,180,80,0.10);
 }
 
 body {
@@ -156,15 +168,18 @@ a[href*="tldraw.dev"] {
   pointer-events: none !important;
 }
 
-/* Softer dark canvas background */
+/* Smoky-black canvas background */
 .tl-background {
-  background-color: #0b0b16 !important;
+  background: linear-gradient(180deg, #121416 0%, #0B0D0F 100%) !important;
 }
 .tl-canvas {
-  background-color: #f0ede8 !important;
+  background-color: #0B0D0F !important;
 }
 
-/* Hide tldraw style panel when toggled off via "Colors" button */
+/* Refined graphite grid */
+.tl-grid {
+  opacity: 0.5 !important;
+}
 .hide-style-panel .tlui-style-panel__wrapper {
   display: none !important;
 }
@@ -913,6 +928,7 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
 .bw-theme .bg-\[\#f0ede8\] div {
   color: #0a0a0a !important;
 }
+
 .bw-theme .bg-\[\#f0ede8\] .border-2 {
   border-color: #0a0a0a !important;
 }
@@ -1176,17 +1192,14 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
 
 /* ─── Dark Mode — Global ───────────────────────────────────────────────────── */
 
-/* Canvas background — subtle color variation + grid (lightweight) */
+/* Canvas background — smoky-black with subtle graphite grid */
 .tl-background {
-  background-color: #0b0b16 !important;
+  background-color: #0B0D0F !important;
   background-image:
-    /* Single blended multi-stop gradient for color variation */
-    radial-gradient(ellipse at 20% 25%, rgba(139, 92, 246, 0.06), transparent 50%),
-    radial-gradient(ellipse at 80% 75%, rgba(6, 182, 212, 0.05), transparent 50%),
-    /* Grid lines */
+    /* Grid lines — graphite */
     linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px) !important;
-  background-size: 100% 100%, 100% 100%, 24px 24px, 24px 24px !important;
+  background-size: 24px 24px, 24px 24px !important;
 }
 
 /* tldraw dark mode text — ensure shapes default to light */

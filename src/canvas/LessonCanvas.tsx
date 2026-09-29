@@ -178,6 +178,11 @@ export default function LessonCanvas({
   const imageGlowColorsRef = useRef(imageGlowColors);
   imageGlowColorsRef.current = imageGlowColors;
 
+  // Pages excluded from animation flow (still editable when unlocked)
+  const [excludedPages, setExcludedPages] = useState<Set<string>>(new Set(initialData?.excludedPages || []));
+  const excludedPagesRef = useRef(excludedPages);
+  excludedPagesRef.current = excludedPages;
+
   // ─── Global Audio Timeline state ───────────────────────────────────────
   const [showGlobalTimeline, setShowGlobalTimeline] = useState(false);
   const [globalAudioDurations, setGlobalAudioDurations] = useState<Record<string, number>>(initialData?.globalAudioDurations || {});
@@ -336,6 +341,7 @@ export default function LessonCanvas({
   const canvasReadyRef = useRef(false);
   const [hideLockButton, setHideLockButton] = useState(false);
   const [tldrawCamera, setTldrawCamera] = useState<{ x: number; y: number; z: number } | null>(null);
+  const tldrawCameraRef = useRef<{ x: number; y: number; z: number } | null>(null);
 
   // ─── Diagram (React Flow) state ──────────────────────────────────────────
   const [diagramData, setDiagramData] = useState<DiagramData>(
@@ -406,13 +412,25 @@ export default function LessonCanvas({
   // Track tldraw camera for RF viewport sync
   useEffect(() => {
     if (!editor) return;
+    let throttleTimer: ReturnType<typeof setTimeout> | null = null;
     const updateCamera = () => {
       const cam = editor.getCamera();
-      setTldrawCamera({ x: cam.x, y: cam.y, z: cam.z });
+      const val = { x: cam.x, y: cam.y, z: cam.z };
+      tldrawCameraRef.current = val; // always fresh for non-render reads
+      if (!throttleTimer) {
+        throttleTimer = setTimeout(() => {
+          throttleTimer = null;
+          setTldrawCamera(tldrawCameraRef.current); // trigger re-render at most every 100ms
+        }, 100);
+      }
     };
     updateCamera();
+    setTldrawCamera(tldrawCameraRef.current); // initial sync
     const unsub = editor.store.listen(updateCamera, { scope: 'session' });
-    return () => unsub();
+    return () => {
+      unsub();
+      if (throttleTimer) clearTimeout(throttleTimer);
+    };
   }, [editor]);
 
   // Track selected shape IDs for timeline highlighting
@@ -715,6 +733,17 @@ export default function LessonCanvas({
 
     const visibilitySteps = steps.filter(s => (s.action || 'enter') !== 'none');
 
+    // ─── DOM query cache — avoid repeated querySelector calls ─────────
+    const elCache = new Map<string, HTMLElement | null>();
+    const getEl = (shapeId: string): HTMLElement | null => {
+      if (elCache.has(shapeId)) return elCache.get(shapeId)!;
+      const el = isTldrawId(shapeId)
+        ? document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null
+        : document.querySelector(`[data-id="${shapeId}"]`) as HTMLElement | null;
+      elCache.set(shapeId, el);
+      return el;
+    };
+
     // Collect shape IDs from "none" animation steps — these are preloaded, never hidden
     const preloadedIds = new Set(
       steps.filter(s => s.animation === 'none' && (s.action || 'enter') === 'enter')
@@ -724,34 +753,28 @@ export default function LessonCanvas({
     // Hide all tldraw animated shapes via CSS (except preloaded ones)
     const allAnimatedIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isTldrawId));
     allAnimatedIds.forEach(shapeId => {
-      if (preloadedIds.has(shapeId)) return; // preloaded — stay visible
-      const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
-      if (el) {
-        el.style.visibility = 'hidden';
-        el.style.opacity = '0';
-      }
+      if (preloadedIds.has(shapeId)) return;
+      const el = getEl(shapeId);
+      if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
     });
 
     // Hide all RF animated elements via class (except preloaded ones)
     const allRfIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isRfId));
     allRfIds.forEach(rfId => {
-      if (preloadedIds.has(rfId)) return; // preloaded — stay visible
-      const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
+      if (preloadedIds.has(rfId)) return;
+      const el = getEl(rfId);
       if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
     });
 
     // Also hide exit shape IDs from swap steps
     const allExitIds = new Set(steps.flatMap(s => s.exitShapeIds || []).filter(isTldrawId));
     allExitIds.forEach(shapeId => {
-      const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
-      if (el) {
-        el.style.visibility = 'hidden';
-        el.style.opacity = '0';
-      }
+      const el = getEl(shapeId);
+      if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
     });
     const allRfExitIds = new Set(steps.flatMap(s => s.exitShapeIds || []).filter(isRfId));
     allRfExitIds.forEach(rfId => {
-      const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
+      const el = getEl(rfId);
       if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
     });
 
@@ -768,43 +791,43 @@ export default function LessonCanvas({
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           shouldBeHidden.add(shapeId);
           shouldBeVisible.delete(shapeId);
-          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          const el = getEl(shapeId);
           if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
-          const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
+          const el = getEl(rfId);
           if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
         });
       } else if (stepAction === 'swap') {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           shouldBeVisible.add(shapeId);
           shouldBeHidden.delete(shapeId);
-          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          const el = getEl(shapeId);
           if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
-          const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
+          const el = getEl(rfId);
           if (el) { el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible'); }
         });
         (steps[i].exitShapeIds || []).filter(isTldrawId).forEach(shapeId => {
           shouldBeHidden.add(shapeId);
           shouldBeVisible.delete(shapeId);
-          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          const el = getEl(shapeId);
           if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
         });
         (steps[i].exitShapeIds || []).filter(isRfId).forEach(rfId => {
-          const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
+          const el = getEl(rfId);
           if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
         });
       } else {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           shouldBeVisible.add(shapeId);
           shouldBeHidden.delete(shapeId);
-          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          const el = getEl(shapeId);
           if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
-          const el = document.querySelector(`[data-id="${rfId}"]`) as HTMLElement | null;
+          const el = getEl(rfId);
           if (el) { el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible'); }
         });
       }
@@ -854,11 +877,6 @@ export default function LessonCanvas({
       applyAnimationState(editor, animationSteps, currentStep);
     }, 50);
   }, [editor, isLocked, animationSteps, currentStep, applyAnimationState]);
-
-  const handleSnapshotChange = useCallback((newSnapshot: unknown) => {
-    setSnapshot(newSnapshot);
-    markDirty();
-  }, []);
 
   const handleStepsChange = useCallback((newSteps: AnimationStep[]) => {
     setAnimationSteps(newSteps);
@@ -945,8 +963,13 @@ export default function LessonCanvas({
       }
     };
 
-    const unsub = editor.store.listen(cleanup, { scope: 'document' });
-    return () => unsub();
+    let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedCleanup = () => {
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      cleanupTimer = setTimeout(cleanup, 100);
+    };
+    const unsub = editor.store.listen(debouncedCleanup, { scope: 'document' });
+    return () => { unsub(); if (cleanupTimer) clearTimeout(cleanupTimer); };
   }, [editor, isLocked, subTopicLabels, shapeAnimations, diagramData]);
 
   // ─── Auto-add new shapes to timeline ─────────────────────────────────────
@@ -1104,14 +1127,17 @@ export default function LessonCanvas({
       knownShapeIdsRef.current = new Set(shapes.map(s => s.id as string));
     };
 
-    const unsub = editor.store.listen(() => {
-      detectNewShapes();
-    }, { scope: 'document' });
+    let detectTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedDetect = () => {
+      if (detectTimer) clearTimeout(detectTimer);
+      detectTimer = setTimeout(detectNewShapes, 100);
+    };
+    const unsub = editor.store.listen(debouncedDetect, { scope: 'document' });
 
     // Also listen for page switches
     const unsubSession = editor.store.listen(handlePageSwitch, { scope: 'session' });
 
-    return () => { unsub(); unsubSession(); };
+    return () => { unsub(); unsubSession(); if (detectTimer) clearTimeout(detectTimer); };
   }, [editor, isLocked]);
 
   // ─── Sync glow-notes line steps when box content changes ────────────────
@@ -1196,9 +1222,14 @@ export default function LessonCanvas({
       markDirty();
     };
 
-    // Run on store changes (shape prop updates)
-    const unsub = editor.store.listen(syncGlowLines, { scope: 'document' });
-    return () => unsub();
+    // Run on store changes (shape prop updates) — debounced
+    let glowTimer: ReturnType<typeof setTimeout> | null = null;
+    const debouncedSync = () => {
+      if (glowTimer) clearTimeout(glowTimer);
+      glowTimer = setTimeout(syncGlowLines, 100);
+    };
+    const unsub = editor.store.listen(debouncedSync, { scope: 'document' });
+    return () => { unsub(); if (glowTimer) clearTimeout(glowTimer); };
   }, [editor, isLocked]);
 
   // ─── Auto-add new RF nodes/edges to timeline ──────────────────────────────
@@ -1601,10 +1632,11 @@ export default function LessonCanvas({
       roughMode: roughMode || undefined,
       canvasMode: canvasMode !== 'main' ? canvasMode : undefined,
       helperShapeIds: helperShapeIds.size > 0 ? [...helperShapeIds] : undefined,
+      excludedPages: excludedPages.size > 0 ? [...excludedPages] : undefined,
       globalAudioFile: globalAudioFileName || undefined,
       globalAudioDurations: Object.keys(globalAudioDurations).length > 0 ? globalAudioDurations : undefined,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, imageGlowColors, globalAudioFileName, globalAudioDurations]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -1684,6 +1716,7 @@ export default function LessonCanvas({
         roughMode: roughModeRef.current || undefined,
         canvasMode: canvasModeRef.current !== 'main' ? canvasModeRef.current : undefined,
         helperShapeIds: helperShapeIdsRef.current.size > 0 ? [...helperShapeIdsRef.current] : undefined,
+        excludedPages: excludedPagesRef.current.size > 0 ? [...excludedPagesRef.current] : undefined,
         globalAudioFile: globalAudioFileNameRef.current || undefined,
         globalAudioDurations: Object.keys(globalAudioDurationsRef.current).length > 0 ? globalAudioDurationsRef.current : undefined,
       };
@@ -1730,7 +1763,7 @@ export default function LessonCanvas({
       }).finally(() => {
         isSavingRef.current = false;
       });
-    }, 3000);
+    }, 10000);
 
     autoSaveTimerRef.current = interval as any;
     return () => clearInterval(interval);
@@ -2169,6 +2202,13 @@ export default function LessonCanvas({
     editor.stopCameraAnimation();
     let nextStep = currentStep + 1;
 
+    // Skip steps on excluded pages
+    const excl = excludedPagesRef.current;
+    while (nextStep < animationSteps.length && excl.has(animationSteps[nextStep].pageId || '')) {
+      nextStep++;
+    }
+    if (nextStep >= animationSteps.length) return;
+
     // ─── Rough mode: batch advance to next camera group ───────────────
     if (roughModeRef.current) {
       // Skip preloaded steps first
@@ -2185,16 +2225,20 @@ export default function LessonCanvas({
       const nextStepData = animationSteps[nextStep];
 
       // Handle page switch if needed
+      let pageSwitched = false;
       if (nextStepData.pageId && (editor.getCurrentPageId() as string) !== nextStepData.pageId) {
+        pageSwitched = true;
         editor.setCameraOptions({ isLocked: false });
         editor.setCurrentPage(nextStepData.pageId as any);
-        // Auto-reveal topic/subtitle on new page
+        // Auto-reveal topic/subtitle on new page + play sounds
         const targetPid = nextStepData.pageId;
         if (pageTopicVisibleRef.current.has(targetPid)) {
           setRevealedTopicPages(prev => new Set(prev).add(targetPid));
+          try { const a = new Audio('/sounds/border_animation.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
         }
         if (pageSubtitleVisibleRef.current.has(targetPid)) {
           setRevealedSubtitlePages(prev => new Set(prev).add(targetPid));
+          try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
         }
       }
 
@@ -2221,8 +2265,8 @@ export default function LessonCanvas({
       const groupStep = animationSteps[nextStep];
       if (groupStep.cameraPosition) {
         editor.setCameraOptions({ isLocked: false });
-        if (currentStep < 0) {
-          // First group — set camera instantly, no fly-in
+        if (currentStep < 0 || pageSwitched) {
+          // First group or page switch — set camera instantly, no fly-in
           editor.setCamera(groupStep.cameraPosition, { force: true });
           editor.setCameraOptions({ isLocked: true });
         } else {
@@ -2504,6 +2548,7 @@ export default function LessonCanvas({
 
     // ─── Rough mode: batch rewind to previous camera group ────────────
     if (roughModeRef.current) {
+      const excl = excludedPagesRef.current;
       // Find the start of the current camera group
       let currentGroupStart = currentStep;
       for (let i = currentStep; i >= 0; i--) {
@@ -2514,8 +2559,14 @@ export default function LessonCanvas({
         if (i === 0) currentGroupStart = 0;
       }
 
-      if (currentGroupStart === 0) {
-        // Already at the first group — go to step -1 (before everything)
+      // Find the previous camera group, skipping excluded pages
+      let prevGroupEnd = currentGroupStart - 1;
+      while (prevGroupEnd >= 0 && excl.has(animationSteps[prevGroupEnd].pageId || '')) {
+        prevGroupEnd--;
+      }
+
+      if (prevGroupEnd < 0) {
+        // No previous non-excluded group — go to step -1
         applyAnimationState(editor, animationSteps, -1);
         if (presentationStartCameraRef.current) {
           editor.setCameraOptions({ isLocked: false });
@@ -2527,9 +2578,6 @@ export default function LessonCanvas({
         return;
       }
 
-      // Find the previous camera group: go back from currentGroupStart - 1
-      // to find where that group started and ended
-      const prevGroupEnd = currentGroupStart - 1;
       let prevGroupStart = 0;
       for (let i = prevGroupEnd; i >= 0; i--) {
         if (animationSteps[i].cameraPosition) {
@@ -2597,9 +2645,23 @@ export default function LessonCanvas({
       setCurrentStep(-1);
       glowFlickeredRef.current.clear();
     } else {
-      const prevStep = currentStep - 1;
-      applyAnimationState(editor, animationSteps, prevStep);
-      setCurrentStep(prevStep);
+      // Find previous step that's not on an excluded page
+      let prevStep = currentStep - 1;
+      const excl = excludedPagesRef.current;
+      while (prevStep >= 0 && excl.has(animationSteps[prevStep].pageId || '')) {
+        prevStep--;
+      }
+      if (prevStep < 0) {
+        applyAnimationState(editor, animationSteps, -1);
+        if (presentationStartCameraRef.current) {
+          editor.setCamera(presentationStartCameraRef.current, { force: true });
+        }
+        setCurrentStep(-1);
+        glowFlickeredRef.current.clear();
+      } else {
+        applyAnimationState(editor, animationSteps, prevStep);
+        setCurrentStep(prevStep);
+      }
     }
   }, [editor, isLocked, currentStep, animationSteps, applyAnimationState, stopStepAudio, revealedTopicPages, revealedSubtitlePages]);
 
@@ -3792,7 +3854,7 @@ export default function LessonCanvas({
   return (
     <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}>
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
-      <div className="flex items-center px-4 py-3 bg-[#1a1f35] border-b border-[#2a3055] flex-shrink-0 min-w-0">
+      <div className="flex items-center px-4 py-3 border-b border-white/[0.12] flex-shrink-0 min-w-0" style={{ background: 'linear-gradient(180deg, #121416, #0B0D0F)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
         {/* Fixed left: Back + title (title hidden when unlocked for more button space) */}
         <div className="flex items-center gap-3 flex-shrink-0 mr-3" style={{ maxWidth: isLocked ? undefined : undefined }}>
           <Link to={backPath} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors whitespace-nowrap">
@@ -3800,7 +3862,7 @@ export default function LessonCanvas({
           </Link>
           {isLocked && (
             <>
-              <div className="w-px h-5 bg-[#1a1a2e] flex-shrink-0" />
+              <div className="w-px h-5 bg-white/[0.10] flex-shrink-0" />
               <div className="flex items-center gap-1 min-w-0 overflow-hidden">
                 <span className="text-slate-400 text-sm truncate">{topicTitle}</span>
                 <span className="text-blue-400/70 text-sm flex-shrink-0">/</span>
@@ -3815,13 +3877,13 @@ export default function LessonCanvas({
           {/* Step counter (locked) — hidden when audio auto-play in fullscreen */}
           {isLocked && animationSteps.length > 0 && !(isPresenting && (globalAudioPlaying || audioCountdown !== null)) && (
             <div className={`flex items-center gap-1.5 flex-shrink-0 ${!hideLockButton ? 'mr-2' : ''}`}>
-              <button onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-[#12121f] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+              <button onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-[#101214] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                 <ChevronLeft className="w-3.5 h-3.5 text-blue-300" />
               </button>
               <span className="text-slate-300 text-xs font-medium min-w-[40px] text-center" style={{ display: isPresenting ? 'none' : undefined }}>
                 {currentStep + 1} / {animationSteps.length}
               </span>
-              <button onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-[#12121f] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+              <button onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-[#101214] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                 <ChevronRight className="w-3.5 h-3.5 text-blue-300" />
               </button>
               {/* Page jump — hidden in fullscreen presenting */}
@@ -3829,11 +3891,13 @@ export default function LessonCanvas({
                 <select
                   value={currentStep >= 0 ? (animationSteps[currentStep]?.pageId || '') : ''}
                   onChange={(e) => { if (e.target.value) jumpToPage(e.target.value); }}
-                  className="ml-1 text-[9px] bg-[#12121f] text-blue-300 border border-blue-500/20 rounded px-1 py-1 outline-none cursor-pointer hover:border-blue-400/40"
+                  className="ml-1 text-[9px] bg-[#101214] text-blue-300 border border-blue-500/20 rounded px-1 py-1 outline-none cursor-pointer hover:border-blue-400/40"
                   title="Jump to page"
                 >
                   <option value="" disabled>Jump to...</option>
-                  {editor.getPages().map((p, i) => (
+                  {editor.getPages()
+                    .filter((p) => !excludedPages.has(p.id as string))
+                    .map((p, i) => (
                     <option key={p.id as string} value={p.id as string}>
                       {p.name || `Page ${i + 1}`}
                     </option>
@@ -3893,7 +3957,7 @@ export default function LessonCanvas({
                 className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${
                   bgMusicEnabled
                     ? 'text-purple-300 bg-purple-500/15 border border-purple-500/30'
-                    : 'text-slate-500 border border-[#2a2a4e] hover:text-purple-300 hover:border-purple-500/30'
+                    : 'text-slate-500 border border-[#191C20] hover:text-purple-300 hover:border-purple-500/30'
                 }`}
                 title={bgMusicEnabled ? 'Disable background music' : 'Enable background music'}
               >
@@ -3906,7 +3970,7 @@ export default function LessonCanvas({
                     className={`px-1.5 py-1 rounded text-[9px] transition-all ${
                       bgMusicLoop
                         ? 'text-blue-300 bg-blue-500/10 border border-blue-500/20'
-                        : 'text-slate-500 border border-[#2a2a4e] hover:text-blue-300'
+                        : 'text-slate-500 border border-[#191C20] hover:text-blue-300'
                     }`}
                     title={bgMusicLoop ? 'Loop ON' : 'Loop OFF'}
                   >
@@ -3934,7 +3998,7 @@ export default function LessonCanvas({
           {/* Save + auto-save indicator */}
           {!isLocked && (
             <>
-            <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-[#12121f] text-blue-400/60 border border-blue-500/10' : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:border-blue-400/50 hover:shadow-[0_0_8px_rgba(59,130,246,0.2)]'}`}>
+            <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-[#101214] text-blue-400/60 border border-blue-500/10' : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:border-blue-400/50 hover:shadow-[0_0_8px_rgba(59,130,246,0.2)]'}`}>
               <Save className="w-3.5 h-3.5" />{isSaved ? 'Saved' : 'Save'}
             </button>
             {lastSavedAt !== null && (
@@ -3949,19 +4013,19 @@ export default function LessonCanvas({
           {/* Export / Import */}
           {!isLocked && (
             <>
-              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as JSON">
+              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as JSON">
                 <Download className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as PNG">
+              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as PNG">
                 <ImageDown className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PDF (all pages)">
+              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PDF (all pages)">
                 <FileText className="w-3.5 h-3.5" />{isExportingPdf ? '...' : 'PDF'}
               </button>
-              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPpt ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PowerPoint (all pages)">
+              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPpt ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PowerPoint (all pages)">
                 <Boxes className="w-3.5 h-3.5" />{isExportingPpt ? '...' : 'PPT'}
               </button>
-              <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Import JSON">
+              <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
               </button>
               <button onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0" title="Reset this canvas">
@@ -3976,22 +4040,22 @@ export default function LessonCanvas({
           {/* Panel toggle buttons (unlocked) */}
           {!isLocked && (
             <>
-              <button onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLineConfig ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              <button onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLineConfig ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 Lines
               </button>
-              <button onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showAnimBar ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              <button onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showAnimBar ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 <Palette className="w-3 h-3" />
                 Colors
               </button>
-              <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 <Boxes className="w-3 h-3" />
                 Nodes
               </button>
-              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showTextBoundary ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Show/hide text paste boundaries">
+              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showTextBoundary ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Show/hide text paste boundaries">
                 <AlignJustify className="w-3 h-3" />
                 Boundary
               </button>
-              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
+              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
                 <PanelRight className="w-3 h-3" />
               </button>
               <button
@@ -4001,7 +4065,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'code-block' as any, x: point.x - 250, y: point.y - 150 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
               >
                 <Code2 className="w-3 h-3" />
                 Code
@@ -4013,7 +4077,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'md-block' as any, x: point.x - 250, y: point.y - 175 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
               >
                 <FileText className="w-3 h-3" />
                 Markdown
@@ -4026,7 +4090,7 @@ export default function LessonCanvas({
                   const point = editor.screenToPage({ x, y });
                   editor.createShape({ type: 'glow-notes' as any, x: point.x - 225, y: point.y - 175 });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
               >
                 ✨ Glow
               </button>
@@ -4055,7 +4119,7 @@ export default function LessonCanvas({
                     editor.flipShapes(ids, 'horizontal');
                   }
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
                 title="Flip selected shapes horizontally"
               >
                 <FlipHorizontal2 className="w-3 h-3" />
@@ -4064,7 +4128,7 @@ export default function LessonCanvas({
               {/* Guide border toggle + add/remove */}
               <button
                 onClick={() => setShowGuideBorder(v => !v)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuideBorder ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuideBorder ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Show/hide presentation guide borders (visible area at 75% zoom)"
               >
                 <Frame className="w-3 h-3" />
@@ -4074,13 +4138,13 @@ export default function LessonCanvas({
                 <>
                   <button
                     onClick={() => { setGuideCount(prev => prev + 1); markDirty(); }}
-                    className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-cyan-300 border border-cyan-500/20 hover:border-cyan-400/40 hover:shadow-[0_0_8px_rgba(6,182,212,0.15)] transition-all flex-shrink-0"
+                    className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-cyan-300 border border-cyan-500/20 hover:border-cyan-400/40 hover:shadow-[0_0_8px_rgba(6,182,212,0.15)] transition-all flex-shrink-0"
                     title="Add guide border"
                   >+</button>
                   {guideCount > 1 && (
                     <button
                       onClick={() => { setGuideCount(prev => Math.max(1, prev - 1)); markDirty(); }}
-                      className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0"
+                      className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0"
                       title="Remove last guide border"
                     >−</button>
                   )}
@@ -4093,7 +4157,7 @@ export default function LessonCanvas({
                   const cam = editor.getCamera();
                   editor.setCamera({ ...cam, z: 0.75 }, { force: true, animation: { duration: 300 } });
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
                 title="Set zoom to 75%"
               >
                 75%
@@ -4101,7 +4165,7 @@ export default function LessonCanvas({
               {/* B&W theme toggle */}
               <button
                 onClick={() => { setBwMode(v => !v); markDirty(); }}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${bwMode ? 'bg-slate-500/15 text-slate-200 border border-slate-400/30 shadow-[0_0_10px_rgba(148,163,184,0.15)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${bwMode ? 'bg-slate-500/15 text-slate-200 border border-slate-400/30 shadow-[0_0_10px_rgba(148,163,184,0.15)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Toggle black & white theme"
               >
                 B&W
@@ -4114,7 +4178,7 @@ export default function LessonCanvas({
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                     canvasMode === 'rough' ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.2)]' :
                     canvasMode === 'kids' ? 'bg-pink-500/15 text-pink-300 border border-pink-500/30 shadow-[0_0_10px_rgba(236,72,153,0.2)]' :
-                    'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'
+                    'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'
                   }`}
                 >
                   {canvasMode === 'rough' ? '📝 Rough' : canvasMode === 'kids' ? '🧒 Kids' : '🎯 Main'}
@@ -4124,7 +4188,7 @@ export default function LessonCanvas({
                   <>
                     <div className="fixed inset-0 z-[99]" onClick={() => setShowModeDropdown(false)} />
                     <div
-                      className="fixed z-[100] bg-[#12121f] border border-[#2a2a4e] rounded-lg shadow-xl py-1 min-w-[110px]"
+                      className="fixed z-[100] bg-[#101214] border border-[#191C20] rounded-lg shadow-xl py-1 min-w-[110px]"
                       ref={(el) => {
                         if (!el) return;
                         const btn = document.querySelector('[data-mode-btn]');
@@ -4169,7 +4233,7 @@ export default function LessonCanvas({
                   }
                   markDirty();
                 }}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageTopicVisible.has(editor.getCurrentPageId() as string) ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageTopicVisible.has(editor.getCurrentPageId() as string) ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Show/hide topic for this page"
               >
                 Topic
@@ -4186,7 +4250,7 @@ export default function LessonCanvas({
                   }
                   markDirty();
                 }}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageSubtitleVisible.has(editor.getCurrentPageId() as string) ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_10px_rgba(20,184,166,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageSubtitleVisible.has(editor.getCurrentPageId() as string) ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_10px_rgba(20,184,166,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Show/hide subtitle for this page"
               >
                 Subtitle
@@ -4195,14 +4259,14 @@ export default function LessonCanvas({
           )}
           {/* Public canvas toggle — hidden when presenting */}
           {!isPresenting && (
-            <button onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showPublicCanvas ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+            <button onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showPublicCanvas ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               <Eye className="w-3 h-3" />
               Public
             </button>
           )}
           {/* Global Audio Timeline toggle */}
           {!isPresenting && !isLocked && (
-            <button onClick={() => setShowGlobalTimeline(v => !v)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGlobalTimeline ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)]' : 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+            <button onClick={() => setShowGlobalTimeline(v => !v)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGlobalTimeline ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               <Music className="w-3 h-3" />
               Audio Sync
             </button>
@@ -4211,7 +4275,7 @@ export default function LessonCanvas({
 
         {/* Lock/Unlock — fixed, always visible, not inside scrollable area */}
         {!hideLockButton && !isPresenting && !showPublicCanvas && (
-          <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ml-2 ${isLocked ? 'bg-[#12121f] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)]'}`}>
+          <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ml-2 ${isLocked ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)]'}`}>
             {isLocked ? <><Lock className="w-3.5 h-3.5" />Locked</> : <><Unlock className="w-3.5 h-3.5" />Unlocked</>}
           </button>
         )}
@@ -4271,8 +4335,8 @@ export default function LessonCanvas({
             const tPlayAnim = isLocked && tAnim !== 'none' && (tMode === 'preload' || revealedTopicPages.has(pid));
             const sPlayAnim = isLocked && sAnim !== 'none' && (sMode === 'preload' || revealedSubtitlePages.has(pid));
             return (
-              <div className="flex-shrink-0 px-2 py-1 flex flex-col gap-2 border-b border-[#1a1a2e]" style={{
-                backgroundColor: '#0b0b16',
+              <div className="flex-shrink-0 px-2 py-1 flex flex-col gap-2 border-b border-[#191C20]" style={{
+                background: 'linear-gradient(180deg, #121416, #0B0D0F)',
                 backgroundImage: `radial-gradient(ellipse at 20% 25%, rgba(139, 92, 246, 0.06), transparent 50%), radial-gradient(ellipse at 80% 75%, rgba(6, 182, 212, 0.05), transparent 50%)`,
                 backgroundSize: '100% 100%, 100% 100%',
               }}>
@@ -4304,7 +4368,7 @@ export default function LessonCanvas({
                         <button onClick={() => { setTopicColorPickerOpen(v => !v); setSubtitleColorPickerOpen(false); }} className="ml-1 w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: tColor }} title="Change color" />
                       )}
                       {topicColorPickerOpen && !isLocked && (
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-[#1a1a2e] border border-[#2a2a4e] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-[#1a1a2e] border border-[#191C20] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <div className="text-[8px] text-slate-400 font-medium">Text</div>
                           <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
                             {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','#ffffff'].map(c => (
@@ -4321,7 +4385,7 @@ export default function LessonCanvas({
                           <select
                             value={pageTopicAnimations[pid] || 'none'}
                             onChange={(e) => { setPageTopicAnimations(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
-                            className="text-[9px] border border-[#2a2a4e] rounded px-1 py-0.5 bg-[#12121f] text-slate-300 w-full"
+                            className="text-[9px] border border-[#191C20] rounded px-1 py-0.5 bg-[#101214] text-slate-300 w-full"
                           >
                             <option value="none">None</option>
                             <option value="appear">Appear</option>
@@ -4375,7 +4439,7 @@ export default function LessonCanvas({
                         <button onClick={() => { setSubtitleColorPickerOpen(v => !v); setTopicColorPickerOpen(false); }} className="ml-1 w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: sColor }} title="Change color" />
                       )}
                       {subtitleColorPickerOpen && !isLocked && (
-                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1a2e] border border-[#2a2a4e] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1a2e] border border-[#191C20] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <div className="text-[8px] text-slate-400 font-medium">Text</div>
                           <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
                             {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','#ffffff'].map(c => (
@@ -4392,7 +4456,7 @@ export default function LessonCanvas({
                           <select
                             value={pageSubtitleAnimations[pid] || 'none'}
                             onChange={(e) => { setPageSubtitleAnimations(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
-                            className="text-[9px] border border-[#2a2a4e] rounded px-1 py-0.5 bg-[#12121f] text-slate-300 w-full"
+                            className="text-[9px] border border-[#191C20] rounded px-1 py-0.5 bg-[#101214] text-slate-300 w-full"
                           >
                             <option value="none">None</option>
                             <option value="appear">Appear</option>
@@ -4430,7 +4494,7 @@ export default function LessonCanvas({
             <CanvasEditor
               snapshot={snapshot}
               onEditorReady={handleEditorReady}
-              onSnapshotChange={handleSnapshotChange}
+              onDocumentChange={markDirty}
               onSeedCanvas={handleSeedCanvas}
               hideUi={isLocked}
             />
@@ -4462,7 +4526,7 @@ export default function LessonCanvas({
 
           {/* Destination picker — drag shape then confirm */}
           {pickingDestinationForStep && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-[#0a0a14]/95 backdrop-blur-md text-blue-100 text-xs font-medium px-4 py-2.5 rounded-lg border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-[#08090B]/95 backdrop-blur-md text-blue-100 text-xs font-medium px-4 py-2.5 rounded-lg border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]">
               <span className="text-blue-300">Drag the shape to its destination</span>
               <button
                 onClick={() => {
@@ -4534,7 +4598,7 @@ export default function LessonCanvas({
           {/* Nodes Catalog */}
           {!isLocked && showNodes && (
             <DraggableWidget defaultPosition={{ x: 16, y: 16 }} zIndex={50}>
-              <div className="bg-[#0a0a14]/95 backdrop-blur-xl rounded-xl border border-emerald-400/25 shadow-2xl shadow-emerald-500/5 overflow-hidden w-72">
+              <div className="bg-[#08090B]/95 backdrop-blur-xl rounded-xl border border-emerald-400/25 shadow-2xl shadow-emerald-500/5 overflow-hidden w-72">
                 <div data-drag-handle className="flex items-center justify-between px-3 py-2.5 border-b border-emerald-400/15 bg-emerald-500/8 cursor-grab active:cursor-grabbing">
                   <span className="text-xs font-semibold text-emerald-300 flex items-center gap-1.5">
                     <Boxes className="w-3 h-3" />
@@ -4554,7 +4618,7 @@ export default function LessonCanvas({
             <DraggableWidget defaultPosition={{ x: 16, y: 60 }} zIndex={35}>
               <div
                 data-drag-handle
-                className="flex items-center gap-1.5 px-3 py-2 bg-[#0a0a14] border border-[#1a1a2e] rounded-lg text-[10px] text-slate-400 hover:text-blue-300 hover:border-blue-500/30 hover:shadow-[0_0_8px_rgba(59,130,246,0.1)] transition-all shadow-lg cursor-grab active:cursor-grabbing"
+                className="flex items-center gap-1.5 px-3 py-2 bg-[#08090B] border border-[#191C20] rounded-lg text-[10px] text-slate-400 hover:text-blue-300 hover:border-blue-500/30 hover:shadow-[0_0_8px_rgba(59,130,246,0.1)] transition-all shadow-lg cursor-grab active:cursor-grabbing"
                 title="Click to expand timeline"
                 onMouseDown={(e) => { (e.currentTarget as any)._dragStartX = e.clientX; (e.currentTarget as any)._dragStartY = e.clientY; }}
                 onMouseUp={(e) => {
@@ -4594,7 +4658,7 @@ export default function LessonCanvas({
             ];
             return (
               <div
-                className="absolute z-[50] flex flex-col items-center gap-1.5 px-1.5 py-2 rounded-lg bg-[#12121f] border border-[#2a2a4e] shadow-xl"
+                className="absolute z-[50] flex flex-col items-center gap-1.5 px-1.5 py-2 rounded-lg bg-[#101214] border border-[#191C20] shadow-xl"
                 style={{ left: screenX, top: screenY, transform: 'translateY(-50%)' }}
               >
                 <span className="text-[8px] text-slate-500">Glow</span>
@@ -4713,7 +4777,7 @@ export default function LessonCanvas({
 
         {!isLocked && !timelineFullyCollapsed && (
           <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
-            <div className="overflow-hidden shadow-2xl border border-[#1a1a2e]" style={{ width: '85vw' }}>
+            <div className="overflow-hidden shadow-2xl border border-[#191C20]" style={{ width: '85vw' }}>
               {showGlobalTimeline ? (
                 <GlobalAudioTimeline
                   steps={animationSteps}
@@ -4767,7 +4831,7 @@ export default function LessonCanvas({
         </div>
 
         {/* Sidebar (right 15%) — always rendered for layout, content conditional */}
-        <div className="w-[15%] min-w-[180px] border-l border-[#1a1a2e] bg-[#0a0a14] flex flex-col overflow-hidden flex-shrink-0">
+        <div className="w-[15%] min-w-[180px] border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0" style={{ background: 'linear-gradient(180deg, #0D0F11, #070809)' }}>
           {showSidebar ? (
             isLocked ? (
               // Locked: always show Sub-topics
@@ -4783,10 +4847,25 @@ export default function LessonCanvas({
                 onSidebarTitleChange={(v) => { setSidebarTitle(v); markDirty(); }}
                 collapsed={false}
                 pageGlow={pageGlow}
+                excludedPages={excludedPages}
               />
             ) : sidebarCollapsed ? (
               // Unlocked + collapsed: show Pages panel
-              <PagePanel editor={editor} isLocked={isLocked} onShowTopics={() => setSidebarCollapsed(false)} />
+              <PagePanel
+                editor={editor}
+                isLocked={isLocked}
+                onShowTopics={() => setSidebarCollapsed(false)}
+                excludedPages={excludedPages}
+                onToggleExclude={(pageId) => {
+                  setExcludedPages(prev => {
+                    const next = new Set(prev);
+                    if (next.has(pageId)) next.delete(pageId);
+                    else next.add(pageId);
+                    return next;
+                  });
+                  markDirty();
+                }}
+              />
             ) : (
               // Unlocked + expanded: show Sub-topics
               <SubTopicTracker
@@ -4802,6 +4881,7 @@ export default function LessonCanvas({
                 collapsed={sidebarCollapsed}
                 onCollapsedChange={setSidebarCollapsed}
                 pageGlow={pageGlow}
+                excludedPages={excludedPages}
               />
             )
           ) : null}

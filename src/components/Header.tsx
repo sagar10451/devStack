@@ -66,7 +66,7 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
 
   return (
     <>
-    <header className="fixed top-0 left-0 right-0 z-50 bg-[#0a0a12]/95 backdrop-blur-md border-b border-[#1a1a2e]">
+    <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.10]" style={{ background: 'linear-gradient(180deg, #0D0F11 0%, #070809 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
       <div className="w-full max-w-[1600px] mx-auto px-1.5 sm:px-2 lg:px-3 py-4 flex items-center justify-between">
         {/* Logo */}
         <Link to={site.basePath || '/'} className="flex items-center gap-3 group">
@@ -91,7 +91,7 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
           {/* Search — only on landing page */}
           {showSearch && (
             <div className="relative hidden sm:block">
-              <div className="flex items-center bg-[#12121f] border border-[#2a2a4e] rounded-xl px-4 py-2.5 w-64 lg:w-80 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+              <div className="flex items-center bg-[#0B0D0F] border border-white/[0.10] rounded-xl px-4 py-2.5 w-64 lg:w-80 focus-within:border-white/[0.25] focus-within:shadow-[0_0_8px_rgba(255,255,255,0.05)] transition-all">
                 <Search className="w-4 h-4 text-gray-500 mr-2 flex-shrink-0" />
                 <input
                   type="text"
@@ -124,7 +124,7 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
           {isLocalhost && !isPresenting && (
             <button
               onClick={() => setShowAbout(true)}
-              className="flex items-center gap-2 bg-[#12121f] hover:bg-[#1a1a2e] text-gray-400 px-3 py-2.5 rounded-xl transition-colors text-sm font-medium border border-[#2a2a4e]"
+              className="flex items-center gap-2 bg-[#0B0D0F] hover:bg-[#14171A] text-gray-400 px-3 py-2.5 rounded-xl transition-colors text-sm font-medium border border-white/[0.10]"
               title="How this works"
             >
               <Info className="w-4 h-4" />

@@ -8,7 +8,7 @@ import { BookOpen, Code2 } from 'lucide-react';
 
 function PortalPicker() {
   return (
-    <div className="min-h-screen bg-[#0a0a12] flex items-center justify-center">
+    <div className="min-h-screen bg-[#050607] flex items-center justify-center">
       <div className="text-center">
         <h1 className="text-3xl font-bold text-gray-100 mb-2">Choose a Portal</h1>
         <p className="text-gray-500 mb-8">Select which content you want to explore</p>
@@ -58,7 +58,7 @@ function AppContent() {
   }
 
   return (
-    <div className={`min-h-screen bg-[#0a0a12] pt-[78px]`}>
+    <div className={`min-h-screen bg-[#050607] pt-[78px]`}>
       <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} />
       <Routes>
         <Route path="/*" element={<PortalPage searchQuery={searchQuery} onSearchChange={setSearchQuery} />} />
