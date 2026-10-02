@@ -4273,6 +4273,17 @@ export default function LessonCanvas({
                       >
                         <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mb-2">Guide Height</div>
 
+                        {/* Error if topic/subtitle present */}
+                        {(() => {
+                          const pid = editor?.getCurrentPageId() as string;
+                          const hasStrip = pid && (pageTopicVisible.has(pid) || pageSubtitleVisible.has(pid));
+                          return hasStrip ? (
+                            <div className="text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-2 mb-2">
+                              ⚠ Remove topic/subtitle first to change guide height
+                            </div>
+                          ) : null;
+                        })()}
+
                         {/* Current Screen (auto) */}
                         <div className="space-y-1 mb-2">
                           <button
@@ -4291,13 +4302,21 @@ export default function LessonCanvas({
                         {/* Saved presets */}
                         {guidePresets.length > 0 && (
                           <div className="space-y-1 mb-2">
-                            {guidePresets.map((p, pi) => (
+                            {guidePresets.map((p, pi) => {
+                              const pid = editor?.getCurrentPageId() as string;
+                              const hasStrip = pid && (pageTopicVisible.has(pid) || pageSubtitleVisible.has(pid));
+                              return (
                               <div key={pi} className="flex items-center gap-1 group">
                                 <button
-                                  onClick={() => { setGuideCustomH(p.h); markDirty(); }}
+                                  onClick={() => {
+                                    if (hasStrip) return; // blocked — show error above
+                                    setGuideCustomH(p.h); markDirty();
+                                  }}
                                   className={`flex-1 text-left text-[10px] px-2.5 py-2 rounded-lg transition-colors flex items-center justify-between ${
                                     guideCustomH === p.h
                                       ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                                      : hasStrip
+                                      ? 'text-slate-600 border border-transparent cursor-not-allowed'
                                       : 'text-slate-300 hover:bg-white/[0.04] border border-transparent hover:border-[#191C20]'
                                   }`}
                                 >
@@ -4312,14 +4331,21 @@ export default function LessonCanvas({
                                   className="text-[9px] text-red-400/50 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1"
                                 >✕</button>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
 
                         <div className="border-t border-[#191C20] my-2" />
 
                         {/* Add new preset */}
-                        {!showAddPreset ? (
+                        {(() => {
+                          const pid = editor?.getCurrentPageId() as string;
+                          const hasStrip = pid && (pageTopicVisible.has(pid) || pageSubtitleVisible.has(pid));
+                          if (hasStrip && !showAddPreset) return (
+                            <div className="text-[9px] text-slate-600 text-center py-1">Remove topic/subtitle to add preset</div>
+                          );
+                          return !showAddPreset ? (
                           <button
                             onClick={() => { setShowAddPreset(true); setNewPresetH(String(guideCustomH || autoGuidePageH)); }}
                             className="w-full text-[10px] font-medium text-cyan-400 hover:text-cyan-300 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/15 rounded-lg px-2.5 py-1.5 transition-colors text-center"
@@ -4371,7 +4397,8 @@ export default function LessonCanvas({
                               </button>
                             </div>
                           </div>
-                        )}
+                        );
+                        })()}
                       </div>
                     </>
                   )}
@@ -4939,8 +4966,11 @@ export default function LessonCanvas({
             const screenH = fullscreenTotalH - toolbarHeight - stripHeight - 47;
             // Width: ALWAYS = screen width / 0.75 (fixed, never changes)
             const guidePageW = screenW / 0.75;
-            // Height: custom (page coords) or auto
-            const guidePageH = guideCustomH ? guideCustomH : screenH / 0.75;
+            // Height: custom value is TOTAL space in page units (same unit as autoGuidePageH).
+            // Strips eat into it — convert strip from screen pixels to page units first.
+            const guidePageH = guideCustomH
+              ? guideCustomH - (stripHeight / 0.75)   // custom minus strip (converted to page units)
+              : screenH / 0.75;                        // auto: screenH already has strip subtracted
             const cam = tldrawCamera;
 
             const startGuideDrag = (e: React.MouseEvent, idx: number) => {
