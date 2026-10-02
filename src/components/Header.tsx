@@ -66,7 +66,7 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
 
   return (
     <>
-    <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.10]" style={{ background: 'linear-gradient(180deg, #0D0F11 0%, #070809 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
+    <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.10]" style={{ background: '#0B0D0F', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
       <div className="w-full max-w-[1600px] mx-auto px-1.5 sm:px-2 lg:px-3 py-4 flex items-center justify-between">
         {/* Logo */}
         <Link to={site.basePath || '/'} className="flex items-center gap-3 group">

@@ -181,6 +181,8 @@ export interface LessonCanvasData {
   guideBordersMap?: Record<string, { x: number; y: number }[]>;
   /** Number of guide borders (shared across pages) */
   guideCount?: number;
+  /** Custom guide height in page coordinates */
+  guideCustomH?: number;
   /** Legacy single-page guide borders (migration) */
   guideBorders?: { x: number; y: number }[];
   /** Per-image glow colors (keyed by shapeId) */

@@ -7,6 +7,7 @@ import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
 import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig } from './types';
 import SubTopicTracker from './SubTopicTracker';
+import RecordingGuide from './RecordingGuide';
 import PagePanel from './PagePanel';
 import { applyIdleAnimation } from './animationEngine';
 import { applyStepAnimation, clearStepAnimations, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
@@ -234,10 +235,41 @@ export default function LessonCanvas({
   const [guideCount, setGuideCount] = useState<number>(
     initialData?.guideCount ?? (initialData?.guideBorders?.length ?? 1)
   );
+  // Guide height presets (width is always auto = screen width at 75%)
+  type GuidePreset = { name: string; h: number };
+  const [guidePresets, setGuidePresets] = useState<GuidePreset[]>([]);
+  const [guideCustomH, setGuideCustomH] = useState<number | null>(initialData?.guideCustomH || null); // null = auto
+  const [showGuidePanel, setShowGuidePanel] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [newPresetH, setNewPresetH] = useState('');
+  const [showAddPreset, setShowAddPreset] = useState(false);
+
+  // Load guide presets on mount
+  useEffect(() => {
+    fetch('/__load-guide-presets').then(r => r.json()).then((data: GuidePreset[]) => {
+      if (Array.isArray(data)) setGuidePresets(data);
+    }).catch(() => {});
+  }, []);
+
+  const saveGuidePresets = (presets: GuidePreset[]) => {
+    setGuidePresets(presets);
+    fetch('/__save-guide-presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(presets) }).catch(() => {});
+  };
+
+  // Auto guide height in page coordinates (no strip subtraction — strip varies per page)
+  const getAutoGuidePageH = () => {
+    const fullscreenTotalH = window.innerHeight + 78;
+    const toolbarHeight = 47;
+    const screenH = fullscreenTotalH - toolbarHeight - 47;
+    return Math.round(screenH / 0.75);
+  };
+  const autoGuidePageH = getAutoGuidePageH();
   const guideBordersMapRef = useRef(guideBordersMap);
   guideBordersMapRef.current = guideBordersMap;
   const guideCountRef = useRef(guideCount);
   guideCountRef.current = guideCount;
+  const guideCustomHRef = useRef(guideCustomH);
+  guideCustomHRef.current = guideCustomH;
 
   // Helper: get guide borders for the current page, falling back to defaults
   const getGuideBordersForPage = (pageId: string): { x: number; y: number }[] => {
@@ -673,7 +705,17 @@ export default function LessonCanvas({
               const sMode = pageSubtitleModes[pid] || 'preload';
               const topicOk = tMode === 'preload' || revealedTopicPages.has(pid) || !pageTopicVisible.has(pid);
               const subtitleOk = sMode === 'preload' || revealedSubtitlePages.has(pid) || !pageSubtitleVisible.has(pid);
-              const gateOpen = currentStep >= 0 && topicOk && subtitleOk;
+              // Sticky notes should appear with canvas elements, not with topic/subtitle
+              // Check that currentStep is at or past the first real step on this page
+              let firstStepOnPage = -1;
+              for (let si = 0; si < animationSteps.length; si++) {
+                if ((animationSteps[si].pageId || 'page:page') === pid) {
+                  firstStepOnPage = si;
+                  break;
+                }
+              }
+              const contentLoaded = firstStepOnPage >= 0 && currentStep >= firstStepOnPage;
+              const gateOpen = currentStep >= 0 && topicOk && subtitleOk && contentLoaded;
               if (gateOpen) {
                 el.style.visibility = '';
                 el.style.opacity = '';
@@ -705,7 +747,7 @@ export default function LessonCanvas({
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [editor, roughMode, helperShapeIds, isLocked, currentStep, revealedTopicPages, revealedSubtitlePages, pageTopicModes, pageSubtitleModes, pageTopicVisible, pageSubtitleVisible]);
+  }, [editor, roughMode, helperShapeIds, isLocked, currentStep, revealedTopicPages, revealedSubtitlePages, pageTopicModes, pageSubtitleModes, pageTopicVisible, pageSubtitleVisible, animationSteps]);
 
   // ─── Notify tldraw when layout changes (strip visibility) ───────────────
   useEffect(() => {
@@ -963,13 +1005,8 @@ export default function LessonCanvas({
       }
     };
 
-    let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedCleanup = () => {
-      if (cleanupTimer) clearTimeout(cleanupTimer);
-      cleanupTimer = setTimeout(cleanup, 100);
-    };
-    const unsub = editor.store.listen(debouncedCleanup, { scope: 'document' });
-    return () => { unsub(); if (cleanupTimer) clearTimeout(cleanupTimer); };
+    const unsub = editor.store.listen(cleanup, { scope: 'document' });
+    return () => unsub();
   }, [editor, isLocked, subTopicLabels, shapeAnimations, diagramData]);
 
   // ─── Auto-add new shapes to timeline ─────────────────────────────────────
@@ -1127,17 +1164,12 @@ export default function LessonCanvas({
       knownShapeIdsRef.current = new Set(shapes.map(s => s.id as string));
     };
 
-    let detectTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedDetect = () => {
-      if (detectTimer) clearTimeout(detectTimer);
-      detectTimer = setTimeout(detectNewShapes, 100);
-    };
-    const unsub = editor.store.listen(debouncedDetect, { scope: 'document' });
+    const unsub = editor.store.listen(detectNewShapes, { scope: 'document' });
 
     // Also listen for page switches
     const unsubSession = editor.store.listen(handlePageSwitch, { scope: 'session' });
 
-    return () => { unsub(); unsubSession(); if (detectTimer) clearTimeout(detectTimer); };
+    return () => { unsub(); unsubSession(); };
   }, [editor, isLocked]);
 
   // ─── Sync glow-notes line steps when box content changes ────────────────
@@ -1222,14 +1254,8 @@ export default function LessonCanvas({
       markDirty();
     };
 
-    // Run on store changes (shape prop updates) — debounced
-    let glowTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedSync = () => {
-      if (glowTimer) clearTimeout(glowTimer);
-      glowTimer = setTimeout(syncGlowLines, 100);
-    };
-    const unsub = editor.store.listen(debouncedSync, { scope: 'document' });
-    return () => { unsub(); if (glowTimer) clearTimeout(glowTimer); };
+    const unsub = editor.store.listen(syncGlowLines, { scope: 'document' });
+    return () => unsub();
   }, [editor, isLocked]);
 
   // ─── Auto-add new RF nodes/edges to timeline ──────────────────────────────
@@ -1628,6 +1654,7 @@ export default function LessonCanvas({
       bwMode,
       guideBordersMap,
       guideCount,
+      guideCustomH: guideCustomH || undefined,
       imageGlowColors,
       roughMode: roughMode || undefined,
       canvasMode: canvasMode !== 'main' ? canvasMode : undefined,
@@ -1636,7 +1663,7 @@ export default function LessonCanvas({
       globalAudioFile: globalAudioFileName || undefined,
       globalAudioDurations: Object.keys(globalAudioDurations).length > 0 ? globalAudioDurations : undefined,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -1712,6 +1739,7 @@ export default function LessonCanvas({
         bwMode,
         guideBordersMap: guideBordersMapRef.current,
         guideCount: guideCountRef.current,
+        guideCustomH: guideCustomHRef.current || undefined,
         imageGlowColors: imageGlowColorsRef.current,
         roughMode: roughModeRef.current || undefined,
         canvasMode: canvasModeRef.current !== 'main' ? canvasModeRef.current : undefined,
@@ -3450,12 +3478,13 @@ export default function LessonCanvas({
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0);
-    return c.toDataURL('image/jpeg', 0.92);
+    return c.toDataURL('image/jpeg', 0.98);
   };
 
   const handleExportPdf = useCallback(async () => {
     if (!editor || isExportingPdf) return;
     setIsExportingPdf(true);
+    let savedGuideBorder = false;
 
     try {
       // Enter fullscreen for full canvas capture
@@ -3469,6 +3498,12 @@ export default function LessonCanvas({
       const { jsPDF } = await import('jspdf');
       const canvasArea = document.getElementById('canvas-export-area');
       if (!canvasArea) { setIsExportingPdf(false); return; }
+
+      // Temporarily hide guide borders and cursor during capture
+      savedGuideBorder = showGuideBorder;
+      setShowGuideBorder(false);
+      document.body.style.cursor = 'none';
+      await new Promise(r => setTimeout(r, 100));
 
       const pages = editor.getPages();
       const originalPageId = editor.getCurrentPageId() as string;
@@ -3487,6 +3522,15 @@ export default function LessonCanvas({
         if (cl?.contains('tlui-navigation-panel')) return false;
         if (cl?.contains('tlui-menu-zone')) return false;
         if (node.className && typeof node.className === 'string' && (node.className.includes('tlui-navigation') || node.className.includes('tlui-toolbar') || node.className.includes('tlui-style-panel'))) return false;
+        // Hide guide border overlays
+        if (node.getAttribute('key')?.startsWith('guide-')) return false;
+        if (node.style?.borderTop?.includes('rgba(34, 211, 238') || node.style?.borderBottom?.includes('rgba(34, 211, 238') || node.style?.borderLeft?.includes('rgba(34, 211, 238') || node.style?.borderRight?.includes('rgba(34, 211, 238')) return false;
+        if (node.textContent?.startsWith('#') && node.style?.color?.includes('rgba(34, 211, 238')) return false;
+        // Hide sticky note delete button
+        if (node.getAttribute('title') === 'Remove sticky note') return false;
+        // Hide cursor elements
+        if (cl?.contains('tl-cursor') || cl?.contains('tl-collaborator-cursor')) return false;
+        if (node.style?.cursor === 'none' || cl?.contains('tl-cursor-hint')) return false;
         return true;
       };
 
@@ -3501,6 +3545,9 @@ export default function LessonCanvas({
 
       for (const page of pages) {
         const pageId = page.id as string;
+
+        // Skip excluded (hidden) pages
+        if (excludedPagesRef.current.has(pageId)) continue;
 
         // Switch to page
         if (pageId !== (editor.getCurrentPageId() as string)) {
@@ -3558,8 +3605,8 @@ export default function LessonCanvas({
             editor.setCamera(firstStep.cameraPosition, { force: true });
           }
           await new Promise(r => setTimeout(r, 400));
-          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
-          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0B0D0F', pixelRatio: 3, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0B0D0F');
           slideImages.push(jpegUrl);
           continue;
         }
@@ -3581,8 +3628,8 @@ export default function LessonCanvas({
             stripEl.style.display = 'none';
           }
 
-          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
-          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0B0D0F', pixelRatio: 3, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0B0D0F');
           slideImages.push(jpegUrl);
 
           // Restore strip
@@ -3598,25 +3645,67 @@ export default function LessonCanvas({
       }
       editor.setCamera(originalCam, { force: true });
 
-      // Build PDF
+      // Build PDF — use actual image dimensions for correct aspect ratio
       if (slideImages.length > 0) {
-        const canvasRect = canvasArea.getBoundingClientRect();
-        const pdfWidth = canvasRect.width;
-        const pdfHeight = canvasRect.height;
+        // Load first image to get actual pixel dimensions
+        const getImageDims = (dataUrl: string): Promise<{ w: number; h: number }> => {
+          return new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => resolve({ w: img.width, h: img.height });
+            img.src = dataUrl;
+          });
+        };
+
+        const firstDims = await getImageDims(slideImages[0]);
+        // Use image aspect ratio for PDF pages (in points, 72 DPI)
+        const pdfW = firstDims.w / 3; // scale down from 3x capture to PDF points
+        const pdfH = firstDims.h / 3;
 
         const pdf = new jsPDF({
-          orientation: pdfWidth > pdfHeight ? 'landscape' : 'portrait',
+          orientation: pdfW > pdfH ? 'landscape' : 'portrait',
           unit: 'px',
-          format: [pdfWidth, pdfHeight],
+          format: [pdfW, pdfH],
         });
 
         for (let i = 0; i < slideImages.length; i++) {
-          if (i > 0) pdf.addPage([pdfWidth, pdfHeight], pdfWidth > pdfHeight ? 'landscape' : 'portrait');
-          pdf.addImage(slideImages[i], 'JPEG', 0, 0, pdfWidth, pdfHeight);
+          const dims = i === 0 ? firstDims : await getImageDims(slideImages[i]);
+          const pageW = dims.w / 3;
+          const pageH = dims.h / 3;
+
+          if (i > 0) pdf.addPage([pageW, pageH], pageW > pageH ? 'landscape' : 'portrait');
+
+          // Fit image to page maintaining aspect ratio
+          const currentPageW = i === 0 ? pdfW : pageW;
+          const currentPageH = i === 0 ? pdfH : pageH;
+          const imgAspect = dims.w / dims.h;
+          const pageAspect = currentPageW / currentPageH;
+
+          let drawW = currentPageW;
+          let drawH = currentPageH;
+          let drawX = 0;
+          let drawY = 0;
+
+          if (imgAspect > pageAspect) {
+            // Image wider — fit to width, center vertically
+            drawW = currentPageW;
+            drawH = currentPageW / imgAspect;
+            drawY = (currentPageH - drawH) / 2;
+          } else {
+            // Image taller — fit to height, center horizontally
+            drawH = currentPageH;
+            drawW = currentPageH * imgAspect;
+            drawX = (currentPageW - drawW) / 2;
+          }
+
+          pdf.addImage(slideImages[i], 'JPEG', drawX, drawY, drawW, drawH);
         }
 
         pdf.save(`canvas-${topicSlug}-${subtopicSlug}.pdf`);
       }
+
+      // Restore guide borders and cursor
+      setShowGuideBorder(savedGuideBorder);
+      document.body.style.cursor = '';
 
       // Exit fullscreen if we entered it
       if (!wasFullscreen && document.fullscreenElement) {
@@ -3624,11 +3713,13 @@ export default function LessonCanvas({
       }
     } catch (err) {
       console.error('PDF export failed:', err);
+      setShowGuideBorder(savedGuideBorder || false);
+      document.body.style.cursor = '';
       if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch { /* */ } }
     } finally {
       setIsExportingPdf(false);
     }
-  }, [editor, isExportingPdf, topicSlug, subtopicSlug, getGuideBordersForPage, guideCount, pageTopicVisible, pageSubtitleVisible]);
+  }, [editor, isExportingPdf, topicSlug, subtopicSlug, getGuideBordersForPage, guideCount, pageTopicVisible, pageSubtitleVisible, showGuideBorder]);
 
   const [isExportingPpt, setIsExportingPpt] = useState(false);
 
@@ -3666,6 +3757,15 @@ export default function LessonCanvas({
         if (cl?.contains('tlui-navigation-panel')) return false;
         if (cl?.contains('tlui-menu-zone')) return false;
         if (node.className && typeof node.className === 'string' && (node.className.includes('tlui-navigation') || node.className.includes('tlui-toolbar') || node.className.includes('tlui-style-panel'))) return false;
+        // Hide guide border overlays
+        if (node.getAttribute('key')?.startsWith('guide-')) return false;
+        if (node.style?.borderTop?.includes('rgba(34, 211, 238') || node.style?.borderBottom?.includes('rgba(34, 211, 238') || node.style?.borderLeft?.includes('rgba(34, 211, 238') || node.style?.borderRight?.includes('rgba(34, 211, 238')) return false;
+        if (node.textContent?.startsWith('#') && node.style?.color?.includes('rgba(34, 211, 238')) return false;
+        // Hide sticky note delete button
+        if (node.getAttribute('title') === 'Remove sticky note') return false;
+        // Hide cursor elements
+        if (cl?.contains('tl-cursor') || cl?.contains('tl-collaborator-cursor')) return false;
+        if (node.style?.cursor === 'none' || cl?.contains('tl-cursor-hint')) return false;
         return true;
       };
 
@@ -3735,8 +3835,8 @@ export default function LessonCanvas({
             editor.setCamera(firstStep.cameraPosition, { force: true });
           }
           await new Promise(r => setTimeout(r, 400));
-          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
-          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0B0D0F', pixelRatio: 3, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0B0D0F');
           slideImages.push(jpegUrl);
           continue;
         }
@@ -3753,8 +3853,8 @@ export default function LessonCanvas({
             stripEl.style.display = 'none';
           }
 
-          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0b0b16', pixelRatio: 1.5, filter: imageFilter });
-          const jpegUrl = await pngToJpeg(dataUrl, '#0b0b16');
+          const dataUrl = await toPng(canvasArea, { backgroundColor: '#0B0D0F', pixelRatio: 3, filter: imageFilter });
+          const jpegUrl = await pngToJpeg(dataUrl, '#0B0D0F');
           slideImages.push(jpegUrl);
 
           if (!isFirstGuide && stripEl) {
@@ -3853,8 +3953,10 @@ export default function LessonCanvas({
 
   return (
     <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}>
+      {/* 16:9 Recording Guide — visible only in presenting mode before first step */}
+      <RecordingGuide visible={isPresenting && isLocked && currentStep === -1 && revealedTopicPages.size === 0} />
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
-      <div className="flex items-center px-4 py-3 border-b border-white/[0.12] flex-shrink-0 min-w-0" style={{ background: 'linear-gradient(180deg, #121416, #0B0D0F)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
+      <div className="flex items-center px-4 py-3 border-b border-white/[0.12] flex-shrink-0 min-w-0" style={{ background: '#0B0D0F', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
         {/* Fixed left: Back + title (title hidden when unlocked for more button space) */}
         <div className="flex items-center gap-3 flex-shrink-0 mr-3" style={{ maxWidth: isLocked ? undefined : undefined }}>
           <Link to={backPath} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors whitespace-nowrap">
@@ -4125,15 +4227,17 @@ export default function LessonCanvas({
                 <FlipHorizontal2 className="w-3 h-3" />
                 Flip
               </button>
-              {/* Guide border toggle + add/remove */}
-              <button
-                onClick={() => setShowGuideBorder(v => !v)}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuideBorder ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-                title="Show/hide presentation guide borders (visible area at 75% zoom)"
-              >
-                <Frame className="w-3 h-3" />
-                Guide {guideCount > 1 ? `(${guideCount})` : ''}
-              </button>
+              {/* Guide border toggle + add/remove + dimension panel */}
+              <div className="relative flex-shrink-0">
+                <button
+                  onClick={() => setShowGuideBorder(v => !v)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showGuideBorder ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+                  title="Show/hide presentation guide borders (visible area at 75% zoom)"
+                >
+                  <Frame className="w-3 h-3" />
+                  Guide {guideCount > 1 ? `(${guideCount})` : ''}
+                </button>
+              </div>
               {showGuideBorder && (
                 <>
                   <button
@@ -4148,17 +4252,143 @@ export default function LessonCanvas({
                       title="Remove last guide border"
                     >−</button>
                   )}
+                  {/* Height settings button */}
+                  <button
+                    onClick={() => setShowGuidePanel(v => !v)}
+                    className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuidePanel ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30' : 'bg-[#101214] text-slate-400 border border-[#191C20] hover:text-cyan-300 hover:border-cyan-500/30'}`}
+                    title="Guide height presets"
+                  >
+                    H:{guideCustomH || autoGuidePageH}
+                  </button>
+                  {/* Height panel dropdown */}
+                  {showGuidePanel && (
+                    <>
+                      <div className="fixed inset-0 z-[99]" onClick={() => { setShowGuidePanel(false); setShowAddPreset(false); }} />
+                      <div className="fixed z-[100] bg-[#101214] border border-[#191C20] rounded-xl shadow-2xl p-3 min-w-[240px]"
+                        ref={(el) => {
+                          if (!el) return;
+                          const btn = el.parentElement?.querySelector('[title="Guide height presets"]');
+                          if (btn) { const r = btn.getBoundingClientRect(); el.style.top = `${r.bottom + 6}px`; el.style.left = `${r.left}px`; }
+                        }}
+                      >
+                        <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mb-2">Guide Height</div>
+
+                        {/* Current Screen (auto) */}
+                        <div className="space-y-1 mb-2">
+                          <button
+                            onClick={() => { setGuideCustomH(null); markDirty(); }}
+                            className={`w-full text-left text-[10px] px-2.5 py-2 rounded-lg transition-colors flex items-center justify-between ${
+                              !guideCustomH
+                                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                                : 'text-slate-300 hover:bg-white/[0.04] border border-transparent hover:border-[#191C20]'
+                            }`}
+                          >
+                            <span className="font-medium">Current Screen</span>
+                            <span className="text-slate-500">{autoGuidePageH}</span>
+                          </button>
+                        </div>
+
+                        {/* Saved presets */}
+                        {guidePresets.length > 0 && (
+                          <div className="space-y-1 mb-2">
+                            {guidePresets.map((p, pi) => (
+                              <div key={pi} className="flex items-center gap-1 group">
+                                <button
+                                  onClick={() => { setGuideCustomH(p.h); markDirty(); }}
+                                  className={`flex-1 text-left text-[10px] px-2.5 py-2 rounded-lg transition-colors flex items-center justify-between ${
+                                    guideCustomH === p.h
+                                      ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                                      : 'text-slate-300 hover:bg-white/[0.04] border border-transparent hover:border-[#191C20]'
+                                  }`}
+                                >
+                                  <span className="font-medium">{p.name}</span>
+                                  <span className="text-slate-500">{p.h}</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    saveGuidePresets(guidePresets.filter((_, i) => i !== pi));
+                                    if (guideCustomH === p.h) setGuideCustomH(null);
+                                  }}
+                                  className="text-[9px] text-red-400/50 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                                >✕</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="border-t border-[#191C20] my-2" />
+
+                        {/* Add new preset */}
+                        {!showAddPreset ? (
+                          <button
+                            onClick={() => { setShowAddPreset(true); setNewPresetH(String(guideCustomH || autoGuidePageH)); }}
+                            className="w-full text-[10px] font-medium text-cyan-400 hover:text-cyan-300 bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/15 rounded-lg px-2.5 py-1.5 transition-colors text-center"
+                          >
+                            + Add Preset
+                          </button>
+                        ) : (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={newPresetName}
+                              onChange={(e) => setNewPresetName(e.target.value)}
+                              placeholder="Name (e.g. MacBook Pro)"
+                              className="w-full text-[10px] bg-[#08090B] border border-[#191C20] rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-cyan-500/40"
+                              onKeyDown={(e) => e.stopPropagation()}
+                              autoFocus
+                            />
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-500">Height:</span>
+                              <input
+                                type="number"
+                                value={newPresetH}
+                                onChange={(e) => setNewPresetH(e.target.value)}
+                                placeholder="Height"
+                                className="w-24 text-[10px] bg-[#08090B] border border-[#191C20] rounded-lg px-2 py-1.5 text-white outline-none focus:border-cyan-500/40"
+                                onKeyDown={(e) => e.stopPropagation()}
+                              />
+                              <span className="text-[9px] text-slate-600">page units</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  const h = Number(newPresetH);
+                                  if (!newPresetName.trim() || h <= 0) return;
+                                  saveGuidePresets([...guidePresets, { name: newPresetName.trim(), h }]);
+                                  setGuideCustomH(h); markDirty();
+                                  setNewPresetName(''); setNewPresetH('');
+                                  setShowAddPreset(false);
+                                }}
+                                className="flex-1 text-[9px] font-semibold text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded-lg px-2 py-1.5 hover:bg-cyan-500/20 transition-colors text-center"
+                              >
+                                Save & Apply
+                              </button>
+                              <button
+                                onClick={() => { setShowAddPreset(false); setNewPresetName(''); setNewPresetH(''); }}
+                                className="text-[9px] text-slate-500 hover:text-slate-300 px-2 py-1.5"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </>
               )}
               {/* 75% zoom button */}
               <button
                 onClick={() => {
                   if (!editor) return;
-                  const cam = editor.getCamera();
-                  editor.setCamera({ ...cam, z: 0.75 }, { force: true, animation: { duration: 300 } });
+                  const pid = editor.getCurrentPageId() as string;
+                  const pageBorders = getGuideBordersForPage(pid);
+                  const guide = pageBorders[0] || { x: 0, y: 0 };
+                  // Position camera so guide top-left aligns with viewport top-left at 75% zoom
+                  editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true, animation: { duration: 300 } });
                 }}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
-                title="Set zoom to 75%"
+                title="Set zoom to 75% and frame guide"
               >
                 75%
               </button>
@@ -4336,7 +4566,7 @@ export default function LessonCanvas({
             const sPlayAnim = isLocked && sAnim !== 'none' && (sMode === 'preload' || revealedSubtitlePages.has(pid));
             return (
               <div className="flex-shrink-0 px-2 py-1 flex flex-col gap-2 border-b border-[#191C20]" style={{
-                background: 'linear-gradient(180deg, #121416, #0B0D0F)',
+                background: '#0B0D0F',
                 backgroundImage: `radial-gradient(ellipse at 20% 25%, rgba(139, 92, 246, 0.06), transparent 50%), radial-gradient(ellipse at 80% 75%, rgba(6, 182, 212, 0.05), transparent 50%)`,
                 backgroundSize: '100% 100%, 100% 100%',
               }}>
@@ -4707,8 +4937,10 @@ export default function LessonCanvas({
             else if (hasSubtitle) stripHeight = stripContainerPy + subtitleLineH + 10;
 
             const screenH = fullscreenTotalH - toolbarHeight - stripHeight - 47;
-            const guideW = screenW / 0.75;
-            const guideH = screenH / 0.75;
+            // Width: ALWAYS = screen width / 0.75 (fixed, never changes)
+            const guidePageW = screenW / 0.75;
+            // Height: custom (page coords) or auto
+            const guidePageH = guideCustomH ? guideCustomH : screenH / 0.75;
             const cam = tldrawCamera;
 
             const startGuideDrag = (e: React.MouseEvent, idx: number) => {
@@ -4736,8 +4968,8 @@ export default function LessonCanvas({
             return currentPageBorders.map((guide, idx) => {
               const screenX = (guide.x + cam.x) * cam.z;
               const screenY = (guide.y + cam.y) * cam.z;
-              const screenWPx = guideW * cam.z;
-              const screenHPx = guideH * cam.z;
+              const screenWPx = guidePageW * cam.z;
+              const screenHPx = guidePageH * cam.z;
               return (
               <div
                 key={`guide-${idx}`}
@@ -4831,7 +5063,7 @@ export default function LessonCanvas({
         </div>
 
         {/* Sidebar (right 15%) — always rendered for layout, content conditional */}
-        <div className="w-[15%] min-w-[180px] border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0" style={{ background: 'linear-gradient(180deg, #0D0F11, #070809)' }}>
+        <div className="w-[15%] min-w-[180px] border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0" style={{ background: '#0B0D0F' }}>
           {showSidebar ? (
             isLocked ? (
               // Locked: always show Sub-topics

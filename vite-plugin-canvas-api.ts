@@ -16,6 +16,50 @@ export function canvasApiPlugin(): Plugin {
   return {
     name: 'canvas-api',
     configureServer(server) {
+      // ─── Guide presets (global, shared across canvases) ───────────────
+      const presetsPath = join(process.cwd(), 'data', 'guide-presets.json');
+
+      server.middlewares.use('/__save-guide-presets', (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const presets = JSON.parse(body);
+            const dir = join(process.cwd(), 'data');
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+            writeFileSync(presetsPath, JSON.stringify(presets, null, 2), 'utf-8');
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: true }));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: false, error: err.message }));
+          }
+        });
+      });
+
+      server.middlewares.use('/__load-guide-presets', (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        try {
+          if (existsSync(presetsPath)) {
+            const data = readFileSync(presetsPath, 'utf-8');
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(data);
+          } else {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end('[]');
+          }
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+
       // POST /__save-public-canvas
       // Body: { siteId, topicSlug, subtopicSlug, data }
       server.middlewares.use('/__save-public-canvas', (req, res) => {

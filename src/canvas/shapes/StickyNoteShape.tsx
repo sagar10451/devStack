@@ -34,6 +34,52 @@ declare module 'tldraw' {
 
 type IStickyNoteShape = TLShape<typeof STICKY_NOTE_TYPE>;
 
+// ─── Capitalize first letter helper ───────────────────────────────────────────
+function capitalize(s: string): string {
+  const trimmed = s.trim();
+  if (!trimmed) return trimmed;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+// ─── Formatted content: parses "something = meaning" lines ───────────────────
+function FormattedStickyContent({ content }: { content: string }) {
+  const lines = content.split('\n');
+
+  return (
+    <div>
+      {lines.map((line, i) => {
+        // Match: anything = anything (with flexible spacing around =)
+        const eqIdx = line.indexOf('=');
+        const isDefinition = eqIdx > 0 && eqIdx < line.length - 1;
+
+        return (
+          <div key={i}>
+            {/* Separator line between definitions (not before first) */}
+            {i > 0 && lines[i - 1].trim() !== '' && line.trim() !== '' && (
+              <div style={{ borderBottom: '1px solid rgba(0,0,0,0.1)', margin: '6px 0' }} />
+            )}
+            {isDefinition ? (
+              <span>
+                {/* Term — underlined with color */}
+                <span style={{ borderBottom: '2px solid #c2410c', paddingBottom: 1, fontWeight: 700, color: '#92400e' }}>
+                  {capitalize(line.slice(0, eqIdx))}
+                </span>
+                <span style={{ color: '#666', margin: '0 4px' }}>=</span>
+                {/* Meaning — capitalize */}
+                <span style={{ fontWeight: 500 }}>
+                  {capitalize(line.slice(eqIdx + 1))}
+                </span>
+              </span>
+            ) : (
+              <span>{line.trim() ? capitalize(line) : '\u00A0'}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Sticky Note View Component ──────────────────────────────────────────────
 
 function StickyNoteView({
@@ -203,7 +249,7 @@ function StickyNoteView({
                 background: 'rgba(0, 0, 0, 0.03)',
               }}
             >
-              <span style={{ fontSize: 11, color: '#555', fontWeight: 700, fontFamily: 'Caveat, sans-serif' }}>Sticky Note</span>
+              <span style={{ fontSize: 11, color: '#555', fontWeight: 700, fontFamily: 'Inter, Noto Sans Devanagari, sans-serif' }}>Sticky Note</span>
               <div style={{ flex: 1 }} />
               <button
                 onClick={handleSave}
@@ -237,7 +283,7 @@ function StickyNoteView({
                 padding: '16px 20px',
                 fontSize: 22,
                 lineHeight: 1.4,
-                fontFamily: "'Caveat', sans-serif",
+                fontFamily: "'Inter', 'Noto Sans Devanagari', sans-serif",
                 fontWeight: 600,
               }}
             />
@@ -265,7 +311,7 @@ function StickyNoteView({
                 color: '#333',
                 fontSize: 22,
                 lineHeight: 1.4,
-                fontFamily: "'Caveat', sans-serif",
+                fontFamily: "'Inter', 'Noto Sans Devanagari', sans-serif",
                 fontWeight: 600,
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
@@ -279,7 +325,7 @@ function StickyNoteView({
                 color: '#333',
                 fontSize: 22,
                 lineHeight: 1.4,
-                fontFamily: "'Caveat', sans-serif",
+                fontFamily: "'Inter', 'Noto Sans Devanagari', sans-serif",
                 fontWeight: 600,
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
@@ -288,7 +334,9 @@ function StickyNoteView({
                 width: `${100 / scale}%`,
               }}
             >
-            {content || (
+            {content ? (
+              <FormattedStickyContent content={content} />
+            ) : (
               <span style={{ color: 'rgba(0, 0, 0, 0.25)', fontStyle: 'italic' }}>
                 Double-click to write...
               </span>
