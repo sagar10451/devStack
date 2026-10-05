@@ -14,6 +14,7 @@ import { applyStepAnimation, clearStepAnimations, applyBlinkAnimation, applyMove
 import type { MoveRecord } from './stepAnimations';
 import { usePresentation } from '../data/presentationContext';
 import LaserPointer from '../components/LaserPointer';
+import LaserSyncTimeline from './LaserSyncTimeline';
 import DiagramEditor from './diagram/DiagramEditor';
 import DiagramToolbar from './diagram/DiagramToolbar';
 import DraggableWidget from './DraggableWidget';
@@ -148,6 +149,8 @@ export default function LessonCanvas({
   const [timelineFullyCollapsed, setTimelineFullyCollapsed] = useState(false); // true = show Pages, false = show Sub-topics
   const [shapeAnimations, setShapeAnimations] = useState<Record<string, ShapeAnimationConfig>>(initialData?.shapeAnimations || {});
   const [currentStep, setCurrentStep] = useState(-1);
+  const currentStepRef = useRef(currentStep);
+  currentStepRef.current = currentStep;
   // Track which virtual topic/subtitle steps have been revealed per page
   const [revealedTopicPages, setRevealedTopicPages] = useState<Set<string>>(new Set());
   const [revealedSubtitlePages, setRevealedSubtitlePages] = useState<Set<string>>(new Set());
@@ -200,6 +203,18 @@ export default function LessonCanvas({
   const isAudioDrivenRef = useRef(false);
   const [audioCountdown, setAudioCountdown] = useState<number | null>(null); // null = no countdown, number = seconds remaining
   const audioCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null); // true when presentation is auto-advancing via global audio
+
+  // ─── Laser Sync state ──────────────────────────────────────────────────
+  const [showLaserTimeline, setShowLaserTimeline] = useState(false);
+  const [laserStrokes, setLaserStrokes] = useState<Record<string, import('./types').LaserStroke[]>>(initialData?.laserStrokes || {});
+  const laserStrokesRef = useRef(laserStrokes);
+  laserStrokesRef.current = laserStrokes;
+  const [laserTimings, setLaserTimings] = useState<Record<string, number>>(initialData?.laserTimings || {});
+  const laserTimingsRef = useRef(laserTimings);
+  laserTimingsRef.current = laserTimings;
+  // Track which pages had laser drawn during current presenting session
+  const laserDrawnPagesRef = useRef<Set<string>>(new Set());
+  const laserSessionStrokesRef = useRef<Record<string, import('./types').LaserStroke[]>>({});
 
   // ─── Background music state ─────────────────────────────────────────────
   const bgMusicRef = useRef<HTMLAudioElement | null>(null);
@@ -441,7 +456,8 @@ export default function LessonCanvas({
   }, [animationSteps, initialData]);
 
   // Re-apply animation state for RF elements after they mount (initial page load)
-  // Track tldraw camera for RF viewport sync
+  // Track tldraw camera for RF viewport sync + auto-snap guide 1 on page switch
+  const lastTrackedPageRef = useRef<string | null>(null);
   useEffect(() => {
     if (!editor) return;
     let throttleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -449,6 +465,16 @@ export default function LessonCanvas({
       const cam = editor.getCamera();
       const val = { x: cam.x, y: cam.y, z: cam.z };
       tldrawCameraRef.current = val; // always fresh for non-render reads
+
+      // Detect page change in unlocked mode → snap to guide 1 at 75%
+      const currentPid = editor.getCurrentPageId() as string;
+      if (!isLocked && lastTrackedPageRef.current && currentPid !== lastTrackedPageRef.current) {
+        const guide = getGuideBordersForPage(currentPid)[0] || { x: 0, y: 0 };
+        editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
+        tldrawCameraRef.current = { x: -guide.x, y: -guide.y, z: 0.75 };
+      }
+      lastTrackedPageRef.current = currentPid;
+
       if (!throttleTimer) {
         throttleTimer = setTimeout(() => {
           throttleTimer = null;
@@ -463,7 +489,7 @@ export default function LessonCanvas({
       unsub();
       if (throttleTimer) clearTimeout(throttleTimer);
     };
-  }, [editor]);
+  }, [editor, isLocked]);
 
   // Track selected shape IDs for timeline highlighting
   const [selectedShapeIds, setSelectedShapeIds] = useState<string[]>([]);
@@ -686,9 +712,180 @@ export default function LessonCanvas({
         isAudioDrivenRef.current = false;
         if (bgMusicRef.current) bgMusicRef.current.pause();
       }
+      // Save laser strokes recorded during this presenting session (rough mode only)
+      if (wasPresenting && !isPresenting) {
+        console.log('[LASER SAVE]', { roughMode: roughModeRef.current, drawnPages: [...laserDrawnPagesRef.current] });
+        if (roughModeRef.current) {
+        const drawnPages = laserDrawnPagesRef.current;
+        const sessionStrokes = laserSessionStrokesRef.current;
+        if (drawnPages.size > 0) {
+          setLaserStrokes(prev => {
+            const updated = { ...prev };
+            for (const pid of drawnPages) {
+              // Overwrite only pages where laser was actually drawn
+              if (sessionStrokes[pid] && sessionStrokes[pid].length > 0) {
+                updated[pid] = sessionStrokes[pid];
+              }
+            }
+            return updated;
+          });
+          markDirty();
+          // Force immediate auto-save to prevent data loss from HMR
+          // Re-mark dirty after a delay so the next auto-save tick picks it up
+          setTimeout(() => { markDirty(); }, 100);
+          setTimeout(() => { markDirty(); }, 1000);
+          setTimeout(() => { markDirty(); }, 3000);
+        }
+        // Reset session tracking
+        laserDrawnPagesRef.current = new Set();
+        laserSessionStrokesRef.current = {};
+        }
+      }
     }
     return () => { document.body.classList.remove('audio-playing-fullscreen'); };
   }, [isPresenting, globalAudioPlaying, audioCountdown]);
+
+  // ─── Laser stroke playback during audio auto-play ───────────────────────
+  // Helper: compute camera group index from a step index
+  // Camera group = steps sharing the same cameraPosition anchor
+  const getCameraGroupIdx = useCallback((stepIdx: number, steps: AnimationStep[]): number => {
+    if (stepIdx < 0 || steps.length === 0) return -1;
+    let groupIdx = 0;
+    for (let i = 0; i <= Math.min(stepIdx, steps.length - 1); i++) {
+      if (i > 0 && steps[i].cameraPosition) groupIdx++;
+    }
+    return groupIdx;
+  }, []);
+
+  // Track camera group transitions during audio playback
+  const prevLaserGroupRef = useRef(-1);
+  const laserGroupStartTimeRef = useRef(0);
+
+  // ─── Laser stroke playback — 60fps rAF loop reading audio.currentTime directly ──
+  // ─── Laser stroke playback — persistent rAF loop, self-terminating ──────
+  const laserRafRef = useRef<number>(0);
+  const laserRafRunningRef = useRef(false);
+
+  useEffect(() => {
+    if (globalAudioPlaying && roughMode && isLocked && editor) {
+      if (laserRafRunningRef.current) return;
+      laserRafRunningRef.current = true;
+
+      const canvas = document.querySelector('.laser-preview-canvas') as HTMLCanvasElement;
+      if (!canvas) { laserRafRunningRef.current = false; return; }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { laserRafRunningRef.current = false; return; }
+      const parent = canvas.parentElement;
+      if (parent) { canvas.width = parent.clientWidth; canvas.height = parent.clientHeight; }
+      if (!globalAudioRef.current) { laserRafRunningRef.current = false; return; }
+
+      const draw = () => {
+        const audioEl = globalAudioRef.current;
+        if (!audioEl || audioEl.paused || !editorRef.current) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          laserRafRunningRef.current = false;
+          return;
+        }
+
+        const currentTime = audioEl.currentTime;
+        const ed = editorRef.current;
+        const pid = ed.getCurrentPageId() as string;
+        const pageStrokes = laserStrokesRef.current[pid] || [];
+        const cam = ed.getCamera();
+
+        let curGroupIdx = getCameraGroupIdx(currentStepRef.current, animationStepsRef.current);
+        if (curGroupIdx < 0) curGroupIdx = 0;
+
+        if (curGroupIdx !== prevLaserGroupRef.current) {
+          prevLaserGroupRef.current = curGroupIdx;
+        }
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Filter strokes to current camera group
+        const groupStrokes = pageStrokes.filter(s => s.cameraGroupIdx === curGroupIdx);
+        const fallbackStrokes = curGroupIdx === 0 ? pageStrokes.filter(s => s.cameraGroupIdx == null) : [];
+        const strokesToDraw = [...groupStrokes, ...fallbackStrokes];
+
+        for (const stroke of strokesToDraw) {
+          // Timing is absolute audio time — read directly from laserTimings
+          const absoluteStartTime = laserTimingsRef.current[stroke.id] ?? 0;
+
+          const hasTimestamps = stroke.path.length > 1 && stroke.path[stroke.path.length - 1].t > 0;
+          const recordedDuration = hasTimestamps
+            ? stroke.path[stroke.path.length - 1].t / 1000
+            : (stroke.path.length * 50) / 1000;
+          const strokeEnd = absoluteStartTime + recordedDuration;
+
+          if (currentTime < absoluteStartTime) continue;
+
+          const elapsed = currentTime - absoluteStartTime;
+          const elapsedMs = elapsed * 1000;
+
+          let pointCount: number;
+          if (currentTime >= strokeEnd) {
+            pointCount = stroke.path.length;
+          } else if (hasTimestamps) {
+            pointCount = 0;
+            for (let i = 0; i < stroke.path.length; i++) {
+              if (stroke.path[i].t <= elapsedMs) pointCount = i + 1;
+              else break;
+            }
+          } else {
+            const progress = Math.min(1, elapsedMs / (recordedDuration * 1000));
+            pointCount = Math.floor(progress * stroke.path.length);
+          }
+
+          if (pointCount > 1) {
+            const toScreen = (px: number, py: number) => ({
+              x: (px + cam.x) * cam.z,
+              y: (py + cam.y) * cam.z,
+            });
+            const p0 = toScreen(stroke.path[0].x, stroke.path[0].y);
+
+            ctx.save();
+            ctx.shadowColor = 'rgba(255, 0, 0, 0.8)';
+            ctx.shadowBlur = 12;
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            for (let i = 1; i < pointCount; i++) {
+              const prev = toScreen(stroke.path[i - 1].x, stroke.path[i - 1].y);
+              const curr = toScreen(stroke.path[i].x, stroke.path[i].y);
+              ctx.quadraticCurveTo(prev.x, prev.y, (prev.x + curr.x) / 2, (prev.y + curr.y) / 2);
+            }
+            ctx.stroke();
+
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(255, 100, 100, 0.7)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            for (let i = 1; i < pointCount; i++) {
+              const prev = toScreen(stroke.path[i - 1].x, stroke.path[i - 1].y);
+              const curr = toScreen(stroke.path[i].x, stroke.path[i].y);
+              ctx.quadraticCurveTo(prev.x, prev.y, (prev.x + curr.x) / 2, (prev.y + curr.y) / 2);
+            }
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        laserRafRef.current = requestAnimationFrame(draw);
+      };
+
+      laserRafRef.current = requestAnimationFrame(draw);
+    }
+
+    return () => {
+      cancelAnimationFrame(laserRafRef.current);
+      laserRafRunningRef.current = false;
+    };
+  }, [globalAudioPlaying, roughMode, isLocked, editor, getCameraGroupIdx]);
 
   useEffect(() => {
     if (!editor) return;
@@ -1662,8 +1859,10 @@ export default function LessonCanvas({
       excludedPages: excludedPages.size > 0 ? [...excludedPages] : undefined,
       globalAudioFile: globalAudioFileName || undefined,
       globalAudioDurations: Object.keys(globalAudioDurations).length > 0 ? globalAudioDurations : undefined,
+      laserStrokes: Object.keys(laserStrokes).length > 0 ? laserStrokes : undefined,
+      laserTimings: Object.keys(laserTimings).length > 0 ? laserTimings : undefined,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -1747,6 +1946,8 @@ export default function LessonCanvas({
         excludedPages: excludedPagesRef.current.size > 0 ? [...excludedPagesRef.current] : undefined,
         globalAudioFile: globalAudioFileNameRef.current || undefined,
         globalAudioDurations: Object.keys(globalAudioDurationsRef.current).length > 0 ? globalAudioDurationsRef.current : undefined,
+        laserStrokes: Object.keys(laserStrokesRef.current).length > 0 ? laserStrokesRef.current : undefined,
+        laserTimings: Object.keys(laserTimingsRef.current).length > 0 ? laserTimingsRef.current : undefined,
       };
 
       // Strip audio base64 data
@@ -2005,12 +2206,14 @@ export default function LessonCanvas({
       zoomSavedCamerasRef.current = {};
       // Stop any playing audio
       stopStepAudio();
-      // Restore camera to original editing position when unlocking
+      // Restore camera to page 1 guide 1 at 75% zoom when unlocking
       if (editingPageIdRef.current && (editor.getCurrentPageId() as string) !== editingPageIdRef.current) {
         editor.setCurrentPage(editingPageIdRef.current as any);
       }
-      if (editingCameraRef.current) {
-        editor.setCamera(editingCameraRef.current, { force: true });
+      {
+        const pid = editor.getCurrentPageId() as string;
+        const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
+        editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
       }
       // Unlock tldraw camera
       editor.setCameraOptions({ isLocked: false });
@@ -2786,14 +2989,82 @@ export default function LessonCanvas({
       return;
     }
 
-    const durations = globalAudioDurationsRef.current;
     const steps = animationStepsRef.current;
     if (steps.length === 0) return;
 
-    // Build unified list matching Audio Sync timeline (including virtual topic/subtitle)
+    // ─── ROUGH MODE: fire goNext at each camera lock's audioStartTime ─────
+    if (roughModeRef.current) {
+      // Build goNextTimes from camera lock audioStartTime values
+      // Each camera group = one goNext() call. Virtual topic/subtitle goNext calls
+      // are also needed (they fire before the camera group goNext).
+      const pages = editorRef.current?.getPages() || [];
+      const pageIdsList = pages.map(p => p.id as string);
+      const goNextTimes: number[] = [];
+
+      let prevCameraTime = 0;
+
+      for (let pi = 0; pi < pageIdsList.length; pi++) {
+        const pid = pageIdsList[pi];
+        const pageSteps = steps.filter(s => (s.pageId || 'page:page') === pid);
+        if (pageSteps.length === 0) continue;
+
+        // Find camera groups on this page (steps with cameraPosition)
+        const cameraGroupStarts = pageSteps.filter(s => s.cameraPosition);
+        if (cameraGroupStarts.length === 0) continue;
+
+        for (const groupStep of cameraGroupStarts) {
+          const startTime = groupStep.audioStartTime ?? prevCameraTime;
+          prevCameraTime = startTime;
+
+          // Virtual topic goNext (page 1 only, before the first group on that page)
+          if (groupStep === cameraGroupStarts[0]) {
+            if (pi === 0 && pageTopicVisibleRef.current.has(pid)) {
+              const tMode = pageTopicModesRef.current[pid] || 'preload';
+              if (tMode === 'animate') goNextTimes.push(startTime);
+            }
+            if (pageSubtitleVisibleRef.current.has(pid)) {
+              const sMode = pageSubtitleModesRef.current[pid] || 'preload';
+              if (sMode === 'animate') goNextTimes.push(startTime);
+            }
+          }
+
+          // Camera group goNext
+          goNextTimes.push(startTime);
+        }
+      }
+
+      // Sort times (they should be in order if user set them correctly, but be safe)
+      goNextTimes.sort((a, b) => a - b);
+
+      const interval = setInterval(() => {
+        const audio = globalAudioRef.current;
+        if (!audio || audio.paused) return;
+        const now = audio.currentTime;
+
+        let targetCallIdx = -1;
+        for (let i = 0; i < goNextTimes.length; i++) {
+          if (now >= goNextTimes[i]) targetCallIdx = i;
+          else break;
+        }
+
+        if (targetCallIdx > lastAudioFiredStepRef.current) {
+          const callsToMake = targetCallIdx - lastAudioFiredStepRef.current;
+          for (let i = 0; i < callsToMake; i++) {
+            goNext();
+          }
+          lastAudioFiredStepRef.current = targetCallIdx;
+        }
+      }, 100);
+
+      return () => clearInterval(interval);
+    }
+
+    // ─── NON-ROUGH MODE: use cumulative step durations (existing behavior) ──
+    const durations = globalAudioDurationsRef.current;
+    const DEFAULT_DUR = 3;
+
     const pages = editorRef.current?.getPages() || [];
     const pageIdsList = pages.map(p => p.id as string);
-    const DEFAULT_DUR = 3;
 
     const stepsByPage = new Map<string, AnimationStep[]>();
     for (const step of steps) {
@@ -2802,14 +3073,12 @@ export default function LessonCanvas({
       stepsByPage.get(pid)!.push(step);
     }
 
-    // Each entry = one goNext() call. Virtual cards also trigger goNext (consumed by topic/subtitle reveal).
     const goNextTimes: number[] = [];
     let cumulative = 0;
 
     for (let pi = 0; pi < pageIdsList.length; pi++) {
       const pid = pageIdsList[pi];
 
-      // Topic (page 1 only)
       if (pi === 0 && pageTopicVisibleRef.current.has(pid)) {
         const topicMode = pageTopicModesRef.current[pid] || 'preload';
         const topicId = `__topic__${pid}`;
@@ -2818,7 +3087,6 @@ export default function LessonCanvas({
         cumulative += topicDur;
       }
 
-      // Subtitle (every page)
       if (pageSubtitleVisibleRef.current.has(pid)) {
         const subMode = pageSubtitleModesRef.current[pid] || 'preload';
         const subId = `__subtitle__${pid}`;
@@ -2827,7 +3095,6 @@ export default function LessonCanvas({
         cumulative += subDur;
       }
 
-      // Real steps
       const pageSteps = stepsByPage.get(pid) || [];
       for (const step of pageSteps) {
         const isPreloaded = step.animation === 'none' && (step.action || 'enter') === 'enter';
@@ -2842,17 +3109,12 @@ export default function LessonCanvas({
       if (!audio || audio.paused) return;
       const now = audio.currentTime;
 
-      // Find how many goNext calls should have happened by now
       let targetCallIdx = -1;
       for (let i = 0; i < goNextTimes.length; i++) {
-        if (now >= goNextTimes[i]) {
-          targetCallIdx = i;
-        } else {
-          break;
-        }
+        if (now >= goNextTimes[i]) targetCallIdx = i;
+        else break;
       }
 
-      // Fire goNext for each call we haven't made yet
       if (targetCallIdx > lastAudioFiredStepRef.current) {
         const callsToMake = targetCallIdx - lastAudioFiredStepRef.current;
         for (let i = 0; i < callsToMake; i++) {
@@ -4462,7 +4724,7 @@ export default function LessonCanvas({
                       ].map(mode => (
                         <button
                           key={mode.id}
-                          onClick={() => { setCanvasMode(mode.id); setShowModeDropdown(false); markDirty(); }}
+                          onClick={() => { setCanvasMode(mode.id); setShowModeDropdown(false); markDirty(); if (mode.id === 'rough') setShowGlobalTimeline(false); else setShowLaserTimeline(false); }}
                           className={`w-full text-left px-3 py-1.5 text-xs font-medium transition-colors ${
                             canvasMode === mode.id
                               ? `${mode.color} bg-white/5`
@@ -4521,12 +4783,23 @@ export default function LessonCanvas({
               Public
             </button>
           )}
-          {/* Global Audio Timeline toggle */}
+          {/* Global Audio Timeline + Laser Sync toggles — mode-specific */}
           {!isPresenting && !isLocked && (
-            <button onClick={() => setShowGlobalTimeline(v => !v)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGlobalTimeline ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+            <>
+            {/* Audio Sync — main mode only */}
+            {!roughMode && (
+            <button onClick={() => { setShowGlobalTimeline(v => !v); setShowLaserTimeline(false); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGlobalTimeline ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               <Music className="w-3 h-3" />
               Audio Sync
             </button>
+            )}
+            {/* Laser Sync — rough mode only */}
+            {roughMode && (
+            <button onClick={() => { setShowLaserTimeline(v => !v); setShowGlobalTimeline(false); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLaserTimeline ? 'bg-red-500/15 text-red-300 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              🔴 Laser Sync
+            </button>
+            )}
+            </>
           )}
         </div>
 
@@ -4868,7 +5141,33 @@ export default function LessonCanvas({
           )}
 
           {/* Laser pointer overlay — only in presentation mode with laser tool, hidden during audio auto-play */}
-          {isPresenting && isLocked && presentationTool === 'laser' && !globalAudioPlaying && <LaserPointer />}
+          {isPresenting && isLocked && presentationTool === 'laser' && !globalAudioPlaying && (
+            <LaserPointer
+              onStrokeComplete={roughMode ? (path) => {
+                if (!editor) return;
+                const pid = editor.getCurrentPageId() as string;
+                const strokeId = `laser-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                // Convert screen-relative coords to tldraw page coords for camera-independent playback
+                const canvasEl = document.querySelector('#canvas-export-area');
+                const rect = canvasEl?.getBoundingClientRect();
+                const pagePath = rect ? path.map(p => {
+                  const page = editor.screenToPage({ x: p.x + rect.left, y: p.y + rect.top });
+                  return { x: page.x, y: page.y, t: p.t };
+                }) : path;
+                // Determine which camera group is active
+                const groupIdx = getCameraGroupIdx(currentStepRef.current, animationStepsRef.current);
+                const newStroke = { id: strokeId, path: pagePath, cameraGroupIdx: groupIdx };
+                // Track that this page had laser drawn
+                laserDrawnPagesRef.current.add(pid);
+                // Add to session strokes
+                const existing = laserSessionStrokesRef.current[pid] || [];
+                laserSessionStrokesRef.current[pid] = [...existing, newStroke];
+              } : undefined}
+            />
+          )}
+
+          {/* Laser preview canvas — for stroke playback preview and auto-play */}
+          <canvas className="laser-preview-canvas absolute inset-0 z-[99997] pointer-events-none" />
 
           {/* Timeline pill — when fully collapsed, draggable anywhere on canvas */}
           {!isLocked && timelineFullyCollapsed && (
@@ -5040,7 +5339,42 @@ export default function LessonCanvas({
         {!isLocked && !timelineFullyCollapsed && (
           <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
             <div className="overflow-hidden shadow-2xl border border-[#191C20]" style={{ width: '85vw' }}>
-              {showGlobalTimeline ? (
+              {showLaserTimeline ? (
+                <LaserSyncTimeline
+                  strokes={laserStrokes}
+                  onStrokesChange={(s) => { setLaserStrokes(s); markDirty(); }}
+                  timings={laserTimings}
+                  onTimingsChange={(t) => { setLaserTimings(t); markDirty(); }}
+                  editor={editor}
+                  currentPageId={(editor?.getCurrentPageId() as string) || 'page:page'}
+                  currentCameraGroupIdx={isLocked ? getCameraGroupIdx(currentStep, animationSteps) : -1}
+                  prevPageLastStrokeTime={(() => {
+                    const curPageId = (editor?.getCurrentPageId() as string) || 'page:page';
+                    const pages = editor?.getPages() || [];
+                    const pageIds = pages.map(p => p.id as string);
+                    const curPageIdx = pageIds.indexOf(curPageId);
+                    if (curPageIdx <= 0) return 0; // first page defaults to 0
+                    // Find the max timing from all previous pages' strokes
+                    let maxTime = 0;
+                    for (let pi = 0; pi < curPageIdx; pi++) {
+                      const pid = pageIds[pi];
+                      const pageStrokes = laserStrokes[pid] || [];
+                      for (const s of pageStrokes) {
+                        const t = laserTimings[s.id];
+                        if (typeof t === 'number' && t > maxTime) maxTime = t;
+                      }
+                    }
+                    return maxTime > 0 ? maxTime + 1 : 0; // +1 sec gap
+                  })()}
+                  audioFileUrl={globalAudioUrl}
+                  onAudioFileChange={handleGlobalAudioFileChange}
+                  isPlaying={globalAudioPlaying}
+                  onPlayPause={handleGlobalAudioPlayPause}
+                  currentTime={globalAudioCurrentTime}
+                  duration={globalAudioDuration}
+                  onSeek={handleGlobalAudioSeek}
+                />
+              ) : showGlobalTimeline ? (
                 <GlobalAudioTimeline
                   steps={animationSteps}
                   audioDurations={globalAudioDurations}
@@ -5083,6 +5417,16 @@ export default function LessonCanvas({
                       return next;
                     });
                     markDirty();
+                  }}
+                  onPlayAudioAt={(time) => {
+                    const audio = globalAudioRef.current;
+                    if (!audio) return;
+                    audio.currentTime = time;
+                    audio.play().catch(() => {});
+                  }}
+                  onStopAudio={() => {
+                    const audio = globalAudioRef.current;
+                    if (audio) audio.pause();
                   }}
                 />
               )}

@@ -4,6 +4,56 @@ Interactive canvas-based notes platform with step-by-step animations, system des
 
 ---
 
+## Recent Changes (Aug 30, 2026) — Laser Sync & Rough Mode Audio
+
+### Laser Sync Feature (Rough Mode Only)
+- **Record laser strokes** during presentation — enter presenting mode, select laser tool, draw on any guide box
+- **Per-page, per-camera-group** stroke storage — strokes saved with tldraw page coordinates and camera group index
+- **Laser Sync Timeline** — dedicated timeline (🔴 button, rough mode only) showing stroke cards with:
+  - Mini SVG path preview
+  - Absolute audio time per card (MM:SS:cs format)
+  - −/+ buttons (0.5s step) to fine-tune timing
+  - ▶ Play button — seeks audio to that exact time and draws the stroke visually
+  - 🗑 Delete per stroke, Reset per page
+- **Per-point timestamps** — strokes replay at the exact speed they were drawn (not stretched/compressed)
+- **Strokes persist on canvas** — after drawing, strokes stay visible until camera moves to a different guide box
+- **Page coordinate system** — strokes stored in tldraw page space, rendered via camera transform. Works at any zoom/pan.
+- **Cross-page defaults** — page 2+ stroke cards default to previous page's last stroke time + 1 second
+- **Shared audio** — same global audio file used by both Laser Sync and Audio Sync timelines
+
+### Camera Lock Audio Start Times (Rough Mode Only)
+- **⏱ Start time** on main timeline cards with camera lock — set when each guide box activates during audio auto-play
+- **Play/−/+** buttons to preview and adjust the audio position per camera lock
+- **Cascading defaults** — each camera lock defaults to the previous one's time (cross-page)
+- **Rough mode audio auto-advance** — fires `goNext()` at each camera lock's ⏱ Start time (replaces cumulative step durations)
+
+### Mode Separation
+- **Rough mode** — shows only 🔴 Laser Sync button (no Audio Sync)
+- **Main mode** — shows only 🎵 Audio Sync button (no Laser Sync)
+- Switching modes auto-closes the wrong timeline
+
+### Auto-Snap Guide 1 at 75% Zoom
+- **On unlock** — camera snaps to page 1's guide box 1 at 75% zoom
+- **On page switch** (unlocked) — camera snaps to that page's guide box 1 at 75% zoom
+
+### Bug Fixes
+- **Stroke data loss prevention** — force `markDirty()` after recording to ensure auto-save persists strokes
+- **Per-page Reset** — Reset button clears only current page's strokes (was clearing all pages)
+- **rAF race condition** — laser playback loop now self-manages lifecycle (checks `audio.paused` per frame instead of relying on React effect cleanup)
+- **Audio Sync play/pause** — header play button now toggles instead of always restarting from beginning
+
+### New Files
+- `src/canvas/LaserSyncTimeline.tsx` — Laser stroke timeline component
+
+### Modified Files
+- `src/canvas/types.ts` — Added `audioStartTime` to AnimationStep, `cameraGroupIdx` + per-point `t` timestamps to LaserStroke
+- `src/canvas/LessonCanvas.tsx` — Laser recording/playback, rough mode audio auto-advance, camera snap on unlock/page switch
+- `src/canvas/TimelineBar.tsx` — Camera lock ⏱ Start time UI with play/−/+ (rough mode only)
+- `src/canvas/GlobalAudioTimeline.tsx` — Play/pause toggle fix
+- `src/components/LaserPointer.tsx` — Per-point timestamp recording
+
+---
+
 ## Recent Changes (Aug 30, 2026) — Dark Mode & Major Features Update
 
 ### Full Dark Mode Conversion (Permanent)

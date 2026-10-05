@@ -270,7 +270,7 @@ export default function GlobalAudioTimeline({
           ) : (
             <>
               <button
-                onClick={() => { onSeek(0); if (!isPlaying) onPlayPause(); }}
+                onClick={() => { onPlayPause(); }}
                 className={`flex items-center gap-1 text-[9px] px-2 py-0.5 rounded border transition-all ${isPlaying ? 'text-blue-300 border-blue-500/30 bg-blue-500/10' : 'text-slate-400 border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30'}`}
               >
                 {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}

@@ -98,6 +98,9 @@ export interface AnimationStep {
   titlePageRange?: 'all' | 'current' | { from: number; to: number };
   /** Pin this shape as a fixed subtitle overlay during presentation (current page only) */
   pinAsSubtitle?: boolean;
+  /** Audio start time in seconds — when this camera group should activate during rough mode audio auto-play.
+   *  Only meaningful on steps that have a cameraPosition (camera lock). */
+  audioStartTime?: number;
 }
 
 /**
@@ -201,6 +204,19 @@ export interface LessonCanvasData {
   globalAudioDurations?: Record<string, number>;
   /** @deprecated — old timestamp format, migrated to durations */
   globalAudioTimestamps?: Record<string, number>;
+  /** Laser strokes per page — recorded during rough mode presenting */
+  laserStrokes?: Record<string, LaserStroke[]>;
+  /** Laser sync timings — strokeId → startTime in seconds */
+  laserTimings?: Record<string, number>;
+}
+
+/** A single recorded laser stroke */
+export interface LaserStroke {
+  id: string;
+  /** Path points in tldraw page coordinates, with relative timestamp (ms from stroke start) */
+  path: { x: number; y: number; t: number }[];
+  /** Camera group index this stroke was drawn on (derived from which guide box was active) */
+  cameraGroupIdx?: number;
 }
 
 /**

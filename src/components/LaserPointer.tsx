@@ -5,12 +5,19 @@ interface Stroke {
   timestamp: number;
 }
 
-export default function LaserPointer() {
+interface LaserPointerProps {
+  onStrokeComplete?: (path: { x: number; y: number; t: number }[]) => void;
+}
+
+export default function LaserPointer({ onStrokeComplete }: LaserPointerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokesRef = useRef<Stroke[]>([]);
-  const currentStrokeRef = useRef<{ x: number; y: number }[] | null>(null);
+  const currentStrokeRef = useRef<{ x: number; y: number; t: number }[] | null>(null);
+  const strokeStartTimeRef = useRef<number>(0);
   const isDrawingRef = useRef(false);
   const animFrameRef = useRef<number>(0);
+  const onStrokeCompleteRef = useRef(onStrokeComplete);
+  onStrokeCompleteRef.current = onStrokeComplete;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -32,23 +39,30 @@ export default function LaserPointer() {
       if (e.button !== 0) return;
       const rect = canvas.getBoundingClientRect();
       isDrawingRef.current = true;
-      currentStrokeRef.current = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }];
+      strokeStartTimeRef.current = performance.now();
+      currentStrokeRef.current = [{ x: e.clientX - rect.left, y: e.clientY - rect.top, t: 0 }];
     };
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDrawingRef.current || !currentStrokeRef.current) return;
       const rect = canvas.getBoundingClientRect();
-      currentStrokeRef.current.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      const t = performance.now() - strokeStartTimeRef.current;
+      currentStrokeRef.current.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, t });
     };
 
     const handleMouseUp = () => {
       if (!isDrawingRef.current || !currentStrokeRef.current) return;
       isDrawingRef.current = false;
       if (currentStrokeRef.current.length > 1) {
+        const completedPath = [...currentStrokeRef.current];
         strokesRef.current.push({
-          points: [...currentStrokeRef.current],
+          points: completedPath.map(p => ({ x: p.x, y: p.y })),
           timestamp: Date.now(),
         });
+        // Notify parent of completed stroke with timestamps
+        if (onStrokeCompleteRef.current) {
+          onStrokeCompleteRef.current(completedPath);
+        }
       }
       currentStrokeRef.current = null;
     };

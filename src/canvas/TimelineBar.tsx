@@ -29,6 +29,10 @@ interface TimelineBarProps {
   roughMode?: boolean;
   helperShapeIds?: Set<string>;
   onHelperToggle?: (shapeId: string) => void;
+  /** Play global audio from a specific time (seconds). Rough mode only. */
+  onPlayAudioAt?: (time: number) => void;
+  /** Stop global audio preview. */
+  onStopAudio?: () => void;
 }
 
 const ANIMATION_OPTIONS: { value: string; label: string; group: string }[] = [
@@ -190,11 +194,14 @@ export default function TimelineBar({
   roughMode = false,
   helperShapeIds,
   onHelperToggle: _onHelperToggle,
+  onPlayAudioAt,
+  onStopAudio,
 }: TimelineBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [minimized, setMinimized] = useState(false);
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
   const [moveMenuStepId, setMoveMenuStepId] = useState<string | null>(null);
+  const [audioPreviewStepId, setAudioPreviewStepId] = useState<string | null>(null);
   const [moveInput, setMoveInput] = useState('');
   const [moveMode, setMoveMode] = useState<'after' | 'before'>('after');
 
@@ -888,6 +895,91 @@ export default function TimelineBar({
                         </div>
                       </details>
                     )}
+
+                    {/* Audio Start Time — rough mode only, on steps with camera lock */}
+                    {roughMode && hasCamera && (() => {
+                      // Default: previous camera lock's audioStartTime (global order, across pages)
+                      const prevCameraTime = (() => {
+                        const gi = steps.findIndex(s => s.id === step.id);
+                        for (let i = gi - 1; i >= 0; i--) {
+                          if (steps[i].cameraPosition && steps[i].audioStartTime != null) {
+                            return steps[i].audioStartTime!;
+                          }
+                        }
+                        return 0;
+                      })();
+                      const effectiveTime = step.audioStartTime ?? prevCameraTime;
+
+                      return (
+                      <div className="px-2 py-1" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[8px] text-orange-400 font-medium flex-shrink-0">⏱</span>
+                          {/* Play/Stop preview */}
+                          <button
+                            onClick={() => {
+                              if (audioPreviewStepId === step.id) {
+                                onStopAudio?.();
+                                setAudioPreviewStepId(null);
+                              } else {
+                                onPlayAudioAt?.(effectiveTime);
+                                setAudioPreviewStepId(step.id);
+                              }
+                            }}
+                            className={`flex items-center justify-center w-5 h-5 rounded-full flex-shrink-0 transition-all ${
+                              audioPreviewStepId === step.id
+                                ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40'
+                                : 'bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-orange-300 hover:border-orange-500/30'
+                            }`}
+                            title={audioPreviewStepId === step.id ? 'Stop' : 'Play from this time'}
+                          >
+                            {audioPreviewStepId === step.id
+                              ? <span className="text-[7px]">⏹</span>
+                              : <span className="text-[7px]">▶</span>}
+                          </button>
+                          {/* Minus 0.5s */}
+                          <button
+                            onClick={() => {
+                              updateStep(step.id, { audioStartTime: Math.max(0, Math.round((effectiveTime - 0.5) * 100) / 100) });
+                            }}
+                            className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-orange-300 hover:border-orange-500/30 transition-all flex-shrink-0 text-[9px]"
+                          >−</button>
+                          {/* Time input */}
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            defaultValue={(() => {
+                              const t = effectiveTime;
+                              const m = Math.floor(t / 60);
+                              const s = Math.floor(t % 60);
+                              const cs = Math.round((t % 1) * 100);
+                              return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}:${String(cs).padStart(2, '0')}`;
+                            })()}
+                            key={`${step.id}-ast-${effectiveTime}`}
+                            onBlur={(e) => {
+                              const parts = e.target.value.split(':').map(Number);
+                              let seconds = 0;
+                              if (parts.length === 3) seconds = (parts[0] || 0) * 60 + (parts[1] || 0) + (parts[2] || 0) / 100;
+                              else if (parts.length === 2) seconds = (parts[0] || 0) * 60 + (parts[1] || 0);
+                              else seconds = parts[0] || 0;
+                              if (!isNaN(seconds) && seconds >= 0) {
+                                updateStep(step.id, { audioStartTime: Math.round(seconds * 100) / 100 });
+                              }
+                            }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
+                            className="w-[62px] text-[9px] font-mono border border-orange-500/30 rounded px-1 py-0.5 text-center bg-[#0d0d18] text-orange-300"
+                            title="Audio time (MM:SS:cs) when this camera group activates"
+                          />
+                          {/* Plus 0.5s */}
+                          <button
+                            onClick={() => {
+                              updateStep(step.id, { audioStartTime: Math.round((effectiveTime + 0.5) * 100) / 100 });
+                            }}
+                            className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-orange-300 hover:border-orange-500/30 transition-all flex-shrink-0 text-[9px]"
+                          >+</button>
+                        </div>
+                      </div>
+                      );
+                    })()}
 
                     {/* Audio — collapsible */}
                     <div className="px-2 pb-1">
