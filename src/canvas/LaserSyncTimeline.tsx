@@ -114,7 +114,7 @@ export default function LaserSyncTimeline({
   onPlayPause,
   currentTime,
   duration,
-  onSeek,
+  onSeek: _onSeek,
 }: LaserSyncTimelineProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [minimized, setMinimized] = useState(false);

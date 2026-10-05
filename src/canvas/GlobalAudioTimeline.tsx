@@ -75,7 +75,7 @@ export default function GlobalAudioTimeline({
   onPlayPause,
   currentTime,
   duration,
-  onSeek,
+  onSeek: _onSeek,
   editor,
   diagramData,
   selectedShapeIds,

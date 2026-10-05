@@ -759,7 +759,6 @@ export default function LessonCanvas({
 
   // Track camera group transitions during audio playback
   const prevLaserGroupRef = useRef(-1);
-  const laserGroupStartTimeRef = useRef(0);
 
   // ─── Laser stroke playback — 60fps rAF loop reading audio.currentTime directly ──
   // ─── Laser stroke playback — persistent rAF loop, self-terminating ──────
