@@ -236,8 +236,8 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                           <col />
                           {!isLocalhost && <col style={{ width: 175 }} />}
                           {!isLocalhost && <col style={{ width: 175 }} />}
-                          <col style={{ width: 80 }} />
-                          <col style={{ width: 40 }} />
+                          {isLocalhost && <col style={{ width: 80 }} />}
+                          {isLocalhost && <col style={{ width: 40 }} />}
                         </colgroup>
                         <thead>
                           <tr style={{ background: C.header }}>
@@ -258,19 +258,20 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                                 </span>
                               </th>
                             )}
+                            {isLocalhost && (
                             <th className="text-center py-2.5 px-2" style={{ borderLeft: `1px solid ${C.borderSub}` }}>
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider" style={{ color: '#34D399' }}>
                                 ✓ Status
                               </span>
                             </th>
-                            <th />
+                            )}
+                            {isLocalhost && <th />}
                           </tr>
                         </thead>
                         <tbody>
                           {chapters.map((chapter, ci) => {
                             const chapterPath = `${basePath}/${cls.slug}/${currentSubject.slug}/${book.slug}/${chapter.slug}`;
                             const isDone = chapter.status === 'done';
-                            const hasYoutube = !!(chapter as any).youtubeUrl;
                             const rowBg = ci % 2 === 0 ? '#07111F' : '#0D182A';
                             const hoverBg = '#12223A';
 
@@ -325,9 +326,8 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                                 {/* YouTube */}
                                 {!isLocalhost && (
                                 <td className="text-center py-0 px-2" style={{ borderLeft: `1px solid ${C.borderSub}` }}>
-                                  {hasYoutube ? (
                                     <a
-                                      href={(chapter as any).youtubeUrl}
+                                      href={(chapter as any).youtubeUrl || 'https://youtube.com/@devStackBySagarKumar'}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       onClick={(e) => e.stopPropagation()}
@@ -343,13 +343,11 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
                                       Watch on YouTube
                                     </a>
-                                  ) : (
-                                    <span className="text-[11px]" style={{ color: '#64748B' }}>—</span>
-                                  )}
                                 </td>
                                 )}
 
-                                {/* Status */}
+                                {/* Status — localhost only */}
+                                {isLocalhost && (
                                 <td className="text-center py-0 px-2" style={{ borderLeft: `1px solid ${C.borderSub}` }}>
                                   {isDone ? (
                                     <div
@@ -364,8 +362,10 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                                     <div className="inline-block w-[22px] h-[22px] rounded-full" style={{ border: '2px solid #7C8AA5' }} />
                                   )}
                                 </td>
+                                )}
 
-                                {/* Arrow */}
+                                {/* Arrow — localhost only */}
+                                {isLocalhost && (
                                 <td className="text-center py-0">
                                   <Link to={chapterPath} className="inline-flex items-center justify-center w-full h-full">
                                     <ChevronRight className="w-4 h-4 transition-colors duration-150" style={{ color: '#94A3B8' }}
@@ -374,6 +374,7 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                                     />
                                   </Link>
                                 </td>
+                                )}
                               </tr>
                             );
                           })}
