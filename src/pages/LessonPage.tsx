@@ -77,7 +77,7 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
         <div className="w-full h-[calc(100vh-78px)] flex flex-col" style={{ background: '#0B0D0F' }}>
           {/* Header */}
           <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.08] flex-shrink-0" style={{ background: '#0B0D0F' }}>
-            <Link to={basePath} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors">
+            <Link to={site.basePath || '/'} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors">
               <ArrowLeft className="w-3.5 h-3.5" /> Back
             </Link>
             <div className="w-px h-5 bg-white/[0.10]" />
