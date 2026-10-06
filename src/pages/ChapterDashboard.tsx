@@ -12,6 +12,12 @@ import TopicIcon from '../components/TopicIcon';
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
+/* ─── Class Visibility Flags ─────────────────────────────────────────────── */
+const CLASS_FLAGS: Record<string, boolean> = {
+  'Class 10': true,
+  'Class 12': false,
+};
+
 /* ─── Color System ────────────────────────────────────────────────────────── */
 const C = {
   page:        '#050A16',
@@ -77,6 +83,7 @@ interface ChapterDashboardProps {
 
 export default function ChapterDashboard({ classes, basePath, searchQuery }: ChapterDashboardProps) {
   const query = (searchQuery || '').toLowerCase().trim();
+  const visibleClasses = classes.filter(cls => CLASS_FLAGS[cls.title] !== false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [activeSubject, setActiveSubject] = useState<Record<string, string>>({});
 
@@ -99,7 +106,7 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
       }}
     >
       <div className="max-w-[1500px] mx-auto px-10 py-5 space-y-[16px]">
-        {classes.map(cls => {
+        {visibleClasses.map(cls => {
           const config = CLASS_CONFIGS[cls.title] || { tagline: '', number: cls.title.replace('Class ', '') };
           const subjects = cls.children.filter(s => matchesQuery(s));
           if (subjects.length === 0) return null;
