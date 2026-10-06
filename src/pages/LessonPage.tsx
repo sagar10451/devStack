@@ -69,37 +69,42 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
 
   // Production: show PDF viewer or markdown viewer
   if (!isLocalhost) {
-    // PDF from Google Drive — full screen
+    // PDF from Google Drive
     if (driveFileId) {
       return (
-        <div className="fixed inset-0 z-[9999] flex flex-col" style={{ background: '#0B0D0F' }}>
-          {/* Minimal floating back button */}
-          <Link
-            to={basePath}
-            className="fixed top-4 left-4 z-[10000] flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-300 hover:text-white transition-all"
-            style={{ background: 'rgba(11,13,15,0.85)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.1)' }}
-          >
-            <ArrowLeft className="w-4 h-4" /> Back
-          </Link>
+        <div className="w-full h-[calc(100vh-78px)] flex flex-col" style={{ background: '#0B0D0F' }}>
+          {/* Header */}
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.08] flex-shrink-0" style={{ background: '#0B0D0F' }}>
+            <Link to={basePath} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors">
+              <ArrowLeft className="w-3.5 h-3.5" /> Back
+            </Link>
+            <div className="w-px h-5 bg-white/[0.10]" />
+            <span className="text-slate-400 text-sm">{topicTitle}</span>
+            <span className="text-blue-400/70 text-sm">/</span>
+            <span className="text-white text-sm font-medium">{subtopicTitle}</span>
+          </div>
 
-          {/* Loading spinner */}
-          {!iframeLoaded && (
-            <div className="absolute inset-0 flex items-center justify-center z-10">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-slate-500 text-sm">Loading notes...</span>
+          {/* PDF Viewer */}
+          <div className="flex-1 relative overflow-hidden">
+            {/* Loading spinner */}
+            {!iframeLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-slate-500 text-sm">Loading notes...</span>
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* PDF iframe — full viewport */}
-          <iframe
-            src={`https://drive.google.com/file/d/${driveFileId}/preview`}
-            className="w-full h-full border-0"
-            allow="autoplay"
-            onLoad={() => setIframeLoaded(true)}
-            style={{ opacity: iframeLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
-          />
+            )}
+            <iframe
+              src={`https://drive.google.com/file/d/${driveFileId}/preview`}
+              className="w-full h-full border-0"
+              allow="autoplay"
+              onLoad={() => setIframeLoaded(true)}
+              style={{ opacity: iframeLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
+            />
+            {/* Cover the pop-out button (top-right corner of Google's viewer) */}
+            <div className="absolute top-0 right-0 w-12 h-12 z-20" style={{ background: '#0B0D0F' }} />
+          </div>
         </div>
       );
     }
