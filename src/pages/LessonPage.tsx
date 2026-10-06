@@ -5,6 +5,9 @@ import PublicMarkdownViewer from '../canvas/PublicMarkdownViewer';
 import type { LessonCanvasData, PublicCanvasData } from '../canvas/types';
 import { ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+
+const DrivePdfViewer = lazy(() => import('../components/DrivePdfViewer'));
 
 interface LessonPageProps {
   topicSlug: string;
@@ -23,7 +26,6 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
   const [publicData, setPublicData] = useState<PublicCanvasData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [publicLoadFailed, setPublicLoadFailed] = useState(false);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
 
   useEffect(() => {
     if (isLocalhost) {
@@ -69,7 +71,7 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
 
   // Production: show PDF viewer or markdown viewer
   if (!isLocalhost) {
-    // PDF from Google Drive
+    // PDF from Google Drive — custom renderer with fit-to-width
     if (driveFileId) {
       return (
         <div className="w-full h-[calc(100vh-78px)] flex flex-col" style={{ background: '#0B0D0F' }}>
@@ -84,27 +86,14 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
             <span className="text-white text-sm font-medium">{subtopicTitle}</span>
           </div>
 
-          {/* PDF Viewer */}
-          <div className="flex-1 relative overflow-hidden">
-            {/* Loading spinner */}
-            {!iframeLoaded && (
-              <div className="absolute inset-0 flex items-center justify-center z-10">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <span className="text-slate-500 text-sm">Loading notes...</span>
-                </div>
-              </div>
-            )}
-            <iframe
-              src={`https://drive.google.com/file/d/${driveFileId}/preview`}
-              className="w-full h-full border-0"
-              allow="autoplay"
-              onLoad={() => setIframeLoaded(true)}
-              style={{ opacity: iframeLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
-            />
-            {/* Cover the pop-out button (top-right corner of Google's viewer) */}
-            <div className="absolute top-0 right-0 w-12 h-12 z-20" style={{ background: '#0B0D0F' }} />
-          </div>
+          {/* PDF Viewer — fit-to-width, scrollable */}
+          <Suspense fallback={
+            <div className="flex-1 flex items-center justify-center" style={{ background: '#0B0D0F' }}>
+              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          }>
+            <DrivePdfViewer driveFileId={driveFileId} />
+          </Suspense>
         </div>
       );
     }
