@@ -37,7 +37,7 @@ export const sites: Record<string, SiteConfig> = {
     brandAccent: 'Stack',
     brandSubtitle: 'by Sagar Kumar',
     watermark: 'DevStack by Sagar Kumar',
-    youtubeUrl: 'https://www.youtube.com/@chapterBreakdown',
+    youtubeUrl: 'https://www.youtube.com',
   },
   'flowchart-notes': {
     id: 'flowchart-notes',
@@ -46,7 +46,7 @@ export const sites: Record<string, SiteConfig> = {
     brandAccent: 'Breakdown',
     brandSubtitle: 'by Priyanka & Sagar',
     watermark: 'Chapter Breakdown by Priyanka & Sagar',
-    youtubeUrl: 'https://youtube.com',
+    youtubeUrl: 'https://www.youtube.com/@chapterBreakdown',
   },
 };
 
