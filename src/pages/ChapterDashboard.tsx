@@ -335,8 +335,9 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                                 {/* Notes button */}
                                 {!isLocalhost && (
                                 <td className="text-center py-0 px-2" style={{ borderLeft: `1px solid ${C.borderSub}` }}>
-                                  <button
-                                    className="inline-flex items-center gap-1.5 px-3 py-[6px] rounded-[7px] text-[10px] font-semibold transition-all duration-150 cursor-pointer hover:shadow-[0_0_12px_rgba(37,99,235,0.25)]"
+                                  <Link
+                                    to={chapterPath}
+                                    className="inline-flex items-center gap-1.5 px-3 py-[6px] rounded-[7px] text-[10px] font-semibold transition-all duration-150 hover:shadow-[0_0_12px_rgba(37,99,235,0.25)]"
                                     style={{
                                       background: 'linear-gradient(180deg, rgba(37,99,235,0.25), rgba(37,99,235,0.12))',
                                       border: '1px solid #2563EB',
@@ -347,7 +348,7 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                                   >
                                     <FileText className="w-3 h-3" />
                                     Click to get Notes
-                                  </button>
+                                  </Link>
                                 </td>
                                 )}
 

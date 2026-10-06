@@ -36,7 +36,9 @@
                 "color": "#3b82f6",
                 "status": "done",
                 "youtubeUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                "children": []
+                "children": [],
+                "driveFileId": "1x5E5mpcy2pVMikH9ku9QXfFS806rSXyL"
+
               },
               {
                 "id": "nelson-mandela",
@@ -291,18 +293,8 @@
                 "children": []
               },
               {
-                "id": "animals",
-                "number": 7,
-                "title": "Animals",
-                "description": "Walt Whitman",
-                "slug": "animals",
-                "icon": "BookOpen",
-                "color": "#8b5cf6",
-                "children": []
-              },
-              {
                 "id": "the-trees",
-                "number": 8,
+                "number": 7,
                 "title": "The Trees",
                 "description": "Adrienne Rich",
                 "slug": "the-trees",
@@ -312,7 +304,7 @@
               },
               {
                 "id": "fog",
-                "number": 9,
+                "number": 8,
                 "title": "Fog",
                 "description": "Carl Sandburg",
                 "slug": "fog",
@@ -322,7 +314,7 @@
               },
               {
                 "id": "the-tale-of-custard-the-dragon",
-                "number": 10,
+                "number": 9,
                 "title": "The Tale of Custard the Dragon",
                 "description": "Ogden Nash",
                 "slug": "the-tale-of-custard-the-dragon",
@@ -332,7 +324,7 @@
               },
               {
                 "id": "for-anne-gregory",
-                "number": 11,
+                "number": 10,
                 "title": "For Anne Gregory",
                 "description": "W.B. Yeats",
                 "slug": "for-anne-gregory",
