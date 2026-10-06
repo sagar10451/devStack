@@ -104,10 +104,21 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
     }
     if (publicLoadFailed) {
       return (
-        <div className="w-full h-[calc(100vh-78px)] flex items-center justify-center bg-[#0a0a14]">
-          <div className="text-center">
-            <p className="text-slate-400 text-lg font-medium">Notes coming soon</p>
-            <p className="text-gray-400 text-sm mt-1">{topicTitle} / {subtopicTitle}</p>
+        <div className="w-full h-[calc(100vh-78px)] flex flex-col bg-[#0a0a14]">
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.08] flex-shrink-0" style={{ background: '#0B0D0F' }}>
+            <Link to={site.basePath || '/'} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors">
+              <ArrowLeft className="w-3.5 h-3.5" /> Back
+            </Link>
+            <div className="w-px h-5 bg-white/[0.10]" />
+            <span className="text-slate-400 text-sm">{topicTitle}</span>
+            <span className="text-blue-400/70 text-sm">/</span>
+            <span className="text-white text-sm font-medium">{subtopicTitle}</span>
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-slate-400 text-lg font-medium">Notes coming soon</p>
+              <p className="text-gray-400 text-sm mt-1">{topicTitle} / {subtopicTitle}</p>
+            </div>
           </div>
         </div>
       );
