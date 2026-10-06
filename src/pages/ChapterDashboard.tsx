@@ -214,6 +214,8 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                         {chapters.length} chapters
                       </span>
 
+                      <div className="flex-1" />
+
                       {/* YouTube Playlist — production only, right-aligned */}
                       {!isLocalhost && (
                         <a
@@ -221,7 +223,7 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-2 px-5 py-[9px] rounded-[9px] text-[13px] font-bold transition-all duration-150 hover:shadow-[0_0_14px_rgba(239,35,60,0.3)]"
+                          className="inline-flex items-center gap-2 px-5 py-[9px] rounded-[9px] text-[13px] font-bold transition-all duration-150 hover:shadow-[0_0_14px_rgba(239,35,60,0.3)] mr-3"
                           style={{
                             background: 'rgba(220,38,38,0.15)',
                             border: '1.2px solid #FF5A67',
@@ -234,8 +236,6 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                           Go to Youtube Playlist 2026-27
                         </a>
                       )}
-
-                      <div className="flex-1" />
 
                       {/* Collapse button */}
                       <div
