@@ -3264,6 +3264,11 @@ export default function LessonCanvas({
           }
           editor.select(...newShapeIds as any);
           
+          // Snap camera back to guide 1 at 75% so the view stays consistent
+          const pid = editor.getCurrentPageId() as string;
+          const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
+          editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
+
           // Explicitly add each new shape as a timeline step
           const pageId = editor.getCurrentPageId() as string;
           const newSteps: AnimationStep[] = newShapeIds.map((sid, i) => ({
