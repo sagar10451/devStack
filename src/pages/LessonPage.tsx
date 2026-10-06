@@ -20,7 +20,7 @@ interface LessonPageProps {
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtopicTitle, basePath, pdfUrl }: LessonPageProps) {
+export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtopicTitle, basePath: _basePath, pdfUrl }: LessonPageProps) {
   const { site } = usePortalSafe();
   const [canvasData, setCanvasData] = useState<LessonCanvasData | null>(null);
   const [publicData, setPublicData] = useState<PublicCanvasData | null>(null);
