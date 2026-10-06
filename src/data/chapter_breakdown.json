@@ -25,6 +25,7 @@
             "slug": "first-flight-prose",
             "icon": "BookOpen",
             "color": "#3b82f6",
+            "youtubeUrl": "https://youtube.com/playlist?list=PLfbcM5IhyD44&si=7x5e5QX7Ey6N3uLJ",
             "children": [
               {
                 "id": "a-letter-to-god",
@@ -35,7 +36,7 @@
                 "icon": "BookOpen",
                 "color": "#3b82f6",
                 "status": "done",
-                "youtubeUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "youtubeUrl": "https://www.youtube.com/watch?v=3yWoKnwXy8s&list=PLfbcM5IhyD44&index=1&t=1s",
                 "children": [],
                 "driveFileId": "1x5E5mpcy2pVMikH9ku9QXfFS806rSXyL",
                 "pdfUrl": "https://pub-cfcf71072a164b11a453b6a04f944241.r2.dev/a_letter_to_god.pdf"
@@ -131,6 +132,7 @@
             "slug": "footprints-without-feet",
             "icon": "BookOpen",
             "color": "#ef4444",
+            "youtubeUrl": "https://youtube.com/playlist?list=PLfbcM5IhyD44&si=7x5e5QX7Ey6N3uLJ",
             "children": [
               {
                 "id": "a-triumph-of-surgery",
@@ -232,6 +234,7 @@
             "slug": "poems-first-flight",
             "icon": "BookOpen",
             "color": "#8b5cf6",
+            "youtubeUrl": "https://youtube.com/playlist?list=PLfbcM5IhyD44&si=7x5e5QX7Ey6N3uLJ",
             "children": [
               {
                 "id": "dust-of-snow",
