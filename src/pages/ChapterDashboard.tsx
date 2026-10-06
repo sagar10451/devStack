@@ -221,7 +221,7 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center gap-2 px-5 py-[9px] rounded-[9px] text-[13px] font-bold ml-auto transition-all duration-150 hover:shadow-[0_0_14px_rgba(239,35,60,0.3)]"
+                          className="inline-flex items-center gap-2 px-5 py-[9px] rounded-[9px] text-[13px] font-bold transition-all duration-150 hover:shadow-[0_0_14px_rgba(239,35,60,0.3)]"
                           style={{
                             background: 'rgba(220,38,38,0.15)',
                             border: '1.2px solid #FF5A67',
@@ -239,7 +239,7 @@ export default function ChapterDashboard({ classes, basePath, searchQuery }: Cha
 
                       {/* Collapse button */}
                       <div
-                        className="w-[34px] h-[34px] rounded-[8px] flex items-center justify-center transition-colors"
+                        className="w-[34px] h-[34px] rounded-[8px] flex items-center justify-center transition-colors flex-shrink-0"
                         style={{ background: accent.collapseBg, border: `1px solid ${accent.collapseBorder}` }}
                       >
                         <ChevronUp
