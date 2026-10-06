@@ -159,7 +159,9 @@ export default function LessonCanvas({
   const [showNodes, setShowNodes] = useState(false);
   const [showTextBoundary, setShowTextBoundary] = useState(false);
   const showTextBoundaryRef = useRef(false);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(initialData?.showSidebar !== false);
+  const showSidebarRef = useRef(showSidebar);
+  showSidebarRef.current = showSidebar;
   const [showGuideBorder, setShowGuideBorder] = useState(true);
   const [bwMode, setBwMode] = useState(initialData?.bwMode || false);
   const [canvasMode, setCanvasMode] = useState<'main' | 'rough' | 'kids'>(
@@ -1208,6 +1210,8 @@ export default function LessonCanvas({
   // ─── Auto-add new shapes to timeline ─────────────────────────────────────
   const knownShapeIdsRef = useRef<Set<string>>(new Set());
   const multiLinePasteRef = useRef(false);
+  const processedPasteShapesRef = useRef<Set<string>>(new Set());
+  const pasteCheckTimerRef = useRef<number>(0);
   // Track groups of text shapes pasted together for auto-reflow
   const pasteGroupsRef = useRef<Map<string, string[]>>(new Map()); // groupId → [shapeId, ...]
   const shapeHeightsRef = useRef<Map<string, number>>(new Map()); // shapeId → last known height
@@ -1860,8 +1864,9 @@ export default function LessonCanvas({
       globalAudioDurations: Object.keys(globalAudioDurations).length > 0 ? globalAudioDurations : undefined,
       laserStrokes: Object.keys(laserStrokes).length > 0 ? laserStrokes : undefined,
       laserTimings: Object.keys(laserTimings).length > 0 ? laserTimings : undefined,
+      showSidebar: showSidebar ? undefined : false,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings, showSidebar]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -1947,6 +1952,7 @@ export default function LessonCanvas({
         globalAudioDurations: Object.keys(globalAudioDurationsRef.current).length > 0 ? globalAudioDurationsRef.current : undefined,
         laserStrokes: Object.keys(laserStrokesRef.current).length > 0 ? laserStrokesRef.current : undefined,
         laserTimings: Object.keys(laserTimingsRef.current).length > 0 ? laserTimingsRef.current : undefined,
+        showSidebar: showSidebarRef.current ? undefined : false,
       };
 
       // Strip audio base64 data
@@ -3126,210 +3132,168 @@ export default function LessonCanvas({
     return () => clearInterval(interval);
   }, [isLocked, globalAudioPlaying, goNext]);
 
+
   // ─── Multi-line paste splitter ──────────────────────────────────────────
-  // When pasting text with multiple lines, create separate text shapes for each line
+  // tldraw v5 intercepts paste events. We detect multi-line text shapes
+  // after tldraw creates them and split them into individual shapes.
   useEffect(() => {
     if (!editor || isLocked) return;
 
-    const handlePaste = (e: ClipboardEvent) => {
-      // Only intercept when not editing a text shape (tldraw handles its own paste)
-      const editingShapeId = editor.getEditingShapeId();
-      if (editingShapeId) return;
+    const handleNewShapes = () => {
+      const allShapeIds = [...editor.getCurrentPageShapeIds()];
+      const allShapes = allShapeIds.map(id => editor.getShape(id as any)).filter(Boolean) as any[];
+      const textShapes = allShapes.filter(s => s.type === 'text');
 
-      // Don't intercept if focus is on an input/textarea (e.g., timeline, sidebar)
-      const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
+      console.log('[PASTE SCAN]', { totalShapes: allShapes.length, textShapes: textShapes.length, processed: processedPasteShapesRef.current.size });
 
-      const text = e.clipboardData?.getData('text/plain');
-      if (!text) return;
+      for (const shape of textShapes) {
+        const shapeId = shape.id as string;
+        if (processedPasteShapesRef.current.has(shapeId)) continue;
 
-      // Only split if there are multiple non-empty lines (real multi-line content)
-      const lines = text.split('\n').filter(line => line.trim().length > 0);
-      if (lines.length <= 1) return;
+        // Try richText (tldraw v5 format)
+        const richText = shape.props?.richText;
+        // Also try plain text prop
+        const plainTextProp = shape.props?.text;
 
-      // Also check: if clipboard has HTML or tldraw internal data, let tldraw handle it
-      const tldrawData = e.clipboardData?.getData('application/tldraw');
-      if (tldrawData) return;
-      const html = e.clipboardData?.getData('text/html');
-      if (html && html.includes('data-tldraw')) return;
-
-      // If HTML has list items, extract text with bullet prefixes and nesting depth
-      let finalLines: { text: string; indent: number }[] = lines.map(l => {
-        // Calculate indent from leading whitespace
-        const match = l.match(/^(\s*)/);
-        const leadingSpaces = match ? match[1].length : 0;
-        // Each tab = 1 level, every 2-4 spaces = 1 level
-        const tabCount = (match?.[1] || '').split('\t').length - 1;
-        const spaceIndent = Math.floor((leadingSpaces - tabCount) / 2);
-        const indent = tabCount + spaceIndent;
-        return { text: l.trimEnd(), indent: Math.min(indent, 4) };
-      });
-
-      if (html && (html.includes('<li') || html.includes('<ul') || html.includes('<ol'))) {
-        try {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, 'text/html');
-          const listItems = doc.querySelectorAll('li');
-
-          if (listItems.length > 0) {
-            const items: { text: string; indent: number }[] = [];
-            const orderedCounters: Record<number, number> = {};
-
-            listItems.forEach(li => {
-              // Google Docs uses aria-level for nesting depth (flat <li> list)
-              const ariaLevel = parseInt(li.getAttribute('aria-level') || '1', 10);
-              const depth = ariaLevel - 1; // 0-based
-
-              // Get direct text content
-              let directText = '';
-              for (const node of Array.from(li.childNodes)) {
-                if (node.nodeType === Node.TEXT_NODE) {
-                  directText += node.textContent || '';
-                } else if (node.nodeType === Node.ELEMENT_NODE && !(node as Element).matches('ul, ol')) {
-                  directText += (node as Element).textContent || '';
-                }
-              }
-              directText = directText.trim();
-              if (!directText) return;
-
-              // Determine bullet style
-              const listStyle = li.style?.listStyleType || '';
-              const isOrdered = listStyle === 'decimal' || li.parentElement?.tagName === 'OL';
-
-              if (isOrdered) {
-                orderedCounters[depth] = (orderedCounters[depth] || 0) + 1;
-                const prefix = '  '.repeat(depth) + `${orderedCounters[depth]}. `;
-                items.push({ text: prefix + directText, indent: depth });
-              } else {
-                const bullet = depth === 0 ? '• ' : '  '.repeat(depth) + '◦ ';
-                items.push({ text: bullet + directText, indent: depth });
-              }
-            });
-
-            if (items.length > 0) {
-              finalLines = items;
-            }
-          }
-        } catch { /* fallback to plain text lines */ }
-      }
-
-      // Intercept the paste
-      e.preventDefault();
-      e.stopImmediatePropagation();
-
-      // Flag so auto-add doesn't block these shapes (> 5 guard)
-      multiLinePasteRef.current = true;
-
-      // Get camera center as starting position
-      const viewportCenter = editor.getViewportScreenCenter();
-      const pagePoint = editor.screenToPage(viewportCenter);
-
-      const INDENT_WIDTH = 30;
-      // Use 80% of viewport width for text, so lines match what you see on screen
-      const viewportBounds = editor.getViewportPageBounds();
-      const TEXT_WIDTH = Math.max(600, viewportBounds.w * 0.7);
-      const startX = pagePoint.x - TEXT_WIDTH / 2;
-      const startY = pagePoint.y - (finalLines.length * 30) / 2;
-
-      const shapeIds: string[] = [];
-
-      finalLines.forEach((line, i) => {
-        const id = createShapeId();
-        editor.createShape({
-          id,
-          type: 'text',
-          x: startX + (line.indent * INDENT_WIDTH),
-          y: startY + i * 40,
-          props: {
-            richText: toRichText(line.text),
-            size: 'm',
-            autoSize: false,
-            w: TEXT_WIDTH - (line.indent * INDENT_WIDTH),
-          },
+        console.log('[PASTE SHAPE]', {
+          id: shapeId,
+          hasRichText: !!richText,
+          hasPlainText: !!plainTextProp,
+          richTextType: richText?.type,
+          contentBlocks: richText?.content?.length,
+          rawRichText: JSON.stringify(richText, null, 2)?.slice(0, 1000),
+          firstBlockType: richText?.content?.[0]?.type,
+          firstBlockContent: JSON.stringify(richText?.content?.[0]?.content)?.slice(0, 500),
+          allPropKeys: Object.keys(shape.props || {}),
         });
-        shapeIds.push(id);
-      });
 
-      if (shapeIds.length > 0) {
-        // Register as a paste group for auto-reflow
-        const groupId = `paste-${Date.now()}`;
-        pasteGroupsRef.current.set(groupId, shapeIds.map(id => id as string));
+        let plainText = '';
 
-        // After tldraw measures the shapes, reposition and create container frame
+        // Extract from richText
+        if (richText) {
+          try {
+            if (richText.type === 'doc' && Array.isArray(richText.content)) {
+              plainText = richText.content
+                .map((block: any) => {
+                  if (Array.isArray(block.content)) {
+                    return block.content.map((inline: any) => inline.text || '').join('');
+                  }
+                  return block.text || '';
+                })
+                .join('\n');
+            } else if (typeof richText === 'string') {
+              plainText = richText;
+            }
+          } catch (e) {
+            console.log('[PASTE EXTRACT ERROR]', e);
+          }
+        }
+
+        // Fallback to plain text prop
+        if (!plainText && plainTextProp) {
+          plainText = plainTextProp;
+        }
+
+        // Fallback: read text from the DOM (tldraw may not have written to store yet)
+        if (!plainText) {
+          const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
+          if (el) {
+            plainText = el.innerText || el.textContent || '';
+            console.log('[PASTE DOM FALLBACK]', { id: shapeId, domText: plainText.slice(0, 200) });
+          }
+        }
+
+        // If still empty, tldraw hasn't populated it yet — skip, will retry on next store change
+        if (!plainText.trim()) continue;
+
+        const lines = plainText.split('\n').filter((l: string) => l.trim().length > 0);
+        console.log('[PASTE RESULT]', { id: shapeId, text: plainText.slice(0, 200), lines: lines.length });
+
+        processedPasteShapesRef.current.add(shapeId);
+        if (lines.length <= 1) continue;
+
+        // Found multi-line — split it
+        console.log('[PASTE SPLITTING]', { id: shapeId, lineCount: lines.length });
+
+        const startX = shape.x;
+        const startY = shape.y;
+        editor.deleteShapes([shape.id]);
+
+        multiLinePasteRef.current = true;
+
+        const viewportBounds = editor.getViewportPageBounds();
+        const TEXT_WIDTH = Math.max(600, viewportBounds.w * 0.7);
+        const INDENT_WIDTH = 30;
+
+        const finalLines = lines.map((l: string) => {
+          const match = l.match(/^(\s*)/);
+          const leadingSpaces = match ? match[1].length : 0;
+          const tabCount = (match?.[1] || '').split('\t').length - 1;
+          const spaceIndent = Math.floor((leadingSpaces - tabCount) / 2);
+          return { text: l.trimEnd(), indent: Math.min(tabCount + spaceIndent, 4) };
+        });
+
+        const newShapeIds: string[] = [];
+        finalLines.forEach((line, i) => {
+          const id = createShapeId();
+          editor.createShape({
+            id,
+            type: 'text',
+            x: startX + (line.indent * INDENT_WIDTH),
+            y: startY + i * 40,
+            props: {
+              richText: toRichText(line.text),
+              size: 'm',
+              autoSize: false,
+              w: TEXT_WIDTH - (line.indent * INDENT_WIDTH),
+            },
+          });
+          newShapeIds.push(id as string);
+          processedPasteShapesRef.current.add(id as string);
+        });
+
         setTimeout(() => {
           const GAP = 10;
           let currentY = startY;
-
-          for (const sid of shapeIds) {
-            const shape = editor.getShape(sid as any) as any;
+          for (const sid of newShapeIds) {
+            const s = editor.getShape(sid as any) as any;
             const bounds = editor.getShapePageBounds(sid as any);
-            if (!shape || !bounds) continue;
-            if (shape.y !== currentY) {
-              editor.updateShape({ id: shape.id, type: shape.type, y: currentY });
-            }
-            shapeHeightsRef.current.set(sid as string, bounds.h);
+            if (!s || !bounds) continue;
+            if (s.y !== currentY) editor.updateShape({ id: s.id, type: s.type, y: currentY });
             currentY += bounds.h + GAP;
           }
-
-          // Store paste group info for later frame creation (when Boundary toggle is ON)
-          pasteFrameRef.current.set(groupId, {
-            frameId: '', // no frame yet — created on demand
-            baseX: startX,
-            textWidth: TEXT_WIDTH,
-          });
-
-          // If Boundary is already ON, create the frame immediately
-          if (showTextBoundaryRef.current) {
-            setTimeout(() => {
-              const FRAME_PADDING = 12;
-              const sIds = pasteGroupsRef.current.get(groupId);
-              if (!sIds || sIds.length === 0) return;
-              let minX = Infinity, minY = Infinity, maxY = -Infinity;
-              for (const sid of sIds) {
-                const shape = editor.getShape(sid as any) as any;
-                const bounds = editor.getShapePageBounds(sid as any);
-                if (!shape || !bounds) continue;
-                minX = Math.min(minX, shape.x);
-                minY = Math.min(minY, shape.y);
-                maxY = Math.max(maxY, shape.y + bounds.h);
-              }
-              if (minX === Infinity) return;
-              const fInfo = pasteFrameRef.current.get(groupId);
-              if (!fInfo) return;
-              const frameId = createShapeId();
-              editor.createShape({
-                id: frameId,
-                type: 'geo',
-                x: minX - FRAME_PADDING,
-                y: minY - FRAME_PADDING,
-                opacity: 0.5,
-                meta: { isPasteBoundary: true },
-                props: {
-                  geo: 'rectangle',
-                  w: fInfo.textWidth + FRAME_PADDING * 2,
-                  h: (maxY - minY) + FRAME_PADDING * 2,
-                  fill: 'none',
-                  color: 'light-blue',
-                  dash: 'dashed',
-                  size: 's',
-                },
-              });
-              fInfo.frameId = frameId as string;
-              fInfo.baseX = minX;
-              pasteFrameIdsRef.current.add(frameId as string);
-              editor.sendToBack([frameId]);
-            }, 300);
-          }
-
-          // Select all text shapes
-          editor.select(...shapeIds as any);
+          editor.select(...newShapeIds as any);
+          
+          // Explicitly add each new shape as a timeline step
+          const pageId = editor.getCurrentPageId() as string;
+          const newSteps: AnimationStep[] = newShapeIds.map((sid, i) => ({
+            id: `step-${Date.now()}-paste-${i}`,
+            shapeIds: [sid],
+            animation: 'appear' as AnimationType,
+            duration: 100,
+            label: 'Step',
+            action: 'enter' as StepAction,
+            pageId,
+          }));
+          setAnimationSteps((prev: AnimationStep[]) => [...prev, ...newSteps]);
+          markDirty();
+          
+          setTimeout(() => { multiLinePasteRef.current = false; }, 500);
         }, 200);
+
+        break;
       }
     };
 
-    // Window capture phase — fires before tldraw's paste handler
-    window.addEventListener('paste', handlePaste, true);
-    return () => window.removeEventListener('paste', handlePaste, true);
+    const unsub = editor.store.listen(() => {
+      clearTimeout(pasteCheckTimerRef.current);
+      pasteCheckTimerRef.current = window.setTimeout(handleNewShapes, 300);
+    }, { scope: 'document' });
+
+    return () => {
+      unsub();
+      clearTimeout(pasteCheckTimerRef.current);
+    };
   }, [editor, isLocked]);
 
   // ─── Auto-reflow paste groups when text shapes resize ───────────────────
@@ -4418,7 +4382,7 @@ export default function LessonCanvas({
                 <AlignJustify className="w-3 h-3" />
                 Boundary
               </button>
-              <button onClick={() => setShowSidebar(s => !s)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
+              <button onClick={() => { setShowSidebar(s => !s); markDirty(); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
                 <PanelRight className="w-3 h-3" />
               </button>
               <button
@@ -4840,8 +4804,8 @@ export default function LessonCanvas({
 
       {/* ─── Canvas + Sidebar ─────────────────────────────────────── */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Canvas column (fixed 85% width) — includes topic strip + canvas */}
-        <div className="w-[85%] flex flex-col overflow-hidden">
+        {/* Canvas column — full width when sidebar hidden, 85% when visible */}
+        <div className={`${showSidebar ? 'w-[85%]' : 'w-full'} flex flex-col overflow-hidden`}>
           {/* Topic / Subtitle strip above canvas — per page */}
           {editor && (() => {
             const pid = editor.getCurrentPageId() as string;
@@ -5248,7 +5212,7 @@ export default function LessonCanvas({
 
             // Calculate fullscreen canvas dimensions
             const fullscreenTotalH = window.innerHeight + 78;
-            const screenW = window.innerWidth * 0.85 - 6;
+            const screenW = window.innerWidth * (showSidebarRef.current ? 0.85 : 1) - 6;
             const toolbarHeight = 47;
             const hasTopic = pageTopicVisible.has(pid);
             const hasSubtitle = pageSubtitleVisible.has(pid);
@@ -5337,7 +5301,7 @@ export default function LessonCanvas({
 
         {!isLocked && !timelineFullyCollapsed && (
           <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
-            <div className="overflow-hidden shadow-2xl border border-[#191C20]" style={{ width: '85vw' }}>
+            <div className="overflow-hidden shadow-2xl border border-[#191C20]" style={{ width: showSidebar ? '85vw' : '100vw' }}>
               {showLaserTimeline ? (
                 <LaserSyncTimeline
                   strokes={laserStrokes}
@@ -5435,7 +5399,8 @@ export default function LessonCanvas({
         </div>
         </div>
 
-        {/* Sidebar (right 15%) — always rendered for layout, content conditional */}
+        {/* Sidebar (right 15%) — hidden when showSidebar is false */}
+        {showSidebar && (
         <div className="w-[15%] min-w-[180px] border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0" style={{ background: '#0B0D0F' }}>
           {showSidebar ? (
             isLocked ? (
@@ -5491,6 +5456,7 @@ export default function LessonCanvas({
             )
           ) : null}
         </div>
+        )}
       </div>
 
       </>

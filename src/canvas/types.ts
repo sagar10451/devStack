@@ -208,6 +208,8 @@ export interface LessonCanvasData {
   laserStrokes?: Record<string, LaserStroke[]>;
   /** Laser sync timings — strokeId → startTime in seconds */
   laserTimings?: Record<string, number>;
+  /** Whether the sidebar (sub-topics/progress) is visible */
+  showSidebar?: boolean;
 }
 
 /** A single recorded laser stroke */
