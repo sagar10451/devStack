@@ -716,7 +716,6 @@ export default function LessonCanvas({
       }
       // Save laser strokes recorded during this presenting session (rough mode only)
       if (wasPresenting && !isPresenting) {
-        console.log('[LASER SAVE]', { roughMode: roughModeRef.current, drawnPages: [...laserDrawnPagesRef.current] });
         if (roughModeRef.current) {
         const drawnPages = laserDrawnPagesRef.current;
         const sessionStrokes = laserSessionStrokesRef.current;
@@ -3144,8 +3143,6 @@ export default function LessonCanvas({
       const allShapes = allShapeIds.map(id => editor.getShape(id as any)).filter(Boolean) as any[];
       const textShapes = allShapes.filter(s => s.type === 'text');
 
-      console.log('[PASTE SCAN]', { totalShapes: allShapes.length, textShapes: textShapes.length, processed: processedPasteShapesRef.current.size });
-
       for (const shape of textShapes) {
         const shapeId = shape.id as string;
         if (processedPasteShapesRef.current.has(shapeId)) continue;
@@ -3154,18 +3151,6 @@ export default function LessonCanvas({
         const richText = shape.props?.richText;
         // Also try plain text prop
         const plainTextProp = shape.props?.text;
-
-        console.log('[PASTE SHAPE]', {
-          id: shapeId,
-          hasRichText: !!richText,
-          hasPlainText: !!plainTextProp,
-          richTextType: richText?.type,
-          contentBlocks: richText?.content?.length,
-          rawRichText: JSON.stringify(richText, null, 2)?.slice(0, 1000),
-          firstBlockType: richText?.content?.[0]?.type,
-          firstBlockContent: JSON.stringify(richText?.content?.[0]?.content)?.slice(0, 500),
-          allPropKeys: Object.keys(shape.props || {}),
-        });
 
         let plainText = '';
 
@@ -3184,9 +3169,7 @@ export default function LessonCanvas({
             } else if (typeof richText === 'string') {
               plainText = richText;
             }
-          } catch (e) {
-            console.log('[PASTE EXTRACT ERROR]', e);
-          }
+          } catch (_e) { /* extraction failed, try fallbacks */ }
         }
 
         // Fallback to plain text prop
@@ -3199,7 +3182,6 @@ export default function LessonCanvas({
           const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
           if (el) {
             plainText = el.innerText || el.textContent || '';
-            console.log('[PASTE DOM FALLBACK]', { id: shapeId, domText: plainText.slice(0, 200) });
           }
         }
 
@@ -3207,16 +3189,21 @@ export default function LessonCanvas({
         if (!plainText.trim()) continue;
 
         const lines = plainText.split('\n').filter((l: string) => l.trim().length > 0);
-        console.log('[PASTE RESULT]', { id: shapeId, text: plainText.slice(0, 200), lines: lines.length });
 
         processedPasteShapesRef.current.add(shapeId);
         if (lines.length <= 1) continue;
 
         // Found multi-line — split it
-        console.log('[PASTE SPLITTING]', { id: shapeId, lineCount: lines.length });
+        // Position shapes inside the guide area, not at the original shape position
+        const pid = editor.getCurrentPageId() as string;
+        const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
+        const startX = guide.x + 20;
+        const startY = guide.y + 20;
 
-        const startX = shape.x;
-        const startY = shape.y;
+        // ── LOCK camera to prevent tldraw auto-zoom during split ──
+        const savedCamera = { ...editor.getCamera() };
+        editor.setCameraOptions({ isLocked: true });
+
         editor.deleteShapes([shape.id]);
 
         multiLinePasteRef.current = true;
@@ -3262,12 +3249,11 @@ export default function LessonCanvas({
             if (s.y !== currentY) editor.updateShape({ id: s.id, type: s.type, y: currentY });
             currentY += bounds.h + GAP;
           }
-          editor.select(...newShapeIds as any);
-          
-          // Snap camera back to guide 1 at 75% so the view stays consistent
-          const pid = editor.getCurrentPageId() as string;
-          const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
-          editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
+          editor.selectNone();
+
+          // ── UNLOCK camera and restore original position ──
+          editor.setCameraOptions({ isLocked: false });
+          editor.setCamera(savedCamera, { force: true });
 
           // Explicitly add each new shape as a timeline step
           const pageId = editor.getCurrentPageId() as string;
@@ -4985,7 +4971,7 @@ export default function LessonCanvas({
           })()}
 
           {/* Canvas Area */}
-          <div className="flex-1 relative overflow-hidden">
+          <div className="flex-1 relative" style={{ overflow: 'hidden', minHeight: 0 }}>
             <div id="canvas-export-area" className="absolute inset-0">
           {/* tldraw canvas — always visible */}
           <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}>
