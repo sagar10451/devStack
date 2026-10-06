@@ -1,7 +1,6 @@
 /**
- * DrivePdfViewer — renders a Google Drive PDF with fit-to-width.
+ * PdfViewer — renders a PDF from any public URL with fit-to-width.
  * Uses react-pdf (PDF.js) for full control over rendering.
- * Downloads PDF from Google Drive public URL, renders all pages.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -12,18 +11,15 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
 
-interface DrivePdfViewerProps {
-  driveFileId: string;
+interface PdfViewerProps {
+  pdfUrl: string;
 }
 
-export default function DrivePdfViewer({ driveFileId }: DrivePdfViewerProps) {
+export default function PdfViewer({ pdfUrl }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Google Drive direct download URL for public files
-  const pdfUrl = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
 
   // Track container width for fit-to-width
   useEffect(() => {
@@ -44,7 +40,7 @@ export default function DrivePdfViewer({ driveFileId }: DrivePdfViewerProps) {
   }, []);
 
   const onDocumentLoadError = useCallback(() => {
-    setError('Failed to load PDF. The file may not be publicly shared.');
+    setError('Failed to load PDF. Please check the URL or try again later.');
   }, []);
 
   return (

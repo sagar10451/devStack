@@ -15,12 +15,12 @@ interface LessonPageProps {
   topicTitle: string;
   subtopicTitle: string;
   basePath: string;
-  driveFileId?: string;
+  pdfUrl?: string;
 }
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtopicTitle, basePath, driveFileId }: LessonPageProps) {
+export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtopicTitle, basePath, pdfUrl }: LessonPageProps) {
   const { site } = usePortalSafe();
   const [canvasData, setCanvasData] = useState<LessonCanvasData | null>(null);
   const [publicData, setPublicData] = useState<PublicCanvasData | null>(null);
@@ -39,8 +39,8 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
           setLoaded(true);
         });
     } else {
-      // Production: if driveFileId exists, skip fetching markdown
-      if (driveFileId) {
+      // Production: if pdfUrl exists, skip fetching markdown
+      if (pdfUrl) {
         setLoaded(true);
         return;
       }
@@ -59,7 +59,7 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
           setLoaded(true);
         });
     }
-  }, [site.id, topicSlug, subtopicSlug, driveFileId]);
+  }, [site.id, topicSlug, subtopicSlug, pdfUrl]);
 
   if (!loaded) {
     return (
@@ -71,8 +71,8 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
 
   // Production: show PDF viewer or markdown viewer
   if (!isLocalhost) {
-    // PDF from Google Drive — custom renderer with fit-to-width
-    if (driveFileId) {
+    // PDF from URL (Cloudflare R2 or any public URL) — custom renderer with fit-to-width
+    if (pdfUrl) {
       return (
         <div className="w-full h-[calc(100vh-78px)] flex flex-col" style={{ background: '#0B0D0F' }}>
           {/* Header */}
@@ -92,7 +92,7 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
               <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
             </div>
           }>
-            <DrivePdfViewer driveFileId={driveFileId} />
+            <DrivePdfViewer pdfUrl={pdfUrl} />
           </Suspense>
         </div>
       );

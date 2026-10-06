@@ -60,7 +60,7 @@ export default function PortalPage({ searchQuery, onSearchChange }: PortalPagePr
         topicTitle={parentNode?.title || site.brandName + ' ' + site.brandAccent}
         subtopicTitle={currentNode.title}
         basePath={`${site.basePath}/${parentSlugs.join('/')}`}
-        driveFileId={(currentNode as any).driveFileId}
+        pdfUrl={(currentNode as any).pdfUrl}
       />
     );
   }
