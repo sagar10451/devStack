@@ -122,6 +122,8 @@ interface LessonCanvasProps {
   siteId: string;
   watermark: string;
   backPath: string;
+  audioNotesMode?: boolean;
+  onToggleAudioNotes?: () => void;
 }
 
 export default function LessonCanvas({
@@ -132,6 +134,8 @@ export default function LessonCanvas({
   initialData,
   siteId,
   backPath,
+  audioNotesMode,
+  onToggleAudioNotes,
 }: LessonCanvasProps) {
   const { isPresenting, presentationTool } = usePresentation();
   const [isLocked, setIsLocked] = useState(true);
@@ -4751,6 +4755,26 @@ export default function LessonCanvas({
             {roughMode && (
             <button onClick={() => { setShowLaserTimeline(v => !v); setShowGlobalTimeline(false); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLaserTimeline ? 'bg-red-500/15 text-red-300 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               🔴 Laser Sync
+            </button>
+            )}
+            {/* Audio Notes — rough mode only */}
+            {roughMode && onToggleAudioNotes && (
+            <button
+              onClick={() => {
+                // Save current canvas before switching
+                const data = buildSaveData();
+                fetch('/__save-canvas', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
+                }).finally(() => {
+                  onToggleAudioNotes();
+                });
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${audioNotesMode ? 'bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-[0_0_10px_rgba(139,92,246,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              title={audioNotesMode ? 'Switch back to Rough canvas' : 'Switch to Audio Notes canvas'}
+            >
+              🎵 Audio Notes
             </button>
             )}
             </>

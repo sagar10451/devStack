@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect, useCallback } from 'react';
 import { usePortalSafe } from '../data/portalContext';
 import LessonCanvas from '../canvas/LessonCanvas';
 import PublicMarkdownViewer from '../canvas/PublicMarkdownViewer';
@@ -27,9 +28,16 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
   const [loaded, setLoaded] = useState(false);
   const [publicLoadFailed, setPublicLoadFailed] = useState(false);
 
+  // ─── Audio Notes toggle (rough mode alternate canvas) ─────────────────
+  const [audioNotesMode, setAudioNotesMode] = useState(false);
+  const effectiveSubtopicSlug = audioNotesMode ? `${subtopicSlug}_audioNotes` : subtopicSlug;
+
+  // Load canvas data for the effective slug
   useEffect(() => {
     if (isLocalhost) {
-      fetch(`/__load-canvas?siteId=${encodeURIComponent(site.id)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(subtopicSlug)}`)
+      setLoaded(false);
+      setCanvasData(null);
+      fetch(`/__load-canvas?siteId=${encodeURIComponent(site.id)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(effectiveSubtopicSlug)}`)
         .then(res => res.json())
         .then((data) => {
           if (data && data.version) setCanvasData(data as LessonCanvasData);
@@ -59,7 +67,11 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
           setLoaded(true);
         });
     }
-  }, [site.id, topicSlug, subtopicSlug, pdfUrl]);
+  }, [site.id, topicSlug, effectiveSubtopicSlug, subtopicSlug, pdfUrl]);
+
+  const handleToggleAudioNotes = useCallback(() => {
+    setAudioNotesMode(prev => !prev);
+  }, []);
 
   if (!loaded) {
     return (
@@ -127,16 +139,20 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
   }
 
   // Localhost: show full canvas editor
+  // key={effectiveSubtopicSlug} forces full re-mount when toggling Audio Notes
   return (
     <LessonCanvas
+      key={effectiveSubtopicSlug}
       topicSlug={topicSlug}
-      subtopicSlug={subtopicSlug}
+      subtopicSlug={effectiveSubtopicSlug}
       topicTitle={topicTitle}
       subtopicTitle={subtopicTitle}
       initialData={canvasData}
       siteId={site.id}
       watermark={site.watermark}
       backPath={site.basePath || '/'}
+      audioNotesMode={audioNotesMode}
+      onToggleAudioNotes={handleToggleAudioNotes}
     />
   );
 }
