@@ -29,7 +29,10 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
   const [publicLoadFailed, setPublicLoadFailed] = useState(false);
 
   // ─── Audio Notes toggle (rough mode alternate canvas) ─────────────────
-  const [audioNotesMode, setAudioNotesMode] = useState(false);
+  const audioNotesKey = `audioNotesMode:${site.id}:${topicSlug}:${subtopicSlug}`;
+  const [audioNotesMode, setAudioNotesMode] = useState(() => {
+    try { return localStorage.getItem(audioNotesKey) === 'true'; } catch { return false; }
+  });
   const effectiveSubtopicSlug = audioNotesMode ? `${subtopicSlug}_audioNotes` : subtopicSlug;
 
   // Load canvas data for the effective slug
@@ -70,8 +73,12 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
   }, [site.id, topicSlug, effectiveSubtopicSlug, subtopicSlug, pdfUrl]);
 
   const handleToggleAudioNotes = useCallback(() => {
-    setAudioNotesMode(prev => !prev);
-  }, []);
+    setAudioNotesMode(prev => {
+      const next = !prev;
+      try { localStorage.setItem(audioNotesKey, String(next)); } catch {}
+      return next;
+    });
+  }, [audioNotesKey]);
 
   if (!loaded) {
     return (

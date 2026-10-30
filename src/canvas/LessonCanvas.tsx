@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot, toRichText, createShapeId } from 'tldraw';
 import type { Editor } from 'tldraw';
-import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, AlignJustify, PanelRight, FlipHorizontal2, Frame, Music } from 'lucide-react';
+import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, PanelRight, FlipHorizontal2, Frame, Music } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
@@ -12,6 +12,7 @@ import PagePanel from './PagePanel';
 import { applyIdleAnimation } from './animationEngine';
 import { applyStepAnimation, clearStepAnimations, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
 import type { MoveRecord } from './stepAnimations';
+import { parseClipboardLines } from './pasteUtils';
 import { usePresentation } from '../data/presentationContext';
 import LaserPointer from '../components/LaserPointer';
 import LaserSyncTimeline from './LaserSyncTimeline';
@@ -139,6 +140,13 @@ export default function LessonCanvas({
 }: LessonCanvasProps) {
   const { isPresenting, presentationTool } = usePresentation();
   const [isLocked, setIsLocked] = useState(true);
+  // Audio Notes split canvas: left/right paste target
+  const [canvasSplitEnabled, setCanvasSplitEnabled] = useState(initialData?.canvasSplitEnabled || false);
+  const canvasSplitEnabledRef = useRef(false);
+  canvasSplitEnabledRef.current = canvasSplitEnabled;
+  const [splitPasteSide, setSplitPasteSide] = useState<'left' | 'right'>('left');
+  const splitPasteSideRef = useRef<'left' | 'right'>('left');
+  splitPasteSideRef.current = splitPasteSide;
   const [showPublicCanvas, setShowPublicCanvas] = useState(false);
   const [publicCanvasData, setPublicCanvasData] = useState<PublicCanvasData | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -161,18 +169,18 @@ export default function LessonCanvas({
   const [showAnimBar, setShowAnimBar] = useState(false);
   const [showLineConfig, setShowLineConfig] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
-  const [showTextBoundary, setShowTextBoundary] = useState(false);
+  const [showTextBoundary] = useState(false); // kept for boundary frame exclusion checks
   const showTextBoundaryRef = useRef(false);
   const [showSidebar, setShowSidebar] = useState(initialData?.showSidebar !== false);
   const showSidebarRef = useRef(showSidebar);
   showSidebarRef.current = showSidebar;
   const [showGuideBorder, setShowGuideBorder] = useState(true);
   const [bwMode, setBwMode] = useState(initialData?.bwMode || false);
-  const [canvasMode, setCanvasMode] = useState<'main' | 'rough' | 'kids'>(
+  const [canvasMode, setCanvasMode] = useState<'main' | 'rough' | 'reveal'>(
     (() => {
       const saved = initialData?.canvasMode || (initialData?.roughMode ? 'rough' : 'main');
-      // Kids mode removed — fall back to main
-      return saved === 'kids' ? 'main' : saved;
+      if (saved === 'kids') return 'main' as const;
+      return saved as 'main' | 'rough' | 'reveal';
     })()
   );
   const roughMode = canvasMode === 'rough';
@@ -244,8 +252,8 @@ export default function LessonCanvas({
   const [topicColorPickerOpen, setTopicColorPickerOpen] = useState(false);
   const [subtitleColorPickerOpen, setSubtitleColorPickerOpen] = useState(false);
   // Track which pages have topic/subtitle visible (toggled by toolbar buttons)
-  const [pageTopicVisible, setPageTopicVisible] = useState<Set<string>>(() => new Set(Object.keys(initialData?.pageTopics || {})));
-  const [pageSubtitleVisible, setPageSubtitleVisible] = useState<Set<string>>(() => new Set(Object.keys(initialData?.pageSubtitles || {})));
+  const [pageTopicVisible, setPageTopicVisible] = useState<Set<string>>(() => new Set(initialData?.pageTopicVisible || Object.keys(initialData?.pageTopics || {})));
+  const [pageSubtitleVisible, setPageSubtitleVisible] = useState<Set<string>>(() => new Set(initialData?.pageSubtitleVisible || Object.keys(initialData?.pageSubtitles || {})));
   const [guideResizeTick, setGuideResizeTick] = useState(0);
   // Multiple guide borders — per-page positions, shared count
   // guideBordersMap: { [pageId]: [{x,y}, ...] }
@@ -973,6 +981,7 @@ export default function LessonCanvas({
 
   const applyAnimationState = useCallback((_ed: Editor, steps: AnimationStep[], upToStep: number) => {
     if (steps.length === 0) return;
+    const isRevealMode = canvasModeRef.current === 'reveal';
 
     const visibilitySteps = steps.filter(s => (s.action || 'enter') !== 'none');
 
@@ -993,27 +1002,56 @@ export default function LessonCanvas({
         .flatMap(s => s.shapeIds)
     );
 
-    // Hide all tldraw animated shapes via CSS (except preloaded ones)
+    // Hide/dim all tldraw animated shapes via CSS (except preloaded ones)
     const allAnimatedIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isTldrawId));
     allAnimatedIds.forEach(shapeId => {
       if (preloadedIds.has(shapeId)) return;
       const el = getEl(shapeId);
-      if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
+      if (el) {
+        if (isRevealMode) {
+          el.style.visibility = 'visible';
+          el.style.opacity = '1';
+          el.classList.remove('reveal-shown', 'reveal-glow');
+          el.classList.add('reveal-dimmed');
+        } else {
+          el.style.visibility = 'hidden';
+          el.style.opacity = '0';
+        }
+      }
     });
 
-    // Hide all RF animated elements via class (except preloaded ones)
+    // Hide/dim all RF animated elements via class (except preloaded ones)
     const allRfIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isRfId));
     allRfIds.forEach(rfId => {
       if (preloadedIds.has(rfId)) return;
       const el = getEl(rfId);
-      if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
+      if (el) {
+        if (isRevealMode) {
+          el.classList.remove('rf-anim-hidden', 'reveal-shown', 'reveal-glow');
+          el.classList.add('rf-anim-visible', 'reveal-dimmed');
+          el.style.opacity = '1';
+        } else {
+          el.classList.add('rf-anim-hidden');
+          el.classList.remove('rf-anim-visible');
+        }
+      }
     });
 
-    // Also hide exit shape IDs from swap steps
+    // Also hide/dim exit shape IDs from swap steps
     const allExitIds = new Set(steps.flatMap(s => s.exitShapeIds || []).filter(isTldrawId));
     allExitIds.forEach(shapeId => {
       const el = getEl(shapeId);
-      if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
+      if (el) {
+        if (isRevealMode) {
+          el.style.visibility = 'visible';
+          el.style.opacity = '1';
+          el.classList.remove('reveal-shown', 'reveal-glow');
+          el.classList.add('reveal-dimmed');
+        } else {
+          el.style.visibility = 'hidden';
+          el.style.opacity = '0';
+        }
+      }
     });
     const allRfExitIds = new Set(steps.flatMap(s => s.exitShapeIds || []).filter(isRfId));
     allRfExitIds.forEach(rfId => {
@@ -1035,43 +1073,101 @@ export default function LessonCanvas({
           shouldBeHidden.add(shapeId);
           shouldBeVisible.delete(shapeId);
           const el = getEl(shapeId);
-          if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-shown', 'reveal-glow');
+              el.classList.add('reveal-dimmed');
+            } else {
+              el.style.visibility = 'hidden'; el.style.opacity = '0';
+            }
+          }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = getEl(rfId);
-          if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-shown', 'reveal-glow');
+              el.classList.add('reveal-dimmed');
+            } else {
+              el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible');
+            }
+          }
         });
       } else if (stepAction === 'swap') {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           shouldBeVisible.add(shapeId);
           shouldBeHidden.delete(shapeId);
           const el = getEl(shapeId);
-          if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-dimmed');
+              el.classList.add('reveal-shown', 'reveal-glow');
+            } else {
+              el.style.visibility = 'visible'; el.style.opacity = '1';
+            }
+          }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = getEl(rfId);
-          if (el) { el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible'); }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-dimmed');
+              el.classList.add('reveal-shown', 'reveal-glow');
+            } else {
+              el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible');
+            }
+            el.style.opacity = '1';
+          }
         });
         (steps[i].exitShapeIds || []).filter(isTldrawId).forEach(shapeId => {
           shouldBeHidden.add(shapeId);
           shouldBeVisible.delete(shapeId);
           const el = getEl(shapeId);
-          if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-shown', 'reveal-glow');
+              el.classList.add('reveal-dimmed');
+            } else {
+              el.style.visibility = 'hidden'; el.style.opacity = '0';
+            }
+          }
         });
         (steps[i].exitShapeIds || []).filter(isRfId).forEach(rfId => {
           const el = getEl(rfId);
-          if (el) { el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible'); }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-shown', 'reveal-glow');
+              el.classList.add('reveal-dimmed');
+            } else {
+              el.classList.add('rf-anim-hidden'); el.classList.remove('rf-anim-visible');
+            }
+          }
         });
       } else {
         steps[i].shapeIds.filter(isTldrawId).forEach(shapeId => {
           shouldBeVisible.add(shapeId);
           shouldBeHidden.delete(shapeId);
           const el = getEl(shapeId);
-          if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-dimmed');
+              el.classList.add('reveal-shown', 'reveal-glow');
+            } else {
+              el.style.visibility = 'visible'; el.style.opacity = '1';
+            }
+          }
         });
         steps[i].shapeIds.filter(isRfId).forEach(rfId => {
           const el = getEl(rfId);
-          if (el) { el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible'); }
+          if (el) {
+            if (isRevealMode) {
+              el.classList.remove('reveal-dimmed');
+              el.classList.add('reveal-shown', 'reveal-glow');
+            } else {
+              el.classList.remove('rf-anim-hidden'); el.classList.add('rf-anim-visible');
+            }
+            el.style.opacity = '1';
+          }
         });
       }
     }
@@ -1089,19 +1185,29 @@ export default function LessonCanvas({
           for (const shapeId of missingVisible) {
             const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
             if (el) {
-              el.style.visibility = 'visible';
-              el.style.opacity = '1';
+              if (isRevealMode) {
+                el.classList.remove('reveal-dimmed');
+                el.classList.add('reveal-shown');
+              } else {
+                el.style.visibility = 'visible';
+                el.style.opacity = '1';
+              }
             } else {
               stillMissing = true;
             }
           }
-          // Also ensure hidden shapes stay hidden (tldraw may re-render them)
+          // Also ensure hidden shapes stay hidden/dimmed (tldraw may re-render them)
           for (const shapeId of shouldBeHidden) {
             if (!isTldrawId(shapeId)) continue;
             const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement | null;
             if (el) {
-              el.style.visibility = 'hidden';
-              el.style.opacity = '0';
+              if (isRevealMode) {
+                el.classList.remove('reveal-shown', 'reveal-glow');
+                el.classList.add('reveal-dimmed');
+              } else {
+                el.style.visibility = 'hidden';
+                el.style.opacity = '0';
+              }
             }
           }
           if (stillMissing) {
@@ -1215,6 +1321,8 @@ export default function LessonCanvas({
   const multiLinePasteRef = useRef(false);
   const processedPasteShapesRef = useRef<Set<string>>(new Set());
   const pasteCheckTimerRef = useRef<number>(0);
+  // Capture clipboard HTML/plain before tldraw intercepts the paste event
+  const clipboardCaptureRef = useRef<{ plain: string; html: string } | null>(null);
   // Track groups of text shapes pasted together for auto-reflow
   const pasteGroupsRef = useRef<Map<string, string[]>>(new Map()); // groupId → [shapeId, ...]
   const shapeHeightsRef = useRef<Map<string, number>>(new Map()); // shapeId → last known height
@@ -1868,8 +1976,11 @@ export default function LessonCanvas({
       laserStrokes: Object.keys(laserStrokes).length > 0 ? laserStrokes : undefined,
       laserTimings: Object.keys(laserTimings).length > 0 ? laserTimings : undefined,
       showSidebar: showSidebar ? undefined : false,
+      canvasSplitEnabled: canvasSplitEnabled || undefined,
+      pageTopicVisible: [...pageTopicVisible],
+      pageSubtitleVisible: [...pageSubtitleVisible],
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings, showSidebar]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings, showSidebar, pageTopicVisible, pageSubtitleVisible, canvasSplitEnabled]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -1956,6 +2067,9 @@ export default function LessonCanvas({
         laserStrokes: Object.keys(laserStrokesRef.current).length > 0 ? laserStrokesRef.current : undefined,
         laserTimings: Object.keys(laserTimingsRef.current).length > 0 ? laserTimingsRef.current : undefined,
         showSidebar: showSidebarRef.current ? undefined : false,
+        canvasSplitEnabled: canvasSplitEnabledRef.current || undefined,
+        pageTopicVisible: [...pageTopicVisibleRef.current],
+        pageSubtitleVisible: [...pageSubtitleVisibleRef.current],
       };
 
       // Strip audio base64 data
@@ -2005,6 +2119,29 @@ export default function LessonCanvas({
     autoSaveTimerRef.current = interval as any;
     return () => clearInterval(interval);
   }, [siteId, topicSlug, subtopicSlug, subtopicTitle, initialData]);
+
+  // ─── Immediate save when topic/subtopic visibility changes ─────────────
+  const visibilitySaveSkipRef = useRef(true); // skip first render (mount)
+  useEffect(() => {
+    if (visibilitySaveSkipRef.current) { visibilitySaveSkipRef.current = false; return; }
+    if (!editorRef.current || !canvasReadyRef.current) return;
+    // Debounce slightly so the ref is updated
+    const t = setTimeout(() => {
+      const data = buildSaveData();
+      if (data.animationSteps) {
+        data.animationSteps = data.animationSteps.map((s: any) => {
+          if (s.audio?.data) return { ...s, audio: { ...s.audio, data: '' } };
+          return s;
+        });
+      }
+      fetch('/__save-canvas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, topicSlug, subtopicSlug, data }),
+      }).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [pageTopicVisible, pageSubtitleVisible]);
 
   // ─── Step audio helpers (Web Audio API for reliable volume control) ──────
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -3136,6 +3273,22 @@ export default function LessonCanvas({
   }, [isLocked, globalAudioPlaying, goNext]);
 
 
+  // ─── Capture clipboard data before tldraw intercepts paste ────────────────
+  useEffect(() => {
+    const handleCapture = (e: ClipboardEvent) => {
+      const plain = e.clipboardData?.getData('text/plain') || '';
+      const html = e.clipboardData?.getData('text/html') || '';
+      if (plain) {
+        clipboardCaptureRef.current = { plain, html };
+        // Auto-clear after 2s so stale captures don't affect later store changes
+        setTimeout(() => { clipboardCaptureRef.current = null; }, 2000);
+      }
+    };
+    // Capture phase fires before tldraw's handler
+    window.addEventListener('paste', handleCapture, true);
+    return () => window.removeEventListener('paste', handleCapture, true);
+  }, []);
+
   // ─── Multi-line paste splitter ──────────────────────────────────────────
   // tldraw v5 intercepts paste events. We detect multi-line text shapes
   // after tldraw creates them and split them into individual shapes.
@@ -3201,8 +3354,6 @@ export default function LessonCanvas({
         // Position shapes inside the guide area, not at the original shape position
         const pid = editor.getCurrentPageId() as string;
         const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
-        const startX = guide.x + 20;
-        const startY = guide.y + 20;
 
         // ── LOCK camera to prevent tldraw auto-zoom during split ──
         const savedCamera = { ...editor.getCamera() };
@@ -3212,11 +3363,37 @@ export default function LessonCanvas({
 
         multiLinePasteRef.current = true;
 
-        const viewportBounds = editor.getViewportPageBounds();
-        const TEXT_WIDTH = Math.max(600, viewportBounds.w * 0.7);
+        const sidebarFraction = showSidebarRef.current ? 0.85 : 1;
+        const screenW = window.innerWidth * sidebarFraction - 6;
+        const guideW = screenW / 0.75;
+
+        // Audio Notes split: each half is its own canvas area
+        const PASTE_PADDING = 45;
+        const SPLIT_GAP = 30; // gap around the center divider
+        let effectiveW: number;
+        let startX: number;
+        if (audioNotesMode && canvasSplitEnabledRef.current) {
+          const halfW = guideW / 2;
+          effectiveW = halfW - PASTE_PADDING - SPLIT_GAP / 2;
+          if (splitPasteSideRef.current === 'left') {
+            startX = guide.x + PASTE_PADDING;
+          } else {
+            startX = guide.x + halfW + SPLIT_GAP / 2;
+          }
+        } else {
+          effectiveW = guideW * 0.7;
+          startX = guide.x + PASTE_PADDING;
+        }
+        const startY = guide.y + PASTE_PADDING;
+        const TEXT_WIDTH = Math.max(300, effectiveW);
         const INDENT_WIDTH = 30;
 
-        const finalLines = lines.map((l: string) => {
+        // Use captured clipboard HTML for rich formatting (bullets, numbered lists, nesting)
+        // Fall back to basic plain-text indent parsing if capture is stale
+        const captured = clipboardCaptureRef.current;
+        clipboardCaptureRef.current = null;
+        const parsed = captured ? parseClipboardLines(captured.plain, captured.html) : null;
+        const finalLines = parsed || lines.map((l: string) => {
           const match = l.match(/^(\s*)/);
           const leadingSpaces = match ? match[1].length : 0;
           const tabCount = (match?.[1] || '').split('\t').length - 1;
@@ -3224,8 +3401,21 @@ export default function LessonCanvas({
           return { text: l.trimEnd(), indent: Math.min(tabCount + spaceIndent, 4) };
         });
 
+        const PASTE_PALETTES = [
+          ['white', 'light-blue'],
+          ['white', 'light-violet'],
+          ['light-blue', 'light-green'],
+        ] as const;
+        const palette = PASTE_PALETTES[Math.floor(Math.random() * PASTE_PALETTES.length)];
+
         const newShapeIds: string[] = [];
+        let colorIdx = 0;
         finalLines.forEach((line, i) => {
+          // Nested lines (indent > 0) inherit parent's color; top-level lines alternate
+          if (line.indent === 0) colorIdx = i === 0 ? 0 : colorIdx;
+          const color = line.indent > 0
+            ? palette[colorIdx % palette.length]
+            : palette[(colorIdx++) % palette.length];
           const id = createShapeId();
           editor.createShape({
             id,
@@ -3234,6 +3424,8 @@ export default function LessonCanvas({
             y: startY + i * 40,
             props: {
               richText: toRichText(line.text),
+              color: color,
+              font: 'serif',
               size: 'm',
               autoSize: false,
               w: TEXT_WIDTH - (line.indent * INDENT_WIDTH),
@@ -3242,6 +3434,11 @@ export default function LessonCanvas({
           newShapeIds.push(id as string);
           processedPasteShapesRef.current.add(id as string);
         });
+
+        // Register paste group for Boundary feature
+        const groupId = `paste-${Date.now()}`;
+        pasteGroupsRef.current.set(groupId, [...newShapeIds]);
+        pasteFrameRef.current.set(groupId, { frameId: '', baseX: startX, textWidth: TEXT_WIDTH });
 
         setTimeout(() => {
           const GAP = 10;
@@ -3270,7 +3467,28 @@ export default function LessonCanvas({
             action: 'enter' as StepAction,
             pageId,
           }));
-          setAnimationSteps((prev: AnimationStep[]) => [...prev, ...newSteps]);
+          if (audioNotesMode && canvasSplitEnabledRef.current && splitPasteSideRef.current === 'right') {
+            // Right-side steps go after all existing steps (left comes first)
+            setAnimationSteps((prev: AnimationStep[]) => [...prev, ...newSteps]);
+          } else if (audioNotesMode && canvasSplitEnabledRef.current && splitPasteSideRef.current === 'left') {
+            // Left-side steps: insert before any right-side steps on this page
+            const guideForSort = getGuideBordersForPage(pageId)[0] || { x: 0, y: 0 };
+            const sidebarFrac = showSidebarRef.current ? 0.85 : 1;
+            const gW = (window.innerWidth * sidebarFrac - 6) / 0.75;
+            const midX = guideForSort.x + gW / 2;
+            setAnimationSteps((prev: AnimationStep[]) => {
+              // Find the first right-side step on this page
+              const insertIdx = prev.findIndex(s => {
+                if (s.pageId !== pageId) return false;
+                const shape = editor.getShape(s.shapeIds[0] as any) as any;
+                return shape && shape.x >= midX;
+              });
+              if (insertIdx === -1) return [...prev, ...newSteps];
+              return [...prev.slice(0, insertIdx), ...newSteps, ...prev.slice(insertIdx)];
+            });
+          } else {
+            setAnimationSteps((prev: AnimationStep[]) => [...prev, ...newSteps]);
+          }
           markDirty();
           
           setTimeout(() => { multiLinePasteRef.current = false; }, 500);
@@ -3297,8 +3515,6 @@ export default function LessonCanvas({
     const GAP = 10;
 
     const handleReflow = () => {
-      // Only reflow when Boundary mode is active
-      if (!showTextBoundaryRef.current) return;
       // Don't reflow while user is dragging/resizing
       if (editor.getInstanceState().isChangingStyle) return;
       const selectedIds = new Set(editor.getSelectedShapeIds().map(id => id as string));
@@ -3362,8 +3578,6 @@ export default function LessonCanvas({
     if (!editor || isLocked) return;
 
     const handleWidthSync = () => {
-      // Only sync when Boundary mode is active
-      if (!showTextBoundaryRef.current) return;
       // Check if any selected shape belongs to a paste group
       const selectedIds = new Set(editor.getSelectedShapeIds().map(id => id as string));
       if (selectedIds.size !== 1) return;
@@ -3415,165 +3629,112 @@ export default function LessonCanvas({
     return () => unsub();
   }, [editor, isLocked]);
 
-  // ─── Frame container resize → adjust all text shapes in paste group ─────
+  // ─── Auto-resize paste groups on sidebar toggle ──────────────────────────
   useEffect(() => {
     if (!editor || isLocked) return;
-    const FRAME_PADDING = 12;
     const INDENT_WIDTH = 30;
     const GAP = 10;
 
-    // Track last known frame widths to detect changes
-    const lastFrameWidths = new Map<string, number>();
+    // Compute current guide width and text width (matching paste padding)
+    const sidebarFraction = showSidebarRef.current ? 0.85 : 1;
+    const screenW = window.innerWidth * sidebarFraction - 6;
+    const guideW = screenW / 0.75;
 
-    const handleFrameResize = () => {
-      // Only handle frame resize when Boundary mode is active
-      if (!showTextBoundaryRef.current) return;
-      for (const [groupId, frameInfo] of pasteFrameRef.current.entries()) {
-        const frame = editor.getShape(frameInfo.frameId as any) as any;
-        if (!frame) {
-          pasteFrameRef.current.delete(groupId);
-          continue;
+    const PASTE_PADDING = 45;
+    const SPLIT_GAP = 30;
+
+    // Resize all autoSize:false text shapes on every page (paste-created shapes)
+    const allPageIds = editor.getPages().map(p => p.id as string);
+    for (const pid of allPageIds) {
+      const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
+      const midX = guide.x + guideW / 2;
+
+      const shapeIds = [...editor.getPageShapeIds(pid as any)];
+      const textShapes = shapeIds
+        .map(id => editor.getShape(id as any) as any)
+        .filter(s => s && s.type === 'text' && s.props?.autoSize === false);
+
+      if (textShapes.length === 0) continue;
+
+      for (const shape of textShapes) {
+        let baseX: number;
+        let targetW: number;
+
+        if (audioNotesMode && canvasSplitEnabled) {
+          const halfW = guideW / 2;
+          const effectiveW = halfW - PASTE_PADDING - SPLIT_GAP / 2;
+          const isRight = shape.x >= midX;
+          baseX = isRight ? midX + SPLIT_GAP / 2 : guide.x + PASTE_PADDING;
+          targetW = Math.max(300, effectiveW);
+        } else {
+          baseX = guide.x + PASTE_PADDING;
+          targetW = Math.max(400, guideW * 0.7);
         }
 
-        const currentFrameW = frame.props?.w;
-        if (!currentFrameW) continue;
-
-        const lastW = lastFrameWidths.get(groupId) || (frameInfo.textWidth + FRAME_PADDING * 2);
-        if (Math.abs(currentFrameW - lastW) < 2) continue;
-        lastFrameWidths.set(groupId, currentFrameW);
-
-        const shapeIds = pasteGroupsRef.current.get(groupId);
-        if (!shapeIds || shapeIds.length === 0) continue;
-
-        // New text width based on frame width
-        const newTextWidth = currentFrameW - FRAME_PADDING * 2;
-        if (newTextWidth < 100) continue;
-
-        // Get the base X from the frame
-        const newBaseX = frame.x + FRAME_PADDING;
-
-        // Update each text shape's width and x position
-        for (const sid of shapeIds) {
-          const shape = editor.getShape(sid as any) as any;
-          if (!shape || shape.type !== 'text') continue;
-
-          const indent = Math.round((shape.x - frameInfo.baseX) / INDENT_WIDTH);
-          const clampedIndent = Math.max(0, indent);
-          const shapeW = newTextWidth - clampedIndent * INDENT_WIDTH;
-          if (shapeW < 50) continue;
-
-          const updates: any = { id: shape.id, type: shape.type };
-          if (Math.abs((shape.props?.w || 0) - shapeW) > 2) {
-            updates.props = { ...shape.props, w: shapeW };
-          }
-          updates.x = newBaseX + clampedIndent * INDENT_WIDTH;
-
-          editor.updateShape(updates);
+        const indent = Math.max(0, Math.round((shape.x - baseX) / INDENT_WIDTH));
+        const shapeW = targetW - indent * INDENT_WIDTH;
+        if (shapeW > 50 && Math.abs((shape.props?.w || 0) - shapeW) > 2) {
+          editor.updateShape({
+            id: shape.id,
+            type: shape.type,
+            props: { ...shape.props, w: shapeW },
+          });
         }
+      }
 
-        // Update stored base X and text width
-        frameInfo.baseX = newBaseX;
+      // Update stored textWidth for any tracked groups on this page
+      const newTextWidth = (audioNotesMode && canvasSplitEnabled) ? Math.max(300, guideW / 2 - PASTE_PADDING - SPLIT_GAP / 2) : Math.max(400, guideW * 0.7);
+      for (const [, frameInfo] of pasteFrameRef.current.entries()) {
         frameInfo.textWidth = newTextWidth;
+      }
+    }
 
-        // Reflow vertically after width changes
-        setTimeout(() => {
-          const existingIds = shapeIds.filter(sid => editor.getShape(sid as any));
-          let currentY = frame.y + FRAME_PADDING;
-          let totalH = 0;
+    // Reflow all autoSize:false text shapes vertically after width changes
+    setTimeout(() => {
+      const allPids = editor.getPages().map(p => p.id as string);
+      for (const pid of allPids) {
+        const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
+        const midX = guide.x + guideW / 2;
 
-          for (const sid of existingIds) {
-            const shape = editor.getShape(sid as any) as any;
-            const bounds = editor.getShapePageBounds(sid as any);
-            if (!shape || !bounds) continue;
+        const sids = [...editor.getPageShapeIds(pid as any)];
+        const texts = sids
+          .map(id => editor.getShape(id as any) as any)
+          .filter(s => s && s.type === 'text' && s.props?.autoSize === false);
+
+        if (texts.length === 0) continue;
+
+        if (audioNotesMode && canvasSplitEnabled) {
+          // Reflow left and right sides independently
+          const leftShapes = texts.filter(s => s.x < midX).sort((a: any, b: any) => a.y - b.y);
+          const rightShapes = texts.filter(s => s.x >= midX).sort((a: any, b: any) => a.y - b.y);
+          for (const group of [leftShapes, rightShapes]) {
+            if (group.length === 0) continue;
+            let currentY = group[0].y;
+            for (const shape of group) {
+              const bounds = editor.getShapePageBounds(shape.id as any);
+              if (!bounds) continue;
+              if (Math.abs(shape.y - currentY) > 1) {
+                editor.updateShape({ id: shape.id, type: shape.type, y: currentY });
+              }
+              currentY += bounds.h + GAP;
+            }
+          }
+        } else {
+          // Single column reflow
+          const sorted = texts.sort((a: any, b: any) => a.y - b.y);
+          let currentY = sorted[0].y;
+          for (const shape of sorted) {
+            const bounds = editor.getShapePageBounds(shape.id as any);
+            if (!bounds) continue;
             if (Math.abs(shape.y - currentY) > 1) {
               editor.updateShape({ id: shape.id, type: shape.type, y: currentY });
             }
-            shapeHeightsRef.current.set(sid, bounds.h);
             currentY += bounds.h + GAP;
-            totalH = currentY - (frame.y + FRAME_PADDING) - GAP;
           }
-
-          // Update frame height to fit content
-          const newFrameH = totalH + FRAME_PADDING * 2;
-          if (Math.abs(frame.props.h - newFrameH) > 2) {
-            editor.updateShape({
-              id: frame.id,
-              type: frame.type,
-              props: { ...frame.props, h: newFrameH },
-            });
-          }
-        }, 100);
-      }
-    };
-
-    const unsub = editor.store.listen(handleFrameResize, { scope: 'document' });
-    return () => unsub();
-  }, [editor, isLocked]);
-
-  // ─── Toggle text boundary frames visibility ──────────────────────────────
-  useEffect(() => {
-    if (!editor) return;
-
-    if (showTextBoundary) {
-      // Create frames for all paste groups that don't have one yet
-      const FRAME_PADDING = 12;
-      for (const [groupId, frameInfo] of pasteFrameRef.current.entries()) {
-        const shapeIds = pasteGroupsRef.current.get(groupId);
-        if (!shapeIds || shapeIds.length === 0) continue;
-
-        // Delete old frame if exists
-        if (frameInfo.frameId) {
-          const oldFrame = editor.getShape(frameInfo.frameId as any);
-          if (oldFrame) editor.deleteShapes([frameInfo.frameId as any]);
-        }
-
-        // Calculate bounds from existing shapes
-        let minX = Infinity, minY = Infinity, maxY = -Infinity;
-        for (const sid of shapeIds) {
-          const shape = editor.getShape(sid as any) as any;
-          const bounds = editor.getShapePageBounds(sid as any);
-          if (!shape || !bounds) continue;
-          minX = Math.min(minX, shape.x);
-          minY = Math.min(minY, shape.y);
-          maxY = Math.max(maxY, shape.y + bounds.h);
-        }
-        if (minX === Infinity) continue;
-
-        const frameId = createShapeId();
-        editor.createShape({
-          id: frameId,
-          type: 'geo',
-          x: minX - FRAME_PADDING,
-          y: minY - FRAME_PADDING,
-          opacity: 0.5,
-          meta: { isPasteBoundary: true },
-          props: {
-            geo: 'rectangle',
-            w: frameInfo.textWidth + FRAME_PADDING * 2,
-            h: (maxY - minY) + FRAME_PADDING * 2,
-            fill: 'none',
-            color: 'light-blue',
-            dash: 'dashed',
-            size: 's',
-          },
-        });
-
-        frameInfo.frameId = frameId as string;
-        frameInfo.baseX = minX;
-        pasteFrameIdsRef.current.add(frameId as string);
-      }
-    } else {
-      // Delete all frames
-      for (const [, frameInfo] of pasteFrameRef.current.entries()) {
-        if (frameInfo.frameId) {
-          const frame = editor.getShape(frameInfo.frameId as any);
-          if (frame) editor.deleteShapes([frameInfo.frameId as any]);
-          pasteFrameIdsRef.current.delete(frameInfo.frameId);
-          frameInfo.frameId = '';
         }
       }
-    }
-  }, [editor, showTextBoundary]);
+    }, 150);
+  }, [editor, isLocked, showSidebar, canvasSplitEnabled]);
 
   // Warn before refresh if audio files are loaded in memory
   useEffect(() => {
@@ -4174,7 +4335,7 @@ export default function LessonCanvas({
   return (
     <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}>
       {/* 16:9 Recording Guide — visible only in presenting mode before first step */}
-      <RecordingGuide visible={isPresenting && isLocked && currentStep === -1 && revealedTopicPages.size === 0} />
+      <RecordingGuide visible={isPresenting && isLocked && currentStep === -1 && revealedTopicPages.size === 0 && !(roughMode && audioNotesMode && canvasSplitEnabled)} />
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
       <div className="flex items-center px-4 py-3 border-b border-white/[0.12] flex-shrink-0 min-w-0" style={{ background: '#0B0D0F', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
         {/* Fixed left: Back + title (title hidden when unlocked for more button space) */}
@@ -4372,10 +4533,6 @@ export default function LessonCanvas({
               <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 <Boxes className="w-3 h-3" />
                 Nodes
-              </button>
-              <button onClick={() => { const next = !showTextBoundary; setShowTextBoundary(next); showTextBoundaryRef.current = next; }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showTextBoundary ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Show/hide text paste boundaries">
-                <AlignJustify className="w-3 h-3" />
-                Boundary
               </button>
               <button onClick={() => { setShowSidebar(s => !s); markDirty(); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
                 <PanelRight className="w-3 h-3" />
@@ -4654,11 +4811,11 @@ export default function LessonCanvas({
                   onClick={() => setShowModeDropdown(v => !v)}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                     canvasMode === 'rough' ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.2)]' :
-                    canvasMode === 'kids' ? 'bg-pink-500/15 text-pink-300 border border-pink-500/30 shadow-[0_0_10px_rgba(236,72,153,0.2)]' :
+                    canvasMode === 'reveal' ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' :
                     'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'
                   }`}
                 >
-                  {canvasMode === 'rough' ? '📝 Rough' : canvasMode === 'kids' ? '🧒 Kids' : '🎯 Main'}
+                  {canvasMode === 'rough' ? '📝 Rough' : canvasMode === 'reveal' ? '🖍 Highlight' : '🎯 Main'}
                   <svg className={`w-3 h-3 transition-transform ${showModeDropdown ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 5l3 3 3-3" /></svg>
                 </button>
                 {showModeDropdown && (
@@ -4679,6 +4836,7 @@ export default function LessonCanvas({
                       {[
                         { id: 'main' as const, label: '🎯 Main', color: 'text-blue-300' },
                         { id: 'rough' as const, label: '📝 Rough', color: 'text-yellow-300' },
+                        { id: 'reveal' as const, label: '🖍 Highlight', color: 'text-emerald-300' },
                       ].map(mode => (
                         <button
                           key={mode.id}
@@ -4728,9 +4886,9 @@ export default function LessonCanvas({
                   markDirty();
                 }}
                 className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageSubtitleVisible.has(editor.getCurrentPageId() as string) ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_10px_rgba(20,184,166,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-                title="Show/hide subtitle for this page"
+                title="Show/hide subtopic for this page"
               >
-                Subtitle
+                Subtopic
               </button>
             </>
           )}
@@ -4775,6 +4933,60 @@ export default function LessonCanvas({
               title={audioNotesMode ? 'Switch back to Rough canvas' : 'Switch to Audio Notes canvas'}
             >
               🎵 Audio Notes
+            </button>
+            )}
+            {/* Canvas Splitter — Audio Notes only */}
+            {roughMode && audioNotesMode && (
+            <button
+              onClick={() => {
+                if (canvasSplitEnabled) {
+                  // Disabling — warn about right-side deletion
+                  if (!editor) return;
+                  const pid = editor.getCurrentPageId() as string;
+                  const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
+                  const sidebarFrac = showSidebarRef.current ? 0.85 : 1;
+                  const gW = (window.innerWidth * sidebarFrac - 6) / 0.75;
+                  const midX = guide.x + gW / 2;
+
+                  // Check if any right-side shapes exist
+                  const allShapeIds = [...editor.getCurrentPageShapeIds()];
+                  const rightShapes = allShapeIds
+                    .map(id => editor.getShape(id as any) as any)
+                    .filter(s => s && s.type === 'text' && s.props?.autoSize === false && s.x >= midX);
+
+                  if (rightShapes.length > 0) {
+                    if (!window.confirm(`Disabling Canvas Splitter will delete ${rightShapes.length} right-side note${rightShapes.length > 1 ? 's' : ''}. Left-side notes will expand to full width.\n\nContinue?`)) return;
+                    // Delete right-side shapes
+                    const rightIds = rightShapes.map((s: any) => s.id);
+                    editor.deleteShapes(rightIds);
+                    // Remove their timeline steps
+                    const rightIdSet = new Set(rightIds.map((id: any) => id as string));
+                    setAnimationSteps(prev => prev.filter(step => !step.shapeIds.some(sid => rightIdSet.has(sid))));
+                  }
+                  setCanvasSplitEnabled(false);
+                  setSplitPasteSide('left');
+                  markDirty();
+                } else {
+                  // Enabling — shapes will resize via the effect
+                  setCanvasSplitEnabled(true);
+                  setSplitPasteSide('left');
+                  markDirty();
+                }
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${canvasSplitEnabled ? 'bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-[0_0_10px_rgba(139,92,246,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              title="Split canvas into left/right halves"
+            >
+              ✂ Canvas Splitter
+            </button>
+            )}
+            {/* Left/Right paste toggle — Audio Notes split canvas only */}
+            {roughMode && audioNotesMode && canvasSplitEnabled && (
+            <button
+              onClick={() => setSplitPasteSide(s => s === 'left' ? 'right' : 'left')}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${splitPasteSide === 'left' ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]'}`}
+              title={`Paste target: ${splitPasteSide} side`}
+            >
+              {splitPasteSide === 'left' ? '◧ Left' : '◨ Right'}
             </button>
             )}
             </>
@@ -4920,7 +5132,7 @@ export default function LessonCanvas({
                   </div>
                 )}
                 {hasSubtitle && (
-                  <div key={`subtitle-${pid}`} className="flex justify-start" style={{ visibility: sVisible ? 'visible' : 'hidden', opacity: sVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
+                  <div key={`subtitle-${pid}`} className="flex justify-start items-center gap-2" style={{ visibility: sVisible ? 'visible' : 'hidden', opacity: sVisible ? 1 : 0, transition: 'opacity 0.3s' }}>
                     <div className={`relative inline-flex items-center rounded-full ${sPlayAnim ? `step-anim-${sAnim}` : ''} ${isLocked && sMode === 'animate' && revealedSubtitlePages.has(pid) && sAnim === 'none' ? 'subtitle-flicker-in' : ''}`} style={{ padding: '4px 16px 4px 0', background: `rgba(255,255,255,0.03)`, backdropFilter: 'blur(8px)', boxShadow: sVisible ? `0 0 12px ${sBorder}30, 0 0 1px ${sBorder}40` : 'none' }}
                       onAnimationEnd={(e) => {
                         if (e.animationName.startsWith('step-') && !e.currentTarget.classList.contains('subtitle-flicker-in')) {
@@ -4932,22 +5144,24 @@ export default function LessonCanvas({
                       {/* Left accent bar */}
                       <div style={{ width: 3, height: '60%', minHeight: 16, borderRadius: 2, background: sBorder, boxShadow: `0 0 6px ${sBorder}80`, marginLeft: 10, marginRight: 10, flexShrink: 0 }} />
                       <div className="inline-grid items-center">
-                        <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22 }}>{sText || 'Subtitle'}</span>
+                        <span className="invisible whitespace-pre col-start-1 row-start-1 font-bold" style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22 }}>{sText || 'Subtopic'}</span>
                         <input
                           type="text"
                           value={sText}
                           onChange={(e) => { setPageSubtitles(prev => ({ ...prev, [pid]: e.target.value })); markDirty(); }}
-                          placeholder="Subtitle"
+                          placeholder="Subtopic"
                           readOnly={isLocked}
                           className="bg-transparent font-bold outline-none placeholder:text-[#4a4a6a] placeholder:font-normal col-start-1 row-start-1"
                           style={{ fontFamily: 'tldraw_serif, Georgia, serif', fontSize: 22, width: 0, minWidth: '100%', color: sColor, textShadow: `0 0 10px ${sColor}50, 0 0 4px ${sColor}30` }}
                         />
                       </div>
-                      {!isLocked && (
-                        <button onClick={() => { setSubtitleColorPickerOpen(v => !v); setTopicColorPickerOpen(false); }} className="ml-1 w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: sColor }} title="Change color" />
-                      )}
-                      {subtitleColorPickerOpen && !isLocked && (
-                        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1a2e] border border-[#191C20] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    </div>
+                    {!isLocked && (
+                      <button onClick={(e) => { e.stopPropagation(); setSubtitleColorPickerOpen(v => !v); setTopicColorPickerOpen(false); }} className="w-4 h-4 rounded-full border border-slate-300 flex-shrink-0" style={{ background: sColor }} title="Change color" />
+                    )}
+                    {subtitleColorPickerOpen && !isLocked && (
+                      <div className="relative">
+                        <div className="absolute top-0 left-0 mt-1 z-50 bg-[#1a1a2e] border border-[#191C20] rounded-lg shadow-lg p-2 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <div className="text-[8px] text-slate-400 font-medium">Text</div>
                           <div className="flex gap-1 flex-wrap" style={{ maxWidth: 140 }}>
                             {['#1e293b','#3b82f6','#ef4444','#22c55e','#f97316','#8b5cf6','#eab308','#9ca3af','#ffffff'].map(c => (
@@ -4986,8 +5200,8 @@ export default function LessonCanvas({
                             </label>
                           </div>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -5308,7 +5522,57 @@ export default function LessonCanvas({
                 <div className="absolute top-0 bottom-0 right-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderRight: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
                   onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
+                {/* Audio Notes split divider — now rendered in separate always-visible overlay */}
               </div>
+              );
+            });
+          })()}
+
+          {/* Audio Notes split overlay — visible in all states (editing + presenting) */}
+          {audioNotesMode && canvasSplitEnabled && tldrawCamera && editor && (() => {
+            const pid = editor.getCurrentPageId() as string;
+            const cam = tldrawCamera;
+            const sidebarFrac = showSidebarRef.current ? 0.85 : 1;
+            const sW = window.innerWidth * sidebarFrac - 6;
+            const guidePageW = sW / 0.75;
+            const currentPageBorders = getGuideBordersForPage(pid);
+
+            return currentPageBorders.map((guide, idx) => {
+              const screenX = (guide.x + cam.x) * cam.z;
+              const screenY = (guide.y + cam.y) * cam.z;
+              const screenWPx = guidePageW * cam.z;
+              const midPageX = guide.x + guidePageW / 2;
+
+              // Get left-side text shapes for row lines
+              const sids = [...editor.getPageShapeIds(pid as any)];
+              const leftTexts = sids
+                .map(id => editor.getShape(id as any) as any)
+                .filter(s => s && s.type === 'text' && s.props?.autoSize === false && s.x < midPageX)
+                .sort((a: any, b: any) => a.y - b.y);
+
+              return (
+                <div
+                  key={`split-overlay-${idx}`}
+                  className="absolute z-[6] pointer-events-none"
+                  style={{ left: screenX, top: screenY, width: screenWPx, height: '100%' }}
+                >
+                  {/* Vertical center divider */}
+                  <div className="absolute top-0 bottom-0" style={{ left: '50%', transform: 'translateX(-50%)', width: 2, background: 'rgba(139, 92, 246, 0.5)', boxShadow: '0 0 8px rgba(139, 92, 246, 0.4)' }} />
+                  {/* Horizontal row lines */}
+                  {leftTexts.map((shape: any, i: number) => {
+                    const bounds = editor.getShapePageBounds(shape.id as any);
+                    if (!bounds) return null;
+                    const linePageY = bounds.y + bounds.h;
+                    const lineScreenY = (linePageY - guide.y) * cam.z;
+                    return (
+                      <div
+                        key={`split-row-${i}`}
+                        className="absolute left-0 right-0"
+                        style={{ top: lineScreenY, height: 1, background: 'rgba(239, 68, 68, 0.7)', boxShadow: '0 0 6px rgba(239, 68, 68, 0.4)' }}
+                      />
+                    );
+                  })}
+                </div>
               );
             });
           })()}

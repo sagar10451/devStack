@@ -891,6 +891,26 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
 
 /* (paste frame styles handled via tldraw opacity) */
 
+/* ─── Reveal mode animation styles ───────────────────────────────────────── */
+/* Clipped state — fully hidden via clip-path mask */
+.reveal-dimmed {
+  clip-path: inset(0 100% 0 0) !important;
+  transition: clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+/* Revealed state — L→R swipe wipe */
+.reveal-shown {
+  clip-path: inset(0 0 0 0) !important;
+  transition: clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+/* Glow pulse on just-revealed elements */
+.reveal-glow {
+  animation: reveal-glow-pulse 1s ease-out forwards !important;
+}
+@keyframes reveal-glow-pulse {
+  0% { filter: drop-shadow(0 0 12px rgba(99, 102, 241, 0.8)) drop-shadow(0 0 24px rgba(99, 102, 241, 0.4)); }
+  100% { filter: none; }
+}
+
 /* Hide tldraw's "Back to content" helper button */
 .tlui-helper-buttons {
   display: none !important;

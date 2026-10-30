@@ -178,6 +178,10 @@ export interface LessonCanvasData {
   pageTopicModes?: Record<string, 'preload' | 'animate'>;
   /** Per-page subtitle mode: 'preload' or 'animate' */
   pageSubtitleModes?: Record<string, 'preload' | 'animate'>;
+  /** Per-page topic visibility (page IDs where topic is shown) */
+  pageTopicVisible?: string[];
+  /** Per-page subtitle visibility (page IDs where subtitle is shown) */
+  pageSubtitleVisible?: string[];
   /** Black & white theme mode */
   bwMode?: boolean;
   /** Per-page guide border positions */
@@ -192,8 +196,8 @@ export interface LessonCanvasData {
   imageGlowColors?: Record<string, string>;
   /** Rough/Main mode */
   roughMode?: boolean;
-  /** Canvas mode: 'main' | 'rough' | 'kids' */
-  canvasMode?: 'main' | 'rough' | 'kids';
+  /** Canvas mode: 'main' | 'rough' | 'reveal' */
+  canvasMode?: 'main' | 'rough' | 'reveal';
   /** Shape IDs marked as helper (visible only in Rough mode) */
   helperShapeIds?: string[];
   /** Pages excluded from animation flow */
@@ -210,6 +214,8 @@ export interface LessonCanvasData {
   laserTimings?: Record<string, number>;
   /** Whether the sidebar (sub-topics/progress) is visible */
   showSidebar?: boolean;
+  /** Whether the canvas splitter is enabled (Audio Notes only) */
+  canvasSplitEnabled?: boolean;
 }
 
 /** A single recorded laser stroke */

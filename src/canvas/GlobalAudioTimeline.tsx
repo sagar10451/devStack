@@ -123,7 +123,7 @@ export default function GlobalAudioTimeline({
           id: `__subtitle__${pid}`,
           type: 'subtitle',
           pageId: pid,
-          label: pageSubtitles[pid] || 'Subtitle',
+          label: pageSubtitles[pid] || 'Subtopic',
           isPreloaded: (pageSubtitleModes[pid] || 'preload') === 'preload',
         });
       }
