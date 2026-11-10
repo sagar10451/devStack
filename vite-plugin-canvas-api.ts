@@ -456,6 +456,66 @@ export function canvasApiPlugin(): Plugin {
           res.end(err.message);
         }
       });
+
+      // POST /__upload-image — save image file to disk
+      server.middlewares.use('/__upload-image', (req, res) => {
+        if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        try {
+          const url = new URL(req.url || '', 'http://localhost');
+          const siteId = url.searchParams.get('siteId') || '';
+          const topicSlug = url.searchParams.get('topicSlug') || '';
+          const subtopicSlug = url.searchParams.get('subtopicSlug') || '';
+          const fileName = url.searchParams.get('fileName') || `img-${Date.now()}.png`;
+          const dir = join(process.cwd(), 'data', 'images', siteId, topicSlug, subtopicSlug);
+          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+          const chunks: Buffer[] = [];
+          req.on('data', (chunk: Buffer) => chunks.push(chunk));
+          req.on('end', () => {
+            const buffer = Buffer.concat(chunks);
+            const filePath = join(dir, fileName);
+            writeFileSync(filePath, buffer);
+            console.log(`[canvas-api] Saved image: ${filePath} (${Math.round(buffer.length / 1024)}KB)`);
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end(JSON.stringify({ success: true, fileName }));
+          });
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
+
+      // GET /__load-image?siteId=...&topicSlug=...&subtopicSlug=...&fileName=...
+      server.middlewares.use('/__load-image', (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        try {
+          const url = new URL(req.url || '', 'http://localhost');
+          const siteId = url.searchParams.get('siteId') || '';
+          const topicSlug = url.searchParams.get('topicSlug') || '';
+          const subtopicSlug = url.searchParams.get('subtopicSlug') || '';
+          const fileName = url.searchParams.get('fileName') || '';
+          const filePath = join(process.cwd(), 'data', 'images', siteId, topicSlug, subtopicSlug, fileName);
+          if (existsSync(filePath)) {
+            const data = readFileSync(filePath);
+            const ext = fileName.split('.').pop()?.toLowerCase() || 'png';
+            const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
+            res.setHeader('Content-Type', mimeMap[ext] || 'image/png');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Content-Length', data.length.toString());
+            res.end(data);
+          } else {
+            res.statusCode = 404;
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.end('Not found');
+          }
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(err.message);
+        }
+      });
     },
   };
 }

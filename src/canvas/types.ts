@@ -53,7 +53,7 @@ export interface ShapeAnimationConfig {
   idle: IdleAnimation;
 }
 
-export type StepAction = 'enter' | 'exit' | 'blink' | 'move' | 'teleport' | 'swap' | 'none';
+export type StepAction = 'enter' | 'exit' | 'blink' | 'move' | 'teleport' | 'swap' | 'none' | 'topicRollCall' | 'topicGlowOne' | 'logoGlow';
 
 export interface AnimationStep {
   id: string;
@@ -101,6 +101,8 @@ export interface AnimationStep {
   /** Audio start time in seconds — when this camera group should activate during rough mode audio auto-play.
    *  Only meaningful on steps that have a cameraPosition (camera lock). */
   audioStartTime?: number;
+  /** Target topic label ID for topicGlowOne action */
+  topicGlowTargetId?: string;
 }
 
 /**
@@ -216,6 +218,49 @@ export interface LessonCanvasData {
   showSidebar?: boolean;
   /** Whether the canvas splitter is enabled (Audio Notes only) */
   canvasSplitEnabled?: boolean;
+  /** Highlight regions drawn on images (Highlight mode) */
+  highlightRegions?: HighlightRegion[];
+  /** Pointer arrows placed on canvas */
+  pointerArrows?: PointerArrow[];
+}
+
+/** A single highlight region drawn on an image shape */
+export interface HighlightRegion {
+  id: string;
+  /** tldraw shape ID of the image this highlight belongs to */
+  imageShapeId: string;
+  /** Position relative to the image shape (0-1 normalized) */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Color of the highlight overlay */
+  color: string;
+  /** Associated animation step ID */
+  stepId: string;
+  /** Page ID */
+  pageId: string;
+  /** Type: 'highlight' for color overlay, 'mask' for B&W reveal mask */
+  type?: 'highlight' | 'mask';
+}
+
+/** A pointer arrow placed on the canvas */
+export interface PointerArrow {
+  id: string;
+  /** Page-space X position */
+  x: number;
+  /** Page-space Y position */
+  y: number;
+  /** Rotation in degrees (0-360) */
+  rotation: number;
+  /** Associated animation step ID */
+  stepId: string;
+  /** Page ID */
+  pageId: string;
+  /** Whether arrow stays visible after its step */
+  keepVisible: boolean;
+  /** Seconds to keep visible (0 = forever), only used if keepVisible=true */
+  keepDuration: number;
 }
 
 /** A single recorded laser stroke */

@@ -33,14 +33,13 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
   const [audioNotesMode, setAudioNotesMode] = useState(() => {
     try { return localStorage.getItem(audioNotesKey) === 'true'; } catch { return false; }
   });
-  const effectiveSubtopicSlug = audioNotesMode ? `${subtopicSlug}_audioNotes` : subtopicSlug;
 
-  // Load canvas data for the effective slug
+  // Load canvas data — always use main subtopicSlug (single file, no _audioNotes split)
   useEffect(() => {
     if (isLocalhost) {
       setLoaded(false);
       setCanvasData(null);
-      fetch(`/__load-canvas?siteId=${encodeURIComponent(site.id)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(effectiveSubtopicSlug)}`)
+      fetch(`/__load-canvas?siteId=${encodeURIComponent(site.id)}&topicSlug=${encodeURIComponent(topicSlug)}&subtopicSlug=${encodeURIComponent(subtopicSlug)}`)
         .then(res => res.json())
         .then((data) => {
           if (data && data.version) setCanvasData(data as LessonCanvasData);
@@ -70,7 +69,7 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
           setLoaded(true);
         });
     }
-  }, [site.id, topicSlug, effectiveSubtopicSlug, subtopicSlug, pdfUrl]);
+  }, [site.id, topicSlug, subtopicSlug, pdfUrl]);
 
   const handleToggleAudioNotes = useCallback(() => {
     setAudioNotesMode(prev => {
@@ -146,12 +145,10 @@ export default function LessonPage({ topicSlug, subtopicSlug, topicTitle, subtop
   }
 
   // Localhost: show full canvas editor
-  // key={effectiveSubtopicSlug} forces full re-mount when toggling Audio Notes
   return (
     <LessonCanvas
-      key={effectiveSubtopicSlug}
       topicSlug={topicSlug}
-      subtopicSlug={effectiveSubtopicSlug}
+      subtopicSlug={subtopicSlug}
       topicTitle={topicTitle}
       subtopicTitle={subtopicTitle}
       initialData={canvasData}

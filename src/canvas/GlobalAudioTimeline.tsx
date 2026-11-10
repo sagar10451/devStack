@@ -16,7 +16,8 @@ const PAGE_COLORS_HEX = [
   '#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e', '#06b6d4', '#f97316', '#6366f1',
 ];
 
-const DEFAULT_DURATION = 3; // seconds
+const DEFAULT_DURATION = 3; // seconds — imported value kept for local use
+const AUTO_GAP = 0.5; // 500ms gap between cards — imported value kept for local use
 
 // A unified step: either a virtual topic/subtitle or a real element step
 type UnifiedStep = {
@@ -59,10 +60,11 @@ function formatMMSSss(totalSeconds: number): string {
 }
 
 function formatShort(seconds: number): string {
-  if (seconds < 0) return '0:00';
+  if (seconds < 0) return '0:00.0';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  const d = Math.round((seconds % 1) * 10);
+  return `${m}:${s.toString().padStart(2, '0')}.${d}`;
 }
 
 export default function GlobalAudioTimeline({
@@ -144,14 +146,27 @@ export default function GlobalAudioTimeline({
     return result;
   }, [steps, pageIds, pageTopicVisible, pageSubtitleVisible, pageTopics, pageSubtitles, pageTopicModes, pageSubtitleModes]);
 
-  // ─── Compute start times ────────────────────────────────────────────────
+  // ─── Compute start times (with 500ms gap between cards) ──────────────────
   const startTimesMap = useMemo(() => {
     const map = new Map<string, number>();
     let cum = 0;
-    for (const us of unifiedSteps) {
-      map.set(us.id, cum);
-      const defaultDur = us.isPreloaded ? 0 : DEFAULT_DURATION;
-      cum += audioDurations[us.id] ?? defaultDur;
+    for (let i = 0; i < unifiedSteps.length; i++) {
+      const us = unifiedSteps[i];
+      if (i === 0) {
+        cum = audioDurations[`__start_${us.id}`] ?? 0;
+      }
+      const isMerged = i > 0 && audioDurations[`__merge_${us.id}`] === 1;
+      if (isMerged) {
+        // Merged card starts at same time as previous card
+        map.set(us.id, map.get(unifiedSteps[i - 1].id) ?? cum);
+      } else {
+        map.set(us.id, cum);
+      }
+      if (!isMerged) {
+        const defaultDur = us.isPreloaded ? 0 : DEFAULT_DURATION;
+        const dur = audioDurations[us.id] ?? defaultDur;
+        cum += dur + (dur > 0 ? AUTO_GAP : 0);
+      }
     }
     return map;
   }, [unifiedSteps, audioDurations]);
@@ -164,6 +179,50 @@ export default function GlobalAudioTimeline({
   const adjustDuration = useCallback((id: string, delta: number, isPreloaded: boolean) => {
     const current = audioDurations[id] ?? (isPreloaded ? 0 : DEFAULT_DURATION);
     onDurationsChange({ ...audioDurations, [id]: Math.max(0, Math.round((current + delta) * 10) / 10) });
+  }, [audioDurations, onDurationsChange]);
+
+  const adjustStartOffset = useCallback((id: string, delta: number) => {
+    const key = `__start_${id}`;
+    const current = audioDurations[key] ?? 0;
+    onDurationsChange({ ...audioDurations, [key]: Math.max(0, Math.round((current + delta) * 10) / 10) });
+  }, [audioDurations, onDurationsChange]);
+
+  // Adjust a card's start time — cascades backward to adjust previous non-merged card's duration
+  const adjustCardStart = useCallback((id: string, delta: number, idx: number) => {
+    if (idx === 0) {
+      // First card: just adjust its start offset
+      adjustStartOffset(id, delta);
+      return;
+    }
+    // Find the previous non-merged card
+    let prevIdx = idx - 1;
+    while (prevIdx > 0 && audioDurations[`__merge_${unifiedSteps[prevIdx].id}`] === 1) {
+      prevIdx--;
+    }
+    const prevUs = unifiedSteps[prevIdx];
+    if (!prevUs) return;
+    if (prevIdx === 0 && audioDurations[`__merge_${prevUs.id}`] === 1) {
+      // All previous cards are merged — adjust first card's start offset
+      adjustStartOffset(unifiedSteps[0].id, delta);
+      return;
+    }
+    const prevDur = audioDurations[prevUs.id] ?? (prevUs.isPreloaded ? 0 : DEFAULT_DURATION);
+    const newPrevDur = Math.max(0, Math.round((prevDur + delta) * 10) / 10);
+    onDurationsChange({ ...audioDurations, [prevUs.id]: newPrevDur });
+  }, [audioDurations, onDurationsChange, unifiedSteps, adjustStartOffset]);
+
+  // Adjust a card's end (duration) — cascades forward to adjust next card's start
+  const adjustCardEnd = useCallback((id: string, delta: number, isPreloaded: boolean, idx: number) => {
+    const current = audioDurations[id] ?? (isPreloaded ? 0 : DEFAULT_DURATION);
+    const newDur = Math.max(0, Math.round((current + delta) * 10) / 10);
+    onDurationsChange({ ...audioDurations, [id]: newDur });
+  }, [audioDurations, onDurationsChange]);
+
+  // Toggle merge — card plays simultaneously with previous card
+  const toggleMerge = useCallback((id: string) => {
+    const key = `__merge_${id}`;
+    const current = audioDurations[key] === 1 ? 0 : 1;
+    onDurationsChange({ ...audioDurations, [key]: current });
   }, [audioDurations, onDurationsChange]);
 
   // ─── Reset ──────────────────────────────────────────────────────────────
@@ -305,6 +364,7 @@ export default function GlobalAudioTimeline({
                 const stepEnd = stepStart + stepDuration;
                 const isActive = audioFileUrl && currentTime >= stepStart && currentTime < stepEnd && stepDuration > 0;
                 const displayNum = idx + 1;
+                const isMerged = idx > 0 && audioDurations[`__merge_${us.id}`] === 1;
 
                 // Page separator
                 const showSep = pid !== lastPageId && lastPageId !== '' && pageIds.length > 1;
@@ -323,7 +383,11 @@ export default function GlobalAudioTimeline({
                 let isSelected = false;
                 let isManualCard = false;
                 if (us.step) {
-                  info = getShapeIcon(editor, us.step.shapeIds[0], diagramData);
+                  if (us.step.label === 'Highlight' || us.step.label === 'Paint B&W' || us.step.label === 'Mask' || us.step.label === 'Pointer') {
+                    info = { icon: null, label: us.step.label };
+                  } else if (us.step.shapeIds.length > 0) {
+                    info = getShapeIcon(editor, us.step.shapeIds[0], diagramData);
+                  }
                   extra = us.step.shapeIds.length > 1 ? `+${us.step.shapeIds.length - 1}` : '';
                   isSelected = us.step.shapeIds.some(id => selectedShapeIds.includes(id));
                   const action = us.step.action || 'enter';
@@ -339,23 +403,26 @@ export default function GlobalAudioTimeline({
                       onMouseEnter={() => setHoveredStepId(us.id)}
                       onMouseLeave={() => setHoveredStepId(null)}
                       className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all mx-1 ${
-                        isActive
-                          ? 'border-blue-400/60 bg-blue-500/8 shadow-[0_0_10px_rgba(59,130,246,0.15)]'
+                        isMerged
+                          ? 'border-purple-400/50 bg-purple-500/8 shadow-[0_0_8px_rgba(168,85,247,0.1)]'
+                          : isActive
+                          ? 'border-blue-400/60 bg-gradient-to-b from-blue-500/12 to-blue-600/5 shadow-[0_0_12px_rgba(59,130,246,0.2)]'
                           : isHovered
-                          ? 'border-blue-400/50 shadow-[0_0_8px_rgba(59,130,246,0.1)]'
+                          ? 'border-blue-400/50 bg-[#14142a] shadow-[0_0_8px_rgba(59,130,246,0.1)]'
                           : isVirtual
                           ? `${virtualBorderColor} ${virtualBgColor}`
                           : isSelected
                           ? 'border-amber-400/50 bg-amber-500/8'
                           : isManualCard
                           ? 'border-orange-500/30 bg-orange-500/5'
-                          : 'border-[#2a2a4e] bg-[#12121f] hover:border-blue-500/30'
+                          : 'border-[#2a2a4e] bg-gradient-to-b from-[#16162a] to-[#0f0f1e] hover:border-blue-500/30 hover:bg-[#18183a]'
                       }`}
                     >
                       {/* Header */}
-                      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[#1a1a2e] bg-[#0d0d18]">
-                        <span className="text-[9px] font-bold text-slate-500">{String(displayNum).padStart(2, '0')}</span>
+                      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-white/[0.06] bg-gradient-to-r from-[#12122a] to-[#0d0d1a]">
+                        <span className="text-[9px] font-bold text-blue-400/70">{String(displayNum).padStart(2, '0')}</span>
                         {us.isPreloaded && <span className="text-[7px] text-slate-600">⚡</span>}
+                        {isMerged && <span className="text-[7px] text-purple-400">🔗</span>}
                         {isVirtual ? (
                           <>
                             <span className="text-[10px]">{virtualIcon}</span>
@@ -398,23 +465,38 @@ export default function GlobalAudioTimeline({
                           </button>
                         )}
 
-                        <button
-                          onClick={(e) => { e.stopPropagation(); adjustDuration(us.id, -0.5, us.isPreloaded); }}
-                          className="flex items-center justify-center w-5 h-5 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all flex-shrink-0"
-                        >
-                          <Minus className="w-2.5 h-2.5" />
-                        </button>
-
-                        <span className={`text-[9px] font-mono min-w-[62px] text-center select-none ${stepDuration === 0 ? 'text-slate-600' : 'text-slate-300'}`}>
-                          {formatMMSSss(stepDuration)}
-                        </span>
-
-                        <button
-                          onClick={(e) => { e.stopPropagation(); adjustDuration(us.id, 0.5, us.isPreloaded); }}
-                          className="flex items-center justify-center w-5 h-5 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all flex-shrink-0"
-                        >
-                          <Plus className="w-2.5 h-2.5" />
-                        </button>
+                        {/* Start / Animate controls */}
+                        <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                          {isMerged ? (
+                            <>
+                              <span className="text-[8px] text-purple-400/80 italic">🔗 Plays with previous</span>
+                            </>
+                          ) : (
+                            <>
+                          {/* Start time — all cards adjustable */}
+                          <div className="flex items-center gap-1">
+                            <span className="text-[7px] text-slate-600 w-7">Start</span>
+                            <button onClick={(e) => { e.stopPropagation(); adjustCardStart(us.id, -0.5, idx); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Minus className="w-2 h-2" /></button>
+                            <span className="text-[8px] font-mono text-cyan-300 min-w-[40px] text-center">{formatShort(stepStart)}</span>
+                            <button onClick={(e) => { e.stopPropagation(); adjustCardStart(us.id, 0.5, idx); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Plus className="w-2 h-2" /></button>
+                          </div>
+                          {/* Animate end time */}
+                          <div className="flex items-center gap-1">
+                            <span className="text-[7px] text-slate-600 w-7">End</span>
+                            <button onClick={(e) => { e.stopPropagation(); adjustCardEnd(us.id, -0.5, us.isPreloaded, idx); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Minus className="w-2 h-2" /></button>
+                            <span className={`text-[8px] font-mono min-w-[40px] text-center ${stepDuration === 0 ? 'text-slate-600' : 'text-amber-300'}`}>{formatShort(stepStart + stepDuration)}</span>
+                            <button onClick={(e) => { e.stopPropagation(); adjustCardEnd(us.id, 0.5, us.isPreloaded, idx); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Plus className="w-2 h-2" /></button>
+                          </div>
+                            </>
+                          )}
+                          {/* Merge checkbox — plays with previous card */}
+                          {idx > 0 && (
+                            <label className="flex items-center gap-1 mt-0.5 cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                              <input type="checkbox" checked={isMerged} onChange={() => toggleMerge(us.id)} className="w-2.5 h-2.5 accent-purple-500 cursor-pointer" />
+                              <span className={`text-[7px] ${isMerged ? 'text-purple-400' : 'text-slate-600'}`}>Merge</span>
+                            </label>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

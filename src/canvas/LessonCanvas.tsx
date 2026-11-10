@@ -5,13 +5,14 @@ import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Do
 import { Link } from 'react-router-dom';
 import CanvasEditor from './CanvasEditor';
 import { createSampleOOPLesson } from './sampleLesson';
-import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig } from './types';
+import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig, HighlightRegion, PointerArrow } from './types';
 import SubTopicTracker from './SubTopicTracker';
 import RecordingGuide from './RecordingGuide';
 import PagePanel from './PagePanel';
 import { applyIdleAnimation } from './animationEngine';
 import { applyStepAnimation, clearStepAnimations, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
 import type { MoveRecord } from './stepAnimations';
+import { computeGoNextTimes } from './audioTimingUtils';
 import { parseClipboardLines } from './pasteUtils';
 import { usePresentation } from '../data/presentationContext';
 import LaserPointer from '../components/LaserPointer';
@@ -25,6 +26,60 @@ import TimelineBar from './TimelineBar';
 import GlobalAudioTimeline from './GlobalAudioTimeline';
 import type { DiagramData } from './diagram/diagramTypes';
 import './diagram/diagramStyles.css';
+
+// ─── Highlight color palette ──────────────────────────────────────────────
+const HIGHLIGHT_COLORS = [
+  { hex: '#FFEB00', label: 'Yellow' },
+  { hex: '#00D65B', label: 'Green' },
+  { hex: '#00BFFF', label: 'Sky Blue' },
+  { hex: '#FF4FA3', label: 'Hot Pink' },
+  { hex: '#C04BFF', label: 'Violet' },
+  { hex: '#FF941A', label: 'Orange' },
+  { hex: '#00C8B4', label: 'Turquoise' },
+  { hex: '#FF5252', label: 'Coral Red' },
+  { hex: '#A6E000', label: 'Lime' },
+  { hex: '#FF6D00', label: 'Deep Orange' },
+];
+
+function hexToRgba(hex: string, _alpha: number): string {
+  // Return full hex color — we use mix-blend-mode: multiply instead of alpha transparency
+  return hex;
+}
+
+// ─── Toolbar tool IDs for hide/show toggle ────────────────────────────
+export const TOOLBAR_TOOLS = [
+  { id: 'save', label: 'Save' },
+  { id: 'pdf', label: 'PDF' },
+  { id: 'ppt', label: 'PPT' },
+  { id: 'import', label: 'Import' },
+  { id: 'undo', label: 'Undo/Redo' },
+  { id: 'delete', label: 'Delete' },
+  { id: 'lines', label: 'Lines' },
+  { id: 'colors', label: 'Colors' },
+  { id: 'nodes', label: 'Nodes' },
+  { id: 'sidebar', label: 'Sidebar' },
+  { id: 'code', label: 'Code' },
+  { id: 'markdown', label: 'Markdown' },
+  { id: 'glow', label: 'Glow' },
+  { id: 'stickynote', label: 'Sticky Note' },
+  { id: 'flip', label: 'Flip' },
+  { id: 'guide', label: 'Guide' },
+  { id: 'bw', label: 'B&W' },
+  { id: 'mode', label: 'Mode' },
+  { id: 'topic', label: 'Topic' },
+  { id: 'subtitle', label: 'Subtitle' },
+  { id: 'audiosync', label: 'Audio Sync' },
+  { id: 'lasersync', label: 'Laser Sync' },
+  { id: 'drawhighlight', label: 'Draw Highlight' },
+  { id: 'paintbw', label: 'Paint B&W' },
+  { id: 'pointer', label: 'Pointer' },
+  { id: 'glowall', label: 'Glow All' },
+  { id: 'glowone', label: 'Glow One' },
+  { id: 'audionotes', label: 'Audio Notes' },
+  { id: 'splitter', label: 'Canvas Splitter' },
+  { id: 'chaptername', label: 'Chapter' },
+  { id: 'logoglow', label: 'Logo Glow' },
+];
 import PublicMarkdownEditor from './PublicMarkdownEditor';
 import type { PublicCanvasData } from './types';
 
@@ -138,7 +193,7 @@ export default function LessonCanvas({
   audioNotesMode,
   onToggleAudioNotes,
 }: LessonCanvasProps) {
-  const { isPresenting, presentationTool } = usePresentation();
+  const { isPresenting, togglePresentation, presentationTool } = usePresentation();
   const [isLocked, setIsLocked] = useState(true);
   // Audio Notes split canvas: left/right paste target
   const [canvasSplitEnabled, setCanvasSplitEnabled] = useState(initialData?.canvasSplitEnabled || false);
@@ -176,13 +231,7 @@ export default function LessonCanvas({
   showSidebarRef.current = showSidebar;
   const [showGuideBorder, setShowGuideBorder] = useState(true);
   const [bwMode, setBwMode] = useState(initialData?.bwMode || false);
-  const [canvasMode, setCanvasMode] = useState<'main' | 'rough' | 'reveal'>(
-    (() => {
-      const saved = initialData?.canvasMode || (initialData?.roughMode ? 'rough' : 'main');
-      if (saved === 'kids') return 'main' as const;
-      return saved as 'main' | 'rough' | 'reveal';
-    })()
-  );
+  const [canvasMode, setCanvasMode] = useState<'main' | 'rough' | 'reveal'>('reveal');
   const roughMode = canvasMode === 'rough';
   const roughModeRef = useRef(roughMode);
   roughModeRef.current = roughMode;
@@ -229,6 +278,85 @@ export default function LessonCanvas({
   // Track which pages had laser drawn during current presenting session
   const laserDrawnPagesRef = useRef<Set<string>>(new Set());
   const laserSessionStrokesRef = useRef<Record<string, import('./types').LaserStroke[]>>({});
+
+  // ─── Highlight mode state ──────────────────────────────────────────────
+  const [highlightRegions, setHighlightRegions] = useState<HighlightRegion[]>(initialData?.highlightRegions || []);
+  const highlightRegionsRef = useRef(highlightRegions);
+  highlightRegionsRef.current = highlightRegions;
+  const [highlightDrawing, setHighlightDrawing] = useState(false);
+  const highlightDrawingRef = useRef(false);
+  highlightDrawingRef.current = highlightDrawing;
+  const [highlightColor, setHighlightColor] = useState('#FFEB00');
+  const [editingHighlightId, setEditingHighlightId] = useState<string | null>(null);
+  const [maskDrawing, setMaskDrawing] = useState(false);
+  const maskDrawingRef = useRef(false);
+  maskDrawingRef.current = maskDrawing;
+  const [pointerArrows, setPointerArrows] = useState<PointerArrow[]>(initialData?.pointerArrows || []);
+  const pointerArrowsRef = useRef(pointerArrows);
+  pointerArrowsRef.current = pointerArrows;
+  const [pointerPlacing, setPointerPlacing] = useState(false);
+  const [editingArrowId, setEditingArrowId] = useState<string | null>(null);
+  const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+  const [showGuideZoomPicker, setShowGuideZoomPicker] = useState(false);
+  // ─── Hidden tools state (persisted in localStorage) ─────────────────────
+  const [hiddenTools, setHiddenTools] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(`hiddenTools:${siteId}:${topicSlug}:${subtopicSlug}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+  const toggleTool = useCallback((toolId: string) => {
+    setHiddenTools(prev => {
+      const next = new Set(prev);
+      if (next.has(toolId)) next.delete(toolId); else next.add(toolId);
+      try { localStorage.setItem(`hiddenTools:${siteId}:${topicSlug}:${subtopicSlug}`, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, [siteId, topicSlug, subtopicSlug]);
+  const pendingHighlightsRef = useRef<{ region: HighlightRegion; step: AnimationStep }[]>([]);
+  const imageReloadingRef = useRef(false);
+  const [quickPlay, setQuickPlay] = useState(true);
+  const [showGlowOnePicker, setShowGlowOnePicker] = useState(false);
+  const globalAudioPlayingRef = useRef(globalAudioPlaying);
+  globalAudioPlayingRef.current = globalAudioPlaying;
+  const revealedTopicPagesRef = useRef(revealedTopicPages);
+  revealedTopicPagesRef.current = revealedTopicPages;
+  const revealedSubtitlePagesRef = useRef(revealedSubtitlePages);
+  revealedSubtitlePagesRef.current = revealedSubtitlePages;
+
+  // ─── Reconcile highlight regions with timeline steps on mount ─────────
+  useEffect(() => {
+    if (highlightRegions.length === 0) return;
+    const steps = animationStepsRef.current;
+    const existingStepIds = new Set(steps.map(s => s.id));
+    const missing = highlightRegions.filter(r => !existingStepIds.has(r.stepId));
+    if (missing.length === 0) return;
+    // Deduplicate — don't add steps that would create duplicate IDs
+    const newStepIds = new Set<string>();
+    const newSteps: AnimationStep[] = [];
+    for (const r of missing) {
+      if (newStepIds.has(r.stepId)) continue;
+      newStepIds.add(r.stepId);
+      newSteps.push({
+        id: r.stepId,
+        shapeIds: [r.imageShapeId],
+        animation: 'appear' as AnimationType,
+        duration: 800,
+        label: 'Highlight',
+        action: 'enter' as StepAction,
+        pageId: r.pageId,
+      });
+    }
+    if (newSteps.length > 0) {
+      setAnimationSteps(prev => {
+        // Final safety: filter out any IDs already in prev
+        const prevIds = new Set(prev.map(s => s.id));
+        const safeNew = newSteps.filter(s => !prevIds.has(s.id));
+        return safeNew.length > 0 ? [...prev, ...safeNew] : prev;
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ─── Background music state ─────────────────────────────────────────────
   const bgMusicRef = useRef<HTMLAudioElement | null>(null);
@@ -395,9 +523,24 @@ export default function LessonCanvas({
   const isDirtyRef = useRef(false);
   // Helper: mark canvas as dirty (unsaved changes) — used by all change handlers
   const markDirty = useCallback(() => {
+    if (isDirtyRef.current) return; // already dirty, skip state update to avoid re-render
     isDirtyRef.current = true;
     setIsSaved(false);
   }, []);
+
+  // ─── Warn before leaving with unsaved changes ───────────────────────────
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirtyRef.current) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   const [canvasReady, setCanvasReady] = useState(false);
   const canvasReadyRef = useRef(false);
   const [hideLockButton, setHideLockButton] = useState(false);
@@ -455,19 +598,58 @@ export default function LessonCanvas({
   const handleEditorReady = useCallback((ed: Editor) => {
     setEditor(ed);
     editorRef.current = ed;
+    // Inject blanket hide-all style to prevent flash of unstyled shapes
+    const blanketStyle = document.createElement('style');
+    blanketStyle.id = 'editor-ready-hide';
+    blanketStyle.textContent = '[data-shape-id] { visibility: hidden !important; opacity: 0 !important; }';
+    document.head.appendChild(blanketStyle);
     setTimeout(() => {
       // Restore saved camera position
       if (initialData?.camera) {
         ed.setCamera(initialData.camera);
       }
-      applyAnimationState(ed, animationSteps, -1);
+      applyAnimationState(ed, animationStepsRef.current, -1);
       ed.updateInstanceState({ isReadonly: true });
       setCanvasReady(true);
       canvasReadyRef.current = true;
       // Clear any false dirty flag from initial loadSnapshot triggering store listener
       isDirtyRef.current = false;
     }, 50);
-  }, [animationSteps, initialData]);
+    // Retry at 300ms
+    setTimeout(() => {
+      applyAnimationState(ed, animationStepsRef.current, -1);
+    }, 300);
+    // Retry at 1500ms and remove blanket style
+    setTimeout(() => {
+      applyAnimationState(ed, animationStepsRef.current, -1);
+      const el = document.getElementById('editor-ready-hide');
+      if (el) el.remove();
+    }, 1500);
+    // Image recovery — re-inject base64 src for any broken/missing images
+    // Runs multiple times to handle slow loading of large base64 images
+    const recoverImages = (attempt: number) => {
+      if (attempt > 5) return;
+      const shapes = ed.getCurrentPageShapes();
+      let anyBroken = false;
+      shapes.forEach(shape => {
+        if ((shape as any).type !== 'image') return;
+        const assetId = (shape as any).props?.assetId;
+        if (!assetId) return;
+        const asset = ed.getAsset(assetId as any) as any;
+        if (!asset?.props?.src) return;
+        const shapeEl = document.querySelector(`[data-shape-id="${shape.id}"]`);
+        if (!shapeEl) { anyBroken = true; return; }
+        const imgEl = shapeEl.querySelector('img') as HTMLImageElement | null;
+        if (!imgEl) { anyBroken = true; return; }
+        if (!imgEl.src || imgEl.naturalWidth === 0 || imgEl.complete === false) {
+          imgEl.src = asset.props.src;
+          anyBroken = true;
+        }
+      });
+      if (anyBroken) setTimeout(() => recoverImages(attempt + 1), 1000);
+    };
+    setTimeout(() => recoverImages(0), 2000);
+  }, [initialData]);
 
   // Re-apply animation state for RF elements after they mount (initial page load)
   // Track tldraw camera for RF viewport sync + auto-snap guide 1 on page switch
@@ -492,7 +674,11 @@ export default function LessonCanvas({
       if (!throttleTimer) {
         throttleTimer = setTimeout(() => {
           throttleTimer = null;
-          setTldrawCamera(tldrawCameraRef.current); // trigger re-render at most every 100ms
+          const next = tldrawCameraRef.current;
+          setTldrawCamera(prev => {
+            if (prev && next && prev.x === next.x && prev.y === next.y && prev.z === next.z) return prev;
+            return next;
+          });
         }, 100);
       }
     };
@@ -708,7 +894,11 @@ export default function LessonCanvas({
     const wasPresenting = prevIsPresentingRef.current;
     prevIsPresentingRef.current = isPresenting;
 
-    if (isPresenting && (globalAudioPlaying || audioCountdown !== null)) {
+    // Hide cursor in fullscreen — but when Quick Play is OFF, keep cursor visible during countdown
+    const shouldHideCursor = isPresenting && (
+      globalAudioPlaying || (audioCountdown !== null && quickPlay)
+    );
+    if (shouldHideCursor) {
       document.body.classList.add('audio-playing-fullscreen');
     } else {
       document.body.classList.remove('audio-playing-fullscreen');
@@ -972,7 +1162,12 @@ export default function LessonCanvas({
     const updateSelection = () => {
       const tldrawIds = editor.getSelectedShapeIds() as string[];
       // Merge tldraw + RF selections so timeline cards highlight for both
-      setSelectedShapeIds([...tldrawIds, ...rfSelectedNodeIds, ...rfSelectedEdgeIds]);
+      const merged = [...tldrawIds, ...rfSelectedNodeIds, ...rfSelectedEdgeIds];
+      setSelectedShapeIds(prev => {
+        const prevKey = prev.join(',');
+        const newKey = merged.join(',');
+        return prevKey === newKey ? prev : merged;
+      });
     };
     updateSelection();
     const unsub = editor.store.listen(updateSelection, { scope: 'session' });
@@ -981,9 +1176,26 @@ export default function LessonCanvas({
 
   const applyAnimationState = useCallback((_ed: Editor, steps: AnimationStep[], upToStep: number) => {
     if (steps.length === 0) return;
-    const isRevealMode = canvasModeRef.current === 'reveal';
+    const isRevealMode = false;
 
     const visibilitySteps = steps.filter(s => (s.action || 'enter') !== 'none');
+
+    // ─── Collect shape IDs that are ONLY used by Highlight steps ─────
+    // These shapes (images) should never be hidden/shown by applyAnimationState
+    // because their visibility is managed by the highlight overlay divs.
+    const highlightOnlyIds = new Set<string>();
+    const nonHighlightIds = new Set<string>();
+    for (const s of steps) {
+      const isHighlightOrMask = s.label === 'Highlight' || s.label === 'Mask' || s.label === 'Paint B&W' || s.label === 'Pointer';
+      for (const sid of s.shapeIds) {
+        if (isHighlightOrMask) highlightOnlyIds.add(sid);
+        else nonHighlightIds.add(sid);
+      }
+    }
+    // If a shape is used by both highlight and non-highlight steps, it's NOT highlight-only
+    for (const sid of nonHighlightIds) {
+      highlightOnlyIds.delete(sid);
+    }
 
     // ─── DOM query cache — avoid repeated querySelector calls ─────────
     const elCache = new Map<string, HTMLElement | null>();
@@ -997,15 +1209,25 @@ export default function LessonCanvas({
     };
 
     // Collect shape IDs from "none" animation steps — these are preloaded, never hidden
+    // But if the page's topic/subtitle needs animate and hasn't been revealed yet, hold them back
     const preloadedIds = new Set(
-      steps.filter(s => s.animation === 'none' && (s.action || 'enter') === 'enter')
-        .flatMap(s => s.shapeIds)
+      steps.filter(s => {
+        if (s.animation !== 'none' || (s.action || 'enter') !== 'enter') return false;
+        const pid = s.pageId || 'page:page';
+        const tMode = pageTopicModesRef.current[pid] || 'preload';
+        const sMode = pageSubtitleModesRef.current[pid] || 'preload';
+        const topicGateBlocking = tMode === 'animate' && pageTopicVisibleRef.current.has(pid) && !revealedTopicPagesRef.current.has(pid);
+        const subtitleGateBlocking = sMode === 'animate' && pageSubtitleVisibleRef.current.has(pid) && !revealedSubtitlePagesRef.current.has(pid);
+        if (topicGateBlocking || subtitleGateBlocking) return false;
+        return true;
+      }).flatMap(s => s.shapeIds)
     );
 
-    // Hide/dim all tldraw animated shapes via CSS (except preloaded ones)
+    // Hide/dim all tldraw animated shapes via CSS (except preloaded ones and highlight-only ones)
     const allAnimatedIds = new Set(visibilitySteps.flatMap(s => s.shapeIds).filter(isTldrawId));
     allAnimatedIds.forEach(shapeId => {
       if (preloadedIds.has(shapeId)) return;
+      if (highlightOnlyIds.has(shapeId)) return; // Image shapes used only by highlights stay visible
       const el = getEl(shapeId);
       if (el) {
         if (isRevealMode) {
@@ -1217,6 +1439,19 @@ export default function LessonCanvas({
       };
       retryApply(0);
     }
+
+    // ─── Ensure highlight-only image shapes are always visible ─────────
+    // These images are excluded from hide/show logic, but the blanket style
+    // or other code may have hidden them. Force them visible.
+    highlightOnlyIds.forEach(shapeId => {
+      if (!isTldrawId(shapeId)) return;
+      const el = getEl(shapeId);
+      if (el) {
+        el.style.visibility = 'visible';
+        el.style.opacity = '1';
+      }
+    });
+
   }, []);
 
   // Called when DiagramEditor's React Flow is initialized — RF nodes are now in DOM
@@ -1229,8 +1464,31 @@ export default function LessonCanvas({
 
   const handleStepsChange = useCallback((newSteps: AnimationStep[]) => {
     setAnimationSteps(newSteps);
+    // Remove orphaned highlight regions whose step was deleted
+    const newStepIds = new Set(newSteps.map(s => s.id));
+    setHighlightRegions(prev => {
+      const filtered = prev.filter(r => newStepIds.has(r.stepId));
+      return filtered.length !== prev.length ? filtered : prev;
+    });
+    // Remove orphaned pointer arrows whose step was deleted
+    setPointerArrows(prev => {
+      const filtered = prev.filter(a => newStepIds.has(a.stepId));
+      return filtered.length !== prev.length ? filtered : prev;
+    });
+    // When unlocked, ensure all shapes remain visible (clear any leftover hidden styles)
+    if (!isLocked) {
+      requestAnimationFrame(() => {
+        document.querySelectorAll('[data-shape-id]').forEach(el => {
+          const htmlEl = el as HTMLElement;
+          if (htmlEl.style.visibility === 'hidden') {
+            htmlEl.style.visibility = '';
+            htmlEl.style.opacity = '';
+          }
+        });
+      });
+    }
     markDirty();
-  }, []);
+  }, [isLocked]);
 
   // Delete RF nodes/edges from diagram data when removed from timeline
   const handleDeleteRfElements = useCallback((ids: string[]) => {
@@ -1247,6 +1505,8 @@ export default function LessonCanvas({
     if (!editor || isLocked) return;
 
     const cleanup = () => {
+      // Skip during highlight/mask drawing to prevent re-renders that cause flash
+      if (highlightDrawingRef.current || maskDrawingRef.current) return;
       const currentPageId = editor.getCurrentPageId() as string;
       const existingShapeIds = new Set(
         editor.getCurrentPageShapeIds() as Set<string>
@@ -1274,7 +1534,7 @@ export default function LessonCanvas({
             }),
           };
         })
-        .filter(step => step.shapeIds.length > 0);
+        .filter(step => step.shapeIds.length > 0 || ((step.action === 'topicRollCall' || step.action === 'topicGlowOne') && subTopicLabels.length > 0) || step.action === 'logoGlow');
 
       if (cleanedSteps.length !== currentSteps.length) {
         setAnimationSteps(cleanedSteps);
@@ -1313,6 +1573,8 @@ export default function LessonCanvas({
     };
 
     const unsub = editor.store.listen(cleanup, { scope: 'document' });
+    // Also run cleanup once on mount to remove orphaned glow steps from saved data
+    setTimeout(cleanup, 200);
     return () => unsub();
   }, [editor, isLocked, subTopicLabels, shapeAnimations, diagramData]);
 
@@ -1339,6 +1601,8 @@ export default function LessonCanvas({
     knownShapeIdsRef.current = new Set(allShapes.map(s => s.id as string));
 
     const detectNewShapes = () => {
+      // Skip during highlight/mask drawing to prevent re-renders that cause flash
+      if (highlightDrawingRef.current || maskDrawingRef.current) return;
       const currentShapes = editor.getCurrentPageShapes();
       const currentIds = new Set(currentShapes.map(s => s.id as string));
       const newIds: string[] = [];
@@ -1786,11 +2050,11 @@ export default function LessonCanvas({
   useEffect(() => {
     if (!editor) return;
     const pages = editor.getPages();
-    const newLabels: SubTopicLabel[] = [];
+    const newAutoLabels: SubTopicLabel[] = [];
     pages.forEach((page, idx) => {
       const pid = page.id as string;
       if (pageSubtitleVisible.has(pid) && pageSubtitles[pid]) {
-        newLabels.push({
+        newAutoLabels.push({
           id: `auto-${pid}`,
           title: pageSubtitles[pid],
           startStep: 0,
@@ -1800,11 +2064,14 @@ export default function LessonCanvas({
         });
       }
     });
+    // Preserve manually added labels (those without 'auto-' prefix)
+    const manualLabels = subTopicLabels.filter(l => !l.id.startsWith('auto-'));
+    const merged = [...newAutoLabels, ...manualLabels];
     // Only update if labels actually changed (avoid infinite loop)
     const currentIds = subTopicLabels.map(l => l.id + ':' + l.title).join(',');
-    const newIds = newLabels.map(l => l.id + ':' + l.title).join(',');
+    const newIds = merged.map(l => l.id + ':' + l.title).join(',');
     if (currentIds !== newIds) {
-      setSubTopicLabels(newLabels);
+      setSubTopicLabels(merged);
       markDirty();
     }
   }, [editor, pageSubtitles, pageSubtitleVisible]);
@@ -1909,6 +2176,20 @@ export default function LessonCanvas({
     }, 1000);
   }, [globalAudioFileName]);
 
+  const startQuickPlay = useCallback(() => {
+    if (!globalAudioRef.current || !globalAudioFileName) return;
+    globalAudioRef.current.currentTime = 0;
+    setGlobalAudioCurrentTime(0);
+    togglePresentation();
+    setTimeout(() => {
+      if (globalAudioRef.current) {
+        globalAudioRef.current.play().catch(() => {});
+        setGlobalAudioPlaying(true);
+        isAudioDrivenRef.current = true;
+      }
+    }, 1000);
+  }, [globalAudioFileName, togglePresentation]);
+
   const pauseGlobalAudio = useCallback(() => {
     if (audioCountdownRef.current) {
       clearInterval(audioCountdownRef.current);
@@ -1979,8 +2260,10 @@ export default function LessonCanvas({
       canvasSplitEnabled: canvasSplitEnabled || undefined,
       pageTopicVisible: [...pageTopicVisible],
       pageSubtitleVisible: [...pageSubtitleVisible],
+      highlightRegions: highlightRegions.length > 0 ? highlightRegions : undefined,
+      pointerArrows: pointerArrows.length > 0 ? pointerArrows : undefined,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings, showSidebar, pageTopicVisible, pageSubtitleVisible, canvasSplitEnabled]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings, showSidebar, pageTopicVisible, pageSubtitleVisible, canvasSplitEnabled, highlightRegions, pointerArrows]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -2070,6 +2353,8 @@ export default function LessonCanvas({
         canvasSplitEnabled: canvasSplitEnabledRef.current || undefined,
         pageTopicVisible: [...pageTopicVisibleRef.current],
         pageSubtitleVisible: [...pageSubtitleVisibleRef.current],
+        highlightRegions: highlightRegionsRef.current.length > 0 ? highlightRegionsRef.current : undefined,
+        pointerArrows: pointerArrowsRef.current.length > 0 ? pointerArrowsRef.current : undefined,
       };
 
       // Strip audio base64 data
@@ -2363,6 +2648,15 @@ export default function LessonCanvas({
       // Unlock tldraw camera
       editor.setCameraOptions({ isLocked: false });
       setIsLocked(false);
+      // Clean up reveal CSS classes
+      document.querySelectorAll('.reveal-shown, .reveal-dimmed').forEach(el => {
+        el.classList.remove('reveal-shown', 'reveal-dimmed');
+      });
+      // Reset audio to start
+      if (globalAudioRef.current) {
+        globalAudioRef.current.currentTime = 0;
+        setGlobalAudioCurrentTime(0);
+      }
       // Stop global audio + bg music + clear countdown
       if (globalAudioRef.current) {
         globalAudioRef.current.pause();
@@ -2499,16 +2793,32 @@ export default function LessonCanvas({
     // Handle virtual topic step
     if (topicNeedsStep && !revealedTopicPages.has(pid)) {
       setRevealedTopicPages(prev => new Set(prev).add(pid));
-      // Play topic reveal sound
+      if (!subtitleNeedsStep) {
+        revealedTopicPagesRef.current = new Set([...revealedTopicPages, pid]);
+        applyAnimationState(editor, animationSteps, currentStep);
+        if (currentStep < 0 && animationSteps.length > 0) {
+          const firstStep = animationSteps[0];
+          applyAnimationState(editor, animationSteps, 0);
+          if (firstStep.animation !== 'none') applyStepAnimation(firstStep.shapeIds, firstStep.animation, firstStep.duration);
+          setCurrentStep(0);
+        }
+      }
       try { const a = new Audio('/sounds/border_animation.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
-      return; // consume this arrow press for the topic reveal
+      return;
     }
     // Handle virtual subtitle step
     if (subtitleNeedsStep && !revealedSubtitlePages.has(pid)) {
       setRevealedSubtitlePages(prev => new Set(prev).add(pid));
-      // Play subtitle reveal sound
-      try { const a = new Audio('/sounds/topic_reveal.mp3'); a.volume = 1.0; a.play().catch(() => {}); } catch {}
-      return; // consume this arrow press for the subtitle reveal
+      revealedSubtitlePagesRef.current = new Set([...revealedSubtitlePages, pid]);
+      applyAnimationState(editor, animationSteps, currentStep);
+      if (currentStep < 0 && animationSteps.length > 0) {
+        const firstStep = animationSteps[0];
+        applyAnimationState(editor, animationSteps, 0);
+        if (firstStep.animation !== 'none') applyStepAnimation(firstStep.shapeIds, firstStep.animation, firstStep.duration);
+        setCurrentStep(0);
+      }
+      try { const a = new Audio('/sounds/short_reveal.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+      return;
     }
 
     // Handle pending camera step — second press plays the animation
@@ -2698,6 +3008,12 @@ export default function LessonCanvas({
       return;
     }
 
+    // Skip over merged steps — advance to the last consecutive merged step
+    // so applyAnimationState shows all merged elements in one pass
+    while (nextStep + 1 < animationSteps.length && globalAudioDurationsRef.current[`__merge_${animationSteps[nextStep + 1].id}`] === 1) {
+      nextStep++;
+    }
+
     const step = animationSteps[nextStep];
     const action = step.action || 'enter';
 
@@ -2813,6 +3129,16 @@ export default function LessonCanvas({
         case 'none': break;
         case 'enter': {
           applyAnimationState(editor!, animationSteps, nextStep);
+          // Skip CSS animation for Highlight/Mask steps — their visibility is managed by overlay divs
+          const isHighlightStep = step.label === 'Highlight' || step.label === 'Mask' || step.label === 'Paint B&W' || step.label === 'Pointer';
+          // Play sound for Paint B&W reveal
+          if (step.label === 'Paint B&W' || step.label === 'Mask') {
+            try { const a = new Audio('/sounds/border_animation.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+          }
+          // Play sound for Highlight reveal
+          if (step.label === 'Highlight') {
+            try { const a = new Audio('/sounds/highlight_line.mp3'); a.volume = 0.2; a.play().catch(() => {}); } catch {}
+          }
           // When audio-driven, respect audio duration for animation speed
           if (isAudioDrivenRef.current) {
             const audioDur = globalAudioDurationsRef.current[step.id] ?? 3;
@@ -2821,13 +3147,13 @@ export default function LessonCanvas({
             } else {
               // Animation duration = min(audio duration in ms, default animation duration)
               const animDuration = Math.min(audioDur * 1000, step.duration);
-              if (step.animation !== 'none') {
+              if (step.animation !== 'none' && !isHighlightStep) {
                 applyStepAnimation(step.shapeIds, step.animation, animDuration);
               }
             }
           } else {
             // Normal mode — use step's animation as-is
-            if (step.animation !== 'none') {
+            if (step.animation !== 'none' && !isHighlightStep) {
               applyStepAnimation(step.shapeIds, step.animation, step.duration);
             }
           }
@@ -2835,6 +3161,19 @@ export default function LessonCanvas({
             const config = shapeAnimations[shapeId];
             if (config?.idle && config.idle !== 'none') {
               applyIdleAnimation(shapeId, config.idle);
+            }
+            // Chapter Name flicker effect — apply subtitle-flicker-in when its step plays
+            if (editor) {
+              const shape = editor.getShape(shapeId as any) as any;
+              if (shape?.type === 'chapter-name' && shape.props?.mode === 'animate') {
+                const el = document.querySelector(`[data-shape-id="${shapeId}"]`) as HTMLElement;
+                if (el) {
+                  el.classList.remove('subtitle-flicker-in');
+                  void el.offsetWidth;
+                  el.classList.add('subtitle-flicker-in');
+                }
+                try { const a = new Audio('/sounds/swipe2.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+              }
             }
           });
           break;
@@ -2846,6 +3185,42 @@ export default function LessonCanvas({
         }
         case 'blink': {
           applyBlinkAnimation(step.shapeIds, step.duration);
+          break;
+        }
+        case 'topicRollCall': {
+          const topicItems = document.querySelectorAll('.sub-topic-sidebar [class*="rounded-lg"]');
+          topicItems.forEach(el => { el.classList.remove('topic-roll-call-active'); void (el as HTMLElement).offsetWidth; el.classList.add('topic-roll-call-active'); });
+          // Also highlight the Topics header
+          const headerEl = document.querySelector('.sub-topic-sidebar > div:first-child > div:first-child');
+          if (headerEl) { headerEl.classList.remove('topic-header-glow-active'); void (headerEl as HTMLElement).offsetWidth; headerEl.classList.add('topic-header-glow-active'); }
+          // Play short reveal sound
+          try { const a = new Audio('/sounds/short_reveal.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+          setTimeout(() => {
+            topicItems.forEach(el => el.classList.remove('topic-roll-call-active'));
+            if (headerEl) headerEl.classList.remove('topic-header-glow-active');
+          }, 2200);
+          break;
+        }
+        case 'topicGlowOne': {
+          const targetId = step.topicGlowTargetId;
+          try { const a = new Audio('/sounds/short_reveal.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+          if (targetId) {
+            const allItems = document.querySelectorAll('.sub-topic-sidebar [class*="rounded-lg"]');
+            const labelIdx = subTopicLabels.findIndex(l => l.id === targetId);
+            if (labelIdx >= 0 && allItems[labelIdx]) { const el = allItems[labelIdx]; el.classList.remove('topic-roll-call-active'); void (el as HTMLElement).offsetWidth; el.classList.add('topic-roll-call-active'); setTimeout(() => el.classList.remove('topic-roll-call-active'), 2200); }
+          }
+          break;
+        }
+        case 'logoGlow': {
+          // Find the logo text in the header and apply glow animation
+          const logoEl = document.querySelector('header .group span, header .group h2, header a.group') as HTMLElement;
+          if (logoEl) {
+            logoEl.classList.remove('logo-glow-active');
+            void logoEl.offsetWidth;
+            logoEl.classList.add('logo-glow-active');
+            setTimeout(() => logoEl.classList.remove('logo-glow-active'), 2500);
+          }
+          try { const a = new Audio('/sounds/activate2.mp3'); a.volume = 0.8; a.play().catch(() => {}); } catch {}
           break;
         }
         case 'move': {
@@ -3183,7 +3558,7 @@ export default function LessonCanvas({
 
       const interval = setInterval(() => {
         const audio = globalAudioRef.current;
-        if (!audio || audio.paused) return;
+        if (!globalAudioPlayingRef.current || !audio || audio.paused) return;
         const now = audio.currentTime;
 
         let targetCallIdx = -1;
@@ -3211,47 +3586,19 @@ export default function LessonCanvas({
     const pages = editorRef.current?.getPages() || [];
     const pageIdsList = pages.map(p => p.id as string);
 
-    const stepsByPage = new Map<string, AnimationStep[]>();
-    for (const step of steps) {
-      const pid = step.pageId || 'page:page';
-      if (!stepsByPage.has(pid)) stepsByPage.set(pid, []);
-      stepsByPage.get(pid)!.push(step);
-    }
-
-    const goNextTimes: number[] = [];
-    let cumulative = 0;
-
-    for (let pi = 0; pi < pageIdsList.length; pi++) {
-      const pid = pageIdsList[pi];
-
-      if (pi === 0 && pageTopicVisibleRef.current.has(pid)) {
-        const topicMode = pageTopicModesRef.current[pid] || 'preload';
-        const topicId = `__topic__${pid}`;
-        const topicDur = durations[topicId] ?? (topicMode === 'preload' ? 0 : DEFAULT_DUR);
-        goNextTimes.push(cumulative);
-        cumulative += topicDur;
-      }
-
-      if (pageSubtitleVisibleRef.current.has(pid)) {
-        const subMode = pageSubtitleModesRef.current[pid] || 'preload';
-        const subId = `__subtitle__${pid}`;
-        const subDur = durations[subId] ?? (subMode === 'preload' ? 0 : DEFAULT_DUR);
-        goNextTimes.push(cumulative);
-        cumulative += subDur;
-      }
-
-      const pageSteps = stepsByPage.get(pid) || [];
-      for (const step of pageSteps) {
-        const isPreloaded = step.animation === 'none' && (step.action || 'enter') === 'enter';
-        const stepDur = durations[step.id] ?? (isPreloaded ? 0 : DEFAULT_DUR);
-        goNextTimes.push(cumulative);
-        cumulative += stepDur;
-      }
-    }
+    const goNextTimes = computeGoNextTimes({
+      steps,
+      pageIds: pageIdsList,
+      durations,
+      pageTopicVisible: pageTopicVisibleRef.current,
+      pageSubtitleVisible: pageSubtitleVisibleRef.current,
+      pageTopicModes: pageTopicModesRef.current,
+      pageSubtitleModes: pageSubtitleModesRef.current,
+    });
 
     const interval = setInterval(() => {
       const audio = globalAudioRef.current;
-      if (!audio || audio.paused) return;
+      if (!globalAudioPlayingRef.current || !audio || audio.paused) return;
       const now = audio.currentTime;
 
       let targetCallIdx = -1;
@@ -4334,13 +4681,28 @@ export default function LessonCanvas({
 
   return (
     <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}>
+      {/* Dynamic style to hide toggled-off toolbar buttons */}
+      {hiddenTools.size > 0 && (
+        <style>{[...hiddenTools].map(id => `[data-tool="${id}"] { display: none !important; }`).join('\n')}</style>
+      )}
       {/* 16:9 Recording Guide — visible only in presenting mode before first step */}
-      <RecordingGuide visible={isPresenting && isLocked && currentStep === -1 && revealedTopicPages.size === 0 && !(roughMode && audioNotesMode && canvasSplitEnabled)} />
+      <RecordingGuide visible={isPresenting && isLocked && currentStep === -1 && revealedTopicPages.size === 0 && !(roughMode && audioNotesMode && canvasSplitEnabled) && !quickPlay} />
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
+      {!isPresenting && (
       <div className="flex items-center px-4 py-3 border-b border-white/[0.12] flex-shrink-0 min-w-0" style={{ background: '#0B0D0F', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
         {/* Fixed left: Back + title (title hidden when unlocked for more button space) */}
         <div className="flex items-center gap-3 flex-shrink-0 mr-3" style={{ maxWidth: isLocked ? undefined : undefined }}>
-          <Link to={backPath} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors whitespace-nowrap">
+          <Link to={backPath} className="flex items-center gap-1.5 text-slate-300 hover:text-blue-400 text-sm transition-colors whitespace-nowrap" onClick={(e) => {
+            if (isDirtyRef.current) {
+              e.preventDefault();
+              if (window.confirm('You have unsaved changes. Save before leaving?')) {
+                handleSave();
+                setTimeout(() => { window.location.href = backPath; }, 500);
+              } else {
+                window.location.href = backPath;
+              }
+            }
+          }}>
             <ArrowLeft className="w-3.5 h-3.5" />Back
           </Link>
           {isLocked && (
@@ -4412,23 +4774,22 @@ export default function LessonCanvas({
                 >
                   ⏸ Pause
                 </button>
-              ) : globalAudioCurrentTime > 0 ? (
-                /* Audio paused mid-way — show Resume (no countdown) */
-                <button
-                  onClick={resumeGlobalAudio}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)] transition-all"
-                >
-                  ▶ Resume
-                </button>
               ) : (
-                /* Initial state — show Play (with 10-sec countdown) */
                 <button
-                  onClick={startAudioWithCountdown}
+                  onClick={quickPlay ? startQuickPlay : startAudioWithCountdown}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)] transition-all"
                 >
                   ▶ Play
                 </button>
               )}
+              {/* Quick Play toggle */}
+              <button
+                onClick={() => setQuickPlay(v => !v)}
+                className={`px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all ${quickPlay ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'text-slate-500 border border-[#191C20] hover:text-amber-300 hover:border-amber-500/30'}`}
+                title={quickPlay ? 'Quick Play ON' : 'Quick Play OFF'}
+              >
+                ⚡
+              </button>
             </div>
           )}
 
@@ -4481,7 +4842,28 @@ export default function LessonCanvas({
           {/* Save + auto-save indicator */}
           {!isLocked && (
             <>
-            <button onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-[#101214] text-blue-400/60 border border-blue-500/10' : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:border-blue-400/50 hover:shadow-[0_0_8px_rgba(59,130,246,0.2)]'}`}>
+            {/* Tools toggle dropdown */}
+            <div className="relative flex-shrink-0">
+              <button
+                onClick={() => setShowToolsDropdown(v => !v)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${showToolsDropdown ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' : 'bg-[#101214] text-slate-400 border border-white/[0.08] hover:text-blue-300 hover:border-blue-400/40'}`}
+                title="Show/hide toolbar buttons"
+              >
+                ⚙️
+              </button>
+              {showToolsDropdown && (
+                <div className="fixed z-[9999] bg-[#101214] border border-[#2a2a4e] rounded-lg shadow-xl p-1.5 min-w-[160px] max-h-[350px] overflow-y-auto" style={{ top: 'auto', marginTop: 4 }} ref={(el) => { if (el) { const btn = el.parentElement?.querySelector('button'); if (btn) { const rect = btn.getBoundingClientRect(); el.style.top = (rect.bottom + 4) + 'px'; el.style.left = rect.left + 'px'; } } }} onClick={(e) => e.stopPropagation()}>
+                  <div className="text-[8px] text-slate-500 uppercase tracking-wider px-2 py-1 mb-0.5">Toggle tools</div>
+                  {TOOLBAR_TOOLS.map(tool => (
+                    <label key={tool.id} className="flex items-center gap-2 px-2 py-1 hover:bg-white/[0.04] rounded cursor-pointer">
+                      <input type="checkbox" checked={!hiddenTools.has(tool.id)} onChange={() => toggleTool(tool.id)} className="w-2.5 h-2.5 accent-blue-500 cursor-pointer" />
+                      <span className={`text-[10px] ${hiddenTools.has(tool.id) ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{tool.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button data-tool="save" onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-[#101214] text-blue-400/60 border border-blue-500/10' : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:border-blue-400/50 hover:shadow-[0_0_8px_rgba(59,130,246,0.2)]'}`}>
               <Save className="w-3.5 h-3.5" />{isSaved ? 'Saved' : 'Save'}
             </button>
             {lastSavedAt !== null && (
@@ -4496,25 +4878,25 @@ export default function LessonCanvas({
           {/* Export / Import */}
           {!isLocked && (
             <>
-              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as JSON">
+              <button data-tool="save" onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as JSON">
                 <Download className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as PNG">
+              <button data-tool="save" onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as PNG">
                 <ImageDown className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PDF (all pages)">
+              <button data-tool="pdf" onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PDF (all pages)">
                 <FileText className="w-3.5 h-3.5" />{isExportingPdf ? '...' : 'PDF'}
               </button>
-              <button onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPpt ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PowerPoint (all pages)">
+              <button data-tool="ppt" onClick={handleExportPpt} disabled={isExportingPpt} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPpt ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PowerPoint (all pages)">
                 <Boxes className="w-3.5 h-3.5" />{isExportingPpt ? '...' : 'PPT'}
               </button>
-              <button onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Import JSON">
+              <button data-tool="import" onClick={handleImport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Import JSON">
                 <Upload className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0" title="Reset this canvas">
+              <button data-tool="undo" onClick={handleResetCanvas} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0" title="Reset this canvas">
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
-              <button onClick={handleClearAllAppData} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-300 border border-red-500/15 hover:border-red-400/30 hover:shadow-[0_0_8px_rgba(239,68,68,0.1)] transition-all flex-shrink-0" title="Clear all app data">
+              <button data-tool="delete" onClick={handleClearAllAppData} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-300 border border-red-500/15 hover:border-red-400/30 hover:shadow-[0_0_8px_rgba(239,68,68,0.1)] transition-all flex-shrink-0" title="Clear all app data">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </>
@@ -4523,22 +4905,22 @@ export default function LessonCanvas({
           {/* Panel toggle buttons (unlocked) */}
           {!isLocked && (
             <>
-              <button onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLineConfig ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              <button data-tool="lines" onClick={() => setShowLineConfig(!showLineConfig)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLineConfig ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 Lines
               </button>
-              <button onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showAnimBar ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              <button data-tool="colors" onClick={() => setShowAnimBar(!showAnimBar)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showAnimBar ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 <Palette className="w-3 h-3" />
                 Colors
               </button>
-              <button onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+              <button data-tool="nodes" onClick={() => setShowNodes(!showNodes)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showNodes ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
                 <Boxes className="w-3 h-3" />
                 Nodes
               </button>
-              <button onClick={() => { setShowSidebar(s => !s); markDirty(); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
+              <button data-tool="sidebar" onClick={() => { setShowSidebar(s => !s); markDirty(); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
                 <PanelRight className="w-3 h-3" />
               </button>
               <button
-                onClick={() => {
+                data-tool="code" onClick={() => {
                   if (!editor) return;
                   const { x, y } = editor.getViewportScreenCenter();
                   const point = editor.screenToPage({ x, y });
@@ -4550,7 +4932,7 @@ export default function LessonCanvas({
                 Code
               </button>
               <button
-                onClick={() => {
+                data-tool="markdown" onClick={() => {
                   if (!editor) return;
                   const { x, y } = editor.getViewportScreenCenter();
                   const point = editor.screenToPage({ x, y });
@@ -4563,7 +4945,7 @@ export default function LessonCanvas({
               </button>
               {/* Glow Notes Box */}
               <button
-                onClick={() => {
+                data-tool="glow" onClick={() => {
                   if (!editor) return;
                   const { x, y } = editor.getViewportScreenCenter();
                   const point = editor.screenToPage({ x, y });
@@ -4575,7 +4957,7 @@ export default function LessonCanvas({
               </button>
               {/* Sticky Note (helper) */}
               <button
-                onClick={() => {
+                data-tool="stickynote" onClick={() => {
                   if (!editor) return;
                   const { x, y } = editor.getViewportScreenCenter();
                   const point = editor.screenToPage({ x, y });
@@ -4588,6 +4970,19 @@ export default function LessonCanvas({
               >
                 📌 Sticky Note
               </button>
+              {/* Chapter Name */}
+              <button
+                data-tool="chaptername" onClick={() => {
+                  if (!editor) return;
+                  const { x, y } = editor.getViewportScreenCenter();
+                  const point = editor.screenToPage({ x, y });
+                  editor.createShape({ type: 'chapter-name' as any, x: point.x - 250, y: point.y - 40 });
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:border-blue-400/50 hover:shadow-[0_0_8px_rgba(59,130,246,0.25)] transition-all flex-shrink-0"
+                title="Add a chapter name text box (editable, movable, with animate/preload mode)"
+              >
+                🏷️ Chapter
+              </button>
               {/* Flip selected shapes horizontally */}
               <button
                 onClick={() => {
@@ -4599,7 +4994,7 @@ export default function LessonCanvas({
                   }
                 }}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
-                title="Flip selected shapes horizontally"
+                data-tool="flip" title="Flip selected shapes horizontally"
               >
                 <FlipHorizontal2 className="w-3 h-3" />
                 Flip
@@ -4609,7 +5004,7 @@ export default function LessonCanvas({
                 <button
                   onClick={() => setShowGuideBorder(v => !v)}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showGuideBorder ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-                  title="Show/hide presentation guide borders (visible area at 75% zoom)"
+                  data-tool="guide" title="Show/hide presentation guide borders (visible area at 75% zoom)"
                 >
                   <Frame className="w-3 h-3" />
                   Guide {guideCount > 1 ? `(${guideCount})` : ''}
@@ -4782,23 +5177,48 @@ export default function LessonCanvas({
                 </>
               )}
               {/* 75% zoom button */}
+              <div className="relative flex-shrink-0">
               <button
                 onClick={() => {
                   if (!editor) return;
                   const pid = editor.getCurrentPageId() as string;
                   const pageBorders = getGuideBordersForPage(pid);
-                  const guide = pageBorders[0] || { x: 0, y: 0 };
-                  // Position camera so guide top-left aligns with viewport top-left at 75% zoom
-                  editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true, animation: { duration: 300 } });
+                  if (pageBorders.length <= 1) {
+                    const guide = pageBorders[0] || { x: 0, y: 0 };
+                    editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true, animation: { duration: 300 } });
+                  } else {
+                    setShowGuideZoomPicker(v => !v);
+                  }
                 }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all"
                 title="Set zoom to 75% and frame guide"
               >
                 75%
               </button>
+              {showGuideZoomPicker && guideCount > 1 && (
+                <div className="fixed z-[9999] bg-[#101214] border border-[#2a2a4e] rounded-lg shadow-xl p-1 min-w-[120px]" ref={(el) => { if (el) { const btn = el.parentElement?.querySelector('button'); if (btn) { const rect = btn.getBoundingClientRect(); el.style.top = (rect.bottom + 4) + 'px'; el.style.left = rect.left + 'px'; } } }} onClick={(e) => e.stopPropagation()}>
+                  {Array.from({ length: guideCount }, (_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        if (!editor) return;
+                        const pid = editor.getCurrentPageId() as string;
+                        const pageBorders = getGuideBordersForPage(pid);
+                        const guide = pageBorders[i] || { x: 0, y: 0 };
+                        editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true, animation: { duration: 300 } });
+                        setShowGuideZoomPicker(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-[10px] font-medium text-slate-300 hover:text-blue-300 hover:bg-white/[0.04] rounded transition-colors"
+                    >
+                      Guide {i + 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+              </div>
               {/* B&W theme toggle */}
               <button
-                onClick={() => { setBwMode(v => !v); markDirty(); }}
+                data-tool="bw" onClick={() => { setBwMode(v => !v); markDirty(); }}
                 className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${bwMode ? 'bg-slate-500/15 text-slate-200 border border-slate-400/30 shadow-[0_0_10px_rgba(148,163,184,0.15)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
                 title="Toggle black & white theme"
               >
@@ -4808,7 +5228,7 @@ export default function LessonCanvas({
               <div className="relative flex-shrink-0">
                 <button
                   data-mode-btn
-                  onClick={() => setShowModeDropdown(v => !v)}
+                  data-tool="mode" onClick={() => setShowModeDropdown(v => !v)}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                     canvasMode === 'rough' ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.2)]' :
                     canvasMode === 'reveal' ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' :
@@ -4904,15 +5324,154 @@ export default function LessonCanvas({
             <>
             {/* Audio Sync — main mode only */}
             {!roughMode && (
-            <button onClick={() => { setShowGlobalTimeline(v => !v); setShowLaserTimeline(false); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGlobalTimeline ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+            <button data-tool="audiosync" onClick={() => { setShowGlobalTimeline(v => !v); setShowLaserTimeline(false); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGlobalTimeline ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               <Music className="w-3 h-3" />
               Audio Sync
             </button>
             )}
             {/* Laser Sync — rough mode only */}
             {roughMode && (
-            <button onClick={() => { setShowLaserTimeline(v => !v); setShowGlobalTimeline(false); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLaserTimeline ? 'bg-red-500/15 text-red-300 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+            <button data-tool="lasersync" onClick={() => { setShowLaserTimeline(v => !v); setShowGlobalTimeline(false); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showLaserTimeline ? 'bg-red-500/15 text-red-300 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               🔴 Laser Sync
+            </button>
+            )}
+            {/* Draw Highlight — highlight mode only */}
+            {canvasMode === 'reveal' && !isLocked && (
+            <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              onClick={() => {
+                const wasDrawing = highlightDrawing;
+                setHighlightDrawing(v => !v);
+                setEditingHighlightId(null);
+                if (!wasDrawing && editor) {
+                  setMaskDrawing(false);
+                  editor.selectNone();
+                  editor.updateInstanceState({ isReadonly: true });
+                }
+                if (wasDrawing && editor) {
+                  editor.updateInstanceState({ isReadonly: false });
+                }
+                if (wasDrawing) {
+                  markDirty();
+                }
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${highlightDrawing ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(250,204,21,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              data-tool="drawhighlight" title="Draw highlight regions on images"
+            >
+              🖍 Draw Highlight
+            </button>
+            <div className="flex items-center gap-0.5 px-1" style={{ display: highlightDrawing ? undefined : 'none' }}>
+              {HIGHLIGHT_COLORS.map(c => (
+                <button
+                  key={c.hex}
+                  onClick={() => setHighlightColor(c.hex)}
+                  className="rounded-full transition-all hover:scale-125 flex-shrink-0"
+                  style={{
+                    width: highlightColor === c.hex ? 16 : 12,
+                    height: highlightColor === c.hex ? 16 : 12,
+                    background: c.hex,
+                    boxShadow: highlightColor === c.hex ? `0 0 8px ${c.hex}80, inset 0 0 0 1.5px rgba(255,255,255,0.5)` : 'none',
+                    opacity: highlightColor === c.hex ? 1 : 0.6,
+                  }}
+                  title={c.label}
+                />
+              ))}
+            </div>
+            </div>
+            )}
+            {/* Glow All Topics */}
+            {/* Paint B&W — highlight mode only */}
+            {canvasMode === 'reveal' && !isLocked && (
+            <button
+              onClick={() => {
+                const wasDrawing = maskDrawing;
+                setMaskDrawing(v => !v);
+                setEditingHighlightId(null);
+                if (!wasDrawing) {
+                  setHighlightDrawing(false);
+                  if (editor) { editor.selectNone(); editor.updateInstanceState({ isReadonly: true }); }
+                }
+                if (wasDrawing && editor) {
+                  editor.updateInstanceState({ isReadonly: false });
+                  markDirty();
+                }
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${maskDrawing ? 'bg-slate-500/15 text-slate-300 border border-slate-500/30 shadow-[0_0_10px_rgba(148,163,184,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              data-tool="paintbw" title="Paint B&W regions on images — covered in grayscale, revealed during playback"
+            >
+              🔲 Paint B&W
+            </button>
+            )}
+            {/* Pointer Arrow — highlight mode only */}
+            {canvasMode === 'reveal' && !isLocked && (
+            <button
+              onClick={() => {
+                setPointerPlacing(v => !v);
+                setHighlightDrawing(false);
+                setMaskDrawing(false);
+                setEditingHighlightId(null);
+                setEditingArrowId(null);
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${pointerPlacing ? 'bg-red-500/15 text-red-300 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              data-tool="pointer" title="Place a pointer arrow on the canvas"
+            >
+              📌 Pointer
+            </button>
+            )}
+            {/* Glow All Topics — original */}
+            {!roughMode && subTopicLabels.length > 0 && !isLocked && (
+            <button
+              onClick={() => {
+                if (!editor) return;
+                const pid = editor.getCurrentPageId() as string;
+                const newStep: AnimationStep = { id: `step-${Date.now()}-glowAll`, shapeIds: [], animation: 'appear' as AnimationType, duration: 800, label: '🎯 Glow All', action: 'topicRollCall' as StepAction, pageId: pid };
+                setAnimationSteps(prev => [...prev, newStep]);
+                markDirty();
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-amber-400/40 hover:shadow-[0_0_8px_rgba(245,158,11,0.15)] transition-all flex-shrink-0"
+              data-tool="glowall" title="Glow all sidebar topics"
+            >
+              🎯 Glow All
+            </button>
+            )}
+            {/* Glow One Topic */}
+            {!roughMode && subTopicLabels.length > 0 && !isLocked && (
+            <div className="relative flex-shrink-0">
+              <button onClick={() => setShowGlowOnePicker(v => !v)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-amber-400/40 hover:shadow-[0_0_8px_rgba(245,158,11,0.15)] transition-all" data-tool="glowone" title="Glow one sidebar topic">
+                ✨ Glow One
+              </button>
+              {showGlowOnePicker && (
+                <div className="fixed z-[9999] bg-[#1a1a2e] border border-[#191C20] rounded-lg shadow-lg p-1.5 min-w-[140px]" ref={(el) => { if (el) { const btn = el.parentElement?.querySelector('button'); if (btn) { const rect = btn.getBoundingClientRect(); el.style.top = (rect.bottom + 4) + 'px'; el.style.left = rect.left + 'px'; } } }} onClick={(e) => e.stopPropagation()}>
+                  {subTopicLabels.map(label => (
+                    <button key={label.id} onClick={() => {
+                      if (!editor) return;
+                      const pid = editor.getCurrentPageId() as string;
+                      const newStep: AnimationStep = { id: `step-${Date.now()}-glowOne`, shapeIds: [], animation: 'appear' as AnimationType, duration: 800, label: `✨ ${label.title}`, action: 'topicGlowOne' as StepAction, pageId: pid, topicGlowTargetId: label.id };
+                      setAnimationSteps(prev => [...prev, newStep]);
+                      markDirty(); setShowGlowOnePicker(false);
+                    }} className="w-full text-left px-2.5 py-1.5 text-[10px] font-medium text-slate-300 hover:text-amber-300 hover:bg-white/[0.04] rounded transition-colors">
+                      {label.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            )}
+            {/* Logo Glow */}
+            {!isLocked && (
+            <button
+              data-tool="logoglow"
+              onClick={() => {
+                if (!editor) return;
+                const pid = editor.getCurrentPageId() as string;
+                const newStep: AnimationStep = { id: `step-${Date.now()}-logoGlow`, shapeIds: [], animation: 'appear' as AnimationType, duration: 2500, label: '✨ Logo Glow', action: 'logoGlow' as StepAction, pageId: pid };
+                setAnimationSteps(prev => [...prev, newStep]);
+                markDirty();
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0"
+              title="Glow the RevisionBhai logo during presentation"
+            >
+              💡 Logo Glow
             </button>
             )}
             {/* Audio Notes — rough mode only */}
@@ -5000,6 +5559,7 @@ export default function LessonCanvas({
           </button>
         )}
       </div>
+      )}
 
 
       {/* ─── Public Canvas OR Main Canvas ─────────────────────────── */}
@@ -5210,9 +5770,9 @@ export default function LessonCanvas({
 
           {/* Canvas Area */}
           <div className="flex-1 relative" style={{ overflow: 'hidden', minHeight: 0 }}>
-            <div id="canvas-export-area" className="absolute inset-0">
+            <div id="canvas-export-area" className="absolute inset-0" onClick={() => { setEditingHighlightId(null); setEditingArrowId(null); }}>
           {/* tldraw canvas — always visible */}
-          <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}>
+          <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${showGlobalTimeline ? 'hide-tldraw-toolbar' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`} style={(highlightDrawing || maskDrawing) ? { pointerEvents: 'none', willChange: 'auto' } : undefined}>
             <CanvasEditor
               snapshot={snapshot}
               onEditorReady={handleEditorReady}
@@ -5360,6 +5920,242 @@ export default function LessonCanvas({
 
           {/* Laser preview canvas — for stroke playback preview and auto-play */}
           <canvas className="laser-preview-canvas absolute inset-0 z-[99997] pointer-events-none" />
+
+          {/* ─── Highlight regions overlay (Highlight mode) ─────────────────── */}
+          {canvasMode === 'reveal' && editor && tldrawCamera && (() => {
+            const cam = tldrawCamera;
+            const pid = editor.getCurrentPageId() as string;
+            const pageRegions = highlightRegions.filter(r => r.pageId === pid);
+            const imageShapes = [...editor.getPageShapeIds(pid as any)].map(id => editor.getShape(id as any) as any).filter(s => s && s.type === 'image');
+            return (
+              <>
+                {pageRegions.map(region => {
+                  const imgShape = imageShapes.find((s: any) => s.id === region.imageShapeId);
+                  if (!imgShape) return null;
+                  const imgBounds = editor.getShapePageBounds(imgShape.id as any);
+                  if (!imgBounds) return null;
+                  const pageX = imgBounds.x + region.x * imgBounds.w, pageY = imgBounds.y + region.y * imgBounds.h;
+                  const pageW = region.w * imgBounds.w, pageH = region.h * imgBounds.h;
+                  const screenX = (pageX + cam.x) * cam.z, screenY = (pageY + cam.y) * cam.z;
+                  const screenW = pageW * cam.z, screenH = pageH * cam.z;
+                  const isMask = region.type === 'mask';
+                  let showRegion = true;
+                  let maskRevealing = false;
+                  if (isLocked) {
+                    const stepIdx = animationSteps.findIndex(s => s.id === region.stepId);
+                    if (isMask) {
+                      // Mask: visible UNTIL step plays, then radial-reveal animation removes it
+                      const justRevealed = stepIdx >= 0 && stepIdx === currentStep;
+                      const alreadyRevealed = stepIdx >= 0 && stepIdx < currentStep;
+                      if (alreadyRevealed) { showRegion = false; }
+                      else if (justRevealed) { showRegion = true; maskRevealing = true; }
+                      else { showRegion = true; }
+                    } else {
+                      // Highlight: hidden until step plays, then visible
+                      showRegion = stepIdx >= 0 && stepIdx <= currentStep;
+                    }
+                  }
+                  const isInteractive = !isLocked && !highlightDrawing && !maskDrawing;
+                  return (
+                    <div key={region.id}>
+                      <div
+                        className={`absolute ${!isLocked && highlightDrawing ? 'cursor-pointer' : 'pointer-events-none'} ${isLocked && !isMask ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${maskRevealing ? 'mask-radial-reveal' : ''}`}
+                        style={{
+                          left: screenX, top: screenY, width: screenW, height: screenH,
+                          background: isMask ? 'transparent' : region.color,
+                          backdropFilter: isMask && showRegion ? 'grayscale(1)' : undefined,
+                          WebkitBackdropFilter: isMask && showRegion ? 'grayscale(1)' : undefined,
+                          borderRadius: 6,
+                          zIndex: 99990,
+                          mixBlendMode: isMask ? undefined : 'multiply',
+                          display: isLocked && !showRegion ? (isMask ? 'none' : undefined) : undefined,
+                          opacity: isLocked && !showRegion && !isMask ? 0 : 1,
+                        }}
+                        onClick={(!isLocked && highlightDrawing) ? (e) => { e.stopPropagation(); setEditingHighlightId(prev => prev === region.id ? null : region.id); } : undefined}
+                      />
+                      {/* White flash overlay when B&W mask reveals */}
+                      {maskRevealing && (
+                        <div className="absolute pointer-events-none mask-reveal-flash" style={{ left: screenX, top: screenY, width: screenW, height: screenH, borderRadius: 6, zIndex: 99992, background: 'white' }} />
+                      )}
+                      {editingHighlightId === region.id && !isLocked && highlightDrawing && (
+                        <div className="absolute z-[99999] flex items-center gap-1 px-2 py-1.5 rounded-lg bg-[#101214] border border-[#2a2a4e] shadow-xl" style={{ left: screenX, top: screenY - 36 }}>
+                          {HIGHLIGHT_COLORS.map(c => (
+                            <button
+                              key={c.hex}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const newColor = hexToRgba(c.hex, 0.55);
+                                setHighlightRegions(prev => prev.map(r => r.id === region.id ? { ...r, color: newColor } : r));
+                                setEditingHighlightId(null);
+                                markDirty();
+                              }}
+                              className="rounded-full transition-all hover:scale-125 flex-shrink-0"
+                              style={{ width: 14, height: 14, background: c.hex, boxShadow: region.color === hexToRgba(c.hex, 0.55) ? `0 0 6px ${c.hex}80, inset 0 0 0 1.5px rgba(255,255,255,0.6)` : 'none' }}
+                              title={c.label}
+                            />
+                          ))}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setHighlightRegions(prev => prev.filter(r => r.id !== region.id)); setAnimationSteps(prev => prev.filter(s => s.id !== region.stepId)); setEditingHighlightId(null); markDirty(); }}
+                            className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-red-500/20 text-red-400 hover:bg-red-500/40 transition-all text-[10px]"
+                            title="Delete highlight"
+                          >✕</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {highlightDrawing && !isLocked && (
+                  <div className="absolute inset-0 z-[20] cursor-crosshair" style={{ willChange: 'transform', isolation: 'isolate' }} onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    const container = e.currentTarget.getBoundingClientRect();
+                    const startScreenX = e.clientX - container.left, startScreenY = e.clientY - container.top;
+                    const startPageX = startScreenX / cam.z - cam.x, startPageY = startScreenY / cam.z - cam.y;
+                    const targetImg = imageShapes.find((s: any) => { const b = editor.getShapePageBounds(s.id as any); return b && startPageX >= b.x && startPageX <= b.x + b.w && startPageY >= b.y && startPageY <= b.y + b.h; });
+                    if (!targetImg) return;
+                    const imgBounds = editor.getShapePageBounds(targetImg.id as any); if (!imgBounds) return;
+                    const preview = document.createElement('div'); preview.className = 'highlight-preview-rect';
+                    const previewBg = hexToRgba(highlightColor, 1);
+                    const previewBorder = hexToRgba(highlightColor, 1);
+                    preview.style.cssText = `position:absolute;background:${previewBg};border-radius:6px;border:2px solid ${previewBorder};pointer-events:none;z-index:25;mix-blend-mode:multiply`;
+                    e.currentTarget.appendChild(preview);
+                    let endSX = startScreenX, endSY = startScreenY;
+                    const onMove = (ev: MouseEvent) => { endSX = ev.clientX - container.left; endSY = ev.clientY - container.top; const l = Math.min(startScreenX, endSX), t = Math.min(startScreenY, endSY); preview.style.left = l+'px'; preview.style.top = t+'px'; preview.style.width = Math.abs(endSX-startScreenX)+'px'; preview.style.height = Math.abs(endSY-startScreenY)+'px'; };
+                    const onUp = (ev: MouseEvent) => {
+                      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); preview.remove();
+                      const esx = ev.clientX - container.left, esy = ev.clientY - container.top;
+                      const epx = esx / cam.z - cam.x, epy = esy / cam.z - cam.y;
+                      const rx = Math.min(startPageX, epx), ry = Math.min(startPageY, epy), rw = Math.abs(epx - startPageX), rh = Math.abs(epy - startPageY);
+                      if (rw < 5 || rh < 5) return;
+                      const cx = Math.max(imgBounds.x, rx), cy = Math.max(imgBounds.y, ry);
+                      const cw = Math.min(imgBounds.x + imgBounds.w, rx + rw) - cx, ch = Math.min(imgBounds.y + imgBounds.h, ry + rh) - cy;
+                      if (cw < 5 || ch < 5) return;
+                      const regionId = `hl-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-hl`;
+                      const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: hexToRgba(highlightColor, 0.55), stepId, pageId: pid };
+                      const camNow = editor.getCamera();
+                      const newStep: AnimationStep = { id: stepId, shapeIds: [targetImg.id as string], animation: 'appear' as AnimationType, duration: 100, label: 'Highlight', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: camNow.x, y: camNow.y, z: camNow.z } };
+                      pendingHighlightsRef.current.push({ region: newRegion, step: newStep });
+                      setHighlightRegions(prev => [...prev, newRegion]);
+                      setAnimationSteps(prev => [...prev, newStep]);
+                      isDirtyRef.current = true;
+                    };
+                    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+                  }} />
+                )}
+                {maskDrawing && !isLocked && (
+                  <div className="absolute inset-0 z-[20] cursor-crosshair" style={{ willChange: 'transform', isolation: 'isolate' }} onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    const container = e.currentTarget.getBoundingClientRect();
+                    const startScreenX = e.clientX - container.left, startScreenY = e.clientY - container.top;
+                    const startPageX = startScreenX / cam.z - cam.x, startPageY = startScreenY / cam.z - cam.y;
+                    const targetImg = imageShapes.find((s: any) => { const b = editor.getShapePageBounds(s.id as any); return b && startPageX >= b.x && startPageX <= b.x + b.w && startPageY >= b.y && startPageY <= b.y + b.h; });
+                    if (!targetImg) return;
+                    const imgBounds = editor.getShapePageBounds(targetImg.id as any); if (!imgBounds) return;
+                    const preview = document.createElement('div'); preview.className = 'mask-preview-rect';
+                    preview.style.cssText = 'position:absolute;background:transparent;border-radius:6px;border:2px dashed rgba(255,255,255,0.4);pointer-events:none;z-index:25;backdrop-filter:grayscale(1);-webkit-backdrop-filter:grayscale(1)';
+                    e.currentTarget.appendChild(preview);
+                    let endSX = startScreenX, endSY = startScreenY;
+                    const onMove = (ev: MouseEvent) => { endSX = ev.clientX - container.left; endSY = ev.clientY - container.top; const l = Math.min(startScreenX, endSX), t = Math.min(startScreenY, endSY); preview.style.left = l+'px'; preview.style.top = t+'px'; preview.style.width = Math.abs(endSX-startScreenX)+'px'; preview.style.height = Math.abs(endSY-startScreenY)+'px'; };
+                    const onUp = (ev: MouseEvent) => {
+                      document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); preview.remove();
+                      const esx = ev.clientX - container.left, esy = ev.clientY - container.top;
+                      const epx = esx / cam.z - cam.x, epy = esy / cam.z - cam.y;
+                      const rx = Math.min(startPageX, epx), ry = Math.min(startPageY, epy), rw = Math.abs(epx - startPageX), rh = Math.abs(epy - startPageY);
+                      if (rw < 5 || rh < 5) return;
+                      const cx = Math.max(imgBounds.x, rx), cy = Math.max(imgBounds.y, ry);
+                      const cw = Math.min(imgBounds.x + imgBounds.w, rx + rw) - cx, ch = Math.min(imgBounds.y + imgBounds.h, ry + rh) - cy;
+                      if (cw < 5 || ch < 5) return;
+                      const regionId = `mask-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-mask`;
+                      const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: '#1a1a1a', stepId, pageId: pid, type: 'mask' };
+                      const camNow = editor.getCamera();
+                      const newStep: AnimationStep = { id: stepId, shapeIds: [targetImg.id as string], animation: 'appear' as AnimationType, duration: 100, label: 'Paint B&W', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: camNow.x, y: camNow.y, z: camNow.z } };
+                      setHighlightRegions(prev => [...prev, newRegion]);
+                      setAnimationSteps(prev => [...prev, newStep]);
+                      isDirtyRef.current = true;
+                    };
+                    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+                  }} />
+                )}
+                {/* ─── Pointer Arrows ─────────────────────────────────── */}
+                {pointerArrows.filter(a => a.pageId === pid).map(arrow => {
+                  const screenX = (arrow.x + cam.x) * cam.z;
+                  const screenY = (arrow.y + cam.y) * cam.z;
+                  let showArrow = true;
+                  let arrowBouncing = false;
+                  let arrowFadingOut = false;
+                  if (isLocked) {
+                    const stepIdx = animationSteps.findIndex(s => s.id === arrow.stepId);
+                    if (stepIdx < 0 || stepIdx > currentStep) { showArrow = false; }
+                    else if (stepIdx === currentStep) { showArrow = true; arrowBouncing = true; }
+                    else {
+                      // Past step — show if keepVisible
+                      if (arrow.keepVisible) { showArrow = true; }
+                      else { showArrow = false; }
+                    }
+                  }
+                  if (!showArrow) return null;
+                  return (
+                    <div key={arrow.id}>
+                      <div
+                        className={`absolute ${isLocked ? 'pointer-events-none' : 'cursor-pointer'} ${arrowBouncing ? 'pointer-arrow-bounce' : ''}`}
+                        style={{
+                          left: screenX - 20, top: screenY - 20,
+                          width: 40, height: 40,
+                          zIndex: 99991,
+                          '--arrow-rotation': `${arrow.rotation}deg`,
+                          transform: `rotate(${arrow.rotation}deg)`,
+                          filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))',
+                        } as React.CSSProperties}
+                        onClick={!isLocked ? (e) => { e.stopPropagation(); setEditingArrowId(editingArrowId === arrow.id ? null : arrow.id); } : undefined}
+                      >
+                        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+                          <path d="M20 2 L28 18 L23 18 L23 38 L17 38 L17 18 L12 18 Z" fill="#FF3B30" stroke="#fff" strokeWidth="1.5"/>
+                        </svg>
+                      </div>
+                      {editingArrowId === arrow.id && !isLocked && (
+                        <div className="absolute z-[99999] flex flex-col gap-2 px-3 py-2.5 rounded-lg bg-[#101214] border border-[#2a2a4e] shadow-xl" style={{ left: screenX + 30, top: screenY - 20, minWidth: 160 }} onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-500 w-12">Rotate</span>
+                            <input type="range" min="0" max="360" value={arrow.rotation} onChange={(e) => { const r = Number(e.target.value); setPointerArrows(prev => prev.map(a => a.id === arrow.id ? { ...a, rotation: r } : a)); markDirty(); }} className="flex-1 h-1 accent-red-500" />
+                            <span className="text-[9px] text-slate-400 w-8">{arrow.rotation}°</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-1 text-[9px] text-slate-400 cursor-pointer">
+                              <input type="checkbox" checked={arrow.keepVisible} onChange={(e) => { setPointerArrows(prev => prev.map(a => a.id === arrow.id ? { ...a, keepVisible: e.target.checked } : a)); markDirty(); }} className="w-3 h-3 accent-red-500" />
+                              Keep visible
+                            </label>
+                            {arrow.keepVisible && (
+                              <div className="flex items-center gap-1">
+                                <input type="number" min="0" max="60" value={arrow.keepDuration} onChange={(e) => { setPointerArrows(prev => prev.map(a => a.id === arrow.id ? { ...a, keepDuration: Number(e.target.value) } : a)); markDirty(); }} className="w-10 text-[9px] text-center bg-[#0d0d18] border border-[#2a2a4e] rounded px-1 py-0.5 text-slate-300" />
+                                <span className="text-[9px] text-slate-500">s</span>
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={() => { setPointerArrows(prev => prev.filter(a => a.id !== arrow.id)); setAnimationSteps(prev => prev.filter(s => s.id !== arrow.stepId)); setEditingArrowId(null); markDirty(); }} className="flex items-center justify-center gap-1 px-2 py-1 rounded bg-red-500/15 text-red-400 text-[9px] hover:bg-red-500/25 transition-all">✕ Delete</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {/* Pointer placement overlay */}
+                {pointerPlacing && !isLocked && (
+                  <div className="absolute inset-0 z-[20] cursor-crosshair" onClick={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    const container = e.currentTarget.getBoundingClientRect();
+                    const sx = e.clientX - container.left, sy = e.clientY - container.top;
+                    const px = sx / cam.z - cam.x, py = sy / cam.z - cam.y;
+                    const arrowId = `ptr-${Date.now()}-${Math.random().toString(36).slice(2,5)}`;
+                    const stepId = `step-${Date.now()}-ptr`;
+                    const newArrow: PointerArrow = { id: arrowId, x: px, y: py, rotation: 315, stepId, pageId: pid, keepVisible: true, keepDuration: 5 };
+                    const newStep: AnimationStep = { id: stepId, shapeIds: [], animation: 'appear' as AnimationType, duration: 100, label: 'Pointer', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: cam.x, y: cam.y, z: cam.z } };
+                    setPointerArrows(prev => [...prev, newArrow]);
+                    setAnimationSteps(prev => [...prev, newStep]);
+                    markDirty();
+                    setPointerPlacing(false);
+                  }} />
+                )}
+              </>
+            );
+          })()}
 
           {/* Timeline pill — when fully collapsed, draggable anywhere on canvas */}
           {!isLocked && timelineFullyCollapsed && (
@@ -5680,7 +6476,7 @@ export default function LessonCanvas({
 
         {/* Sidebar (right 15%) — hidden when showSidebar is false */}
         {showSidebar && (
-        <div className="w-[15%] min-w-[180px] border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0" style={{ background: '#0B0D0F' }}>
+        <div className="sub-topic-sidebar w-[15%] min-w-[180px] border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0" style={{ background: '#0B0D0F' }}>
           {showSidebar ? (
             isLocked ? (
               // Locked: always show Sub-topics

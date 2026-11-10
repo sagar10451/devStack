@@ -70,18 +70,19 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
       <div className="w-full max-w-[1600px] mx-auto px-1.5 sm:px-2 lg:px-3 py-4 flex items-center justify-between">
         {/* Logo */}
         <Link to={site.basePath || '/'} className="flex items-center gap-3 group">
-          <div className="w-11 h-11 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-md group-hover:shadow-lg transition-shadow">
-            <div className="relative">
-              <BookOpen className="w-5 h-5 text-white" />
-              <Code2 className="w-3 h-3 text-white absolute -bottom-1 -right-1" />
-            </div>
+          <div className="w-11 h-11 rounded-xl overflow-hidden shadow-md group-hover:shadow-lg transition-shadow" style={{ boxShadow: '0 0 12px rgba(0,140,255,0.3)' }}>
+            <img src="/revision-bhai-logo.png" alt="RevisionBhai" className="w-full h-full object-cover" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-100 leading-tight">
-              {site.brandName}<span className="text-blue-400">{site.brandAccent}</span>
+            <h1 className="text-xl leading-tight" style={{ fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+              <span className="font-semibold text-white">Revision</span><span className="font-bold" style={{ color: '#00BFFF' }}> Bhai</span>
             </h1>
             {site.brandSubtitle && (
-              <p className="text-xs text-gray-500 -mt-0.5">{site.brandSubtitle}</p>
+              <div className="flex items-center gap-2 -mt-0.5">
+                <div className="flex-1 h-[2px] rounded-full" style={{ background: 'linear-gradient(90deg, transparent, #008CFF, #00BFFF)', boxShadow: '0 0 6px rgba(0,140,255,0.4)' }} />
+                <p className="text-[9px] font-bold tracking-[0.2em] text-slate-400 uppercase flex-shrink-0">{site.brandSubtitle}</p>
+                <div className="flex-1 h-[2px] rounded-full" style={{ background: 'linear-gradient(90deg, #00BFFF, #008CFF, transparent)', boxShadow: '0 0 6px rgba(0,140,255,0.4)' }} />
+              </div>
             )}
           </div>
         </Link>
@@ -115,10 +116,7 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
             </button>
           )}
 
-          {/* Presentation tool toggle — only visible in fullscreen */}
-          {isPresenting && (
-            <PresentationToolToggle />
-          )}
+          {/* Presentation tool toggle — hidden (laser not needed in highlight mode) */}
 
           {/* About button — localhost only, hidden when presenting */}
           {isLocalhost && !isPresenting && (

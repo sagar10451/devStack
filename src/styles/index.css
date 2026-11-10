@@ -185,6 +185,18 @@ a[href*="tldraw.dev"] {
 }
 
 
+/* Hide tldraw watermark globally */
+[class*="watermark"],
+.tl-watermark_SEE-LICENSE {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+
 /* Hide hover/selection indicators when canvas is locked */
 .canvas-locked .tl-overlays,
 .canvas-locked .tl-canvas-overlays,
@@ -197,7 +209,8 @@ a[href*="tldraw.dev"] {
 .canvas-locked [class*="overlay"]:not(.tl-error-boundary__overlay),
 .canvas-locked .tl-cursor,
 .canvas-locked .tl-collaborator,
-.canvas-locked [class*="cursor"] {
+.canvas-locked [class*="cursor"],
+.canvas-locked [class*="watermark"] {
   display: none !important;
   pointer-events: none !important;
 }
@@ -406,6 +419,17 @@ a[href*="tldraw.dev"] {
 @keyframes wave-flow-2 {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
+}
+
+/* Glow line between header and canvas, and sidebar and canvas in presenting mode */
+.presenting-mode header {
+  border-bottom: 1px solid rgba(59, 130, 246, 0.4) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 12px rgba(59, 130, 246, 0.3), 0 1px 4px rgba(59, 130, 246, 0.2) !important;
+}
+.presenting-mode .sub-topic-sidebar {
+  border-left: 1px solid rgba(59, 130, 246, 0.5) !important;
+  box-shadow: -4px 0 20px rgba(59, 130, 246, 0.4), -1px 0 8px rgba(59, 130, 246, 0.3), inset 2px 0 8px rgba(59, 130, 246, 0.15) !important;
+  overflow: visible !important;
 }
 
 /* Laser pointer cursor in presentation mode — only on canvas area */
@@ -911,6 +935,35 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
   100% { filter: none; }
 }
 
+/* Topic Glow — electric-blue flash highlight on all topic boxes */
+@keyframes topic-roll-call-flash {
+  0% {
+    border-color: rgba(0, 140, 255, 0);
+    box-shadow: none;
+  }
+  10% {
+    border-color: #008CFF;
+    box-shadow: 0 0 12px rgba(0, 140, 255, 0.8), 0 0 30px rgba(0, 140, 255, 0.4), inset 0 0 8px rgba(0, 140, 255, 0.15);
+  }
+  50% {
+    border-color: #008CFF;
+    box-shadow: 0 0 18px rgba(0, 140, 255, 0.9), 0 0 40px rgba(0, 140, 255, 0.5), inset 0 0 12px rgba(0, 140, 255, 0.2);
+  }
+  80% {
+    border-color: rgba(0, 140, 255, 0.6);
+    box-shadow: 0 0 10px rgba(0, 140, 255, 0.5), 0 0 20px rgba(0, 140, 255, 0.2);
+  }
+  100% {
+    border-color: rgba(0, 140, 255, 0);
+    box-shadow: none;
+  }
+}
+.topic-roll-call-active {
+  animation: topic-roll-call-flash 2.2s ease-in-out forwards !important;
+  box-shadow: inset 0 0 0 1.5px #008CFF, 0 0 15px rgba(0, 140, 255, 0.5), 0 0 30px rgba(0, 140, 255, 0.2) !important;
+  background: linear-gradient(180deg, rgba(0, 140, 255, 0.08), rgba(0, 20, 60, 0.9)) !important;
+}
+
 /* Hide tldraw's "Back to content" helper button */
 .tlui-helper-buttons {
   display: none !important;
@@ -1225,4 +1278,134 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
 /* tldraw dark mode text — ensure shapes default to light */
 .tl-theme__dark {
   --tl-color-text: #e2e8f0;
+}
+
+
+/* Mask radial reveal — grayscale shrinks from edges toward center, revealing color from center outward */
+@keyframes mask-radial-shrink {
+  0% {
+    clip-path: circle(150% at 50% 50%);
+    opacity: 1;
+  }
+  85% {
+    clip-path: circle(5% at 50% 50%);
+    opacity: 0.6;
+  }
+  100% {
+    clip-path: circle(0% at 50% 50%);
+    opacity: 0;
+  }
+}
+
+.mask-radial-reveal {
+  animation: mask-radial-shrink 0.8s ease-in-out forwards !important;
+}
+
+
+/* Pointer arrow bounce/dance animation */
+@keyframes pointer-bounce {
+  0%, 100% { transform: translateY(0) rotate(var(--arrow-rotation, 315deg)); }
+  12% { transform: translateY(-14px) rotate(var(--arrow-rotation, 315deg)); }
+  24% { transform: translateY(0) rotate(var(--arrow-rotation, 315deg)); }
+  36% { transform: translateY(-10px) rotate(var(--arrow-rotation, 315deg)); }
+  48% { transform: translateY(0) rotate(var(--arrow-rotation, 315deg)); }
+  60% { transform: translateY(-6px) rotate(var(--arrow-rotation, 315deg)); }
+  72% { transform: translateY(0) rotate(var(--arrow-rotation, 315deg)); }
+  84% { transform: translateY(-3px) rotate(var(--arrow-rotation, 315deg)); }
+}
+
+.pointer-arrow-bounce {
+  animation: pointer-bounce 1.6s ease-out forwards !important;
+}
+
+
+/* B&W reveal — camera flash (white overlay pulse) */
+@keyframes reveal-flash {
+  0% { opacity: 0; }
+  30% { opacity: 0.35; }
+  100% { opacity: 0; }
+}
+
+.mask-reveal-flash {
+  animation: reveal-flash 0.6s ease-out 0.4s forwards !important;
+  opacity: 0;
+}
+
+
+/* Topics header glow — bright white-blue highlight for the "Topics" title bar */
+@keyframes topic-header-flash {
+  0% { box-shadow: none; background: transparent; }
+  10% { box-shadow: 0 0 15px rgba(0, 217, 255, 0.7), 0 0 30px rgba(0, 140, 255, 0.4), inset 0 0 12px rgba(0, 217, 255, 0.2); background: rgba(0, 140, 255, 0.15); }
+  50% { box-shadow: 0 0 20px rgba(0, 217, 255, 0.8), 0 0 40px rgba(0, 140, 255, 0.5), inset 0 0 15px rgba(0, 217, 255, 0.25); background: rgba(0, 140, 255, 0.2); }
+  80% { box-shadow: 0 0 10px rgba(0, 217, 255, 0.4), 0 0 20px rgba(0, 140, 255, 0.2); background: rgba(0, 140, 255, 0.08); }
+  100% { box-shadow: none; background: transparent; }
+}
+
+.topic-header-glow-active {
+  animation: topic-header-flash 2.2s ease-in-out forwards !important;
+  border-bottom: 1px solid rgba(0, 217, 255, 0.5) !important;
+}
+
+
+/* Hide tldraw toolbar when Audio Sync timeline is open */
+.hide-tldraw-toolbar .tlui-toolbar,
+.hide-tldraw-toolbar .tlui-navigation-panel {
+  display: none !important;
+}
+
+
+/* Logo glow — neon flicker + single pop animation on the header logo */
+@keyframes logo-glow-flicker {
+  0% { filter: brightness(1); text-shadow: none; transform: scale(1); }
+  10% { filter: brightness(1.8); text-shadow: 0 0 20px rgba(59,130,246,0.8), 0 0 40px rgba(59,130,246,0.4); transform: scale(1.15); }
+  25% { filter: brightness(1.2); text-shadow: 0 0 12px rgba(59,130,246,0.5), 0 0 25px rgba(59,130,246,0.3); transform: scale(1); }
+  50% { filter: brightness(1.4); text-shadow: 0 0 18px rgba(59,130,246,0.6), 0 0 35px rgba(59,130,246,0.3); transform: scale(1); }
+  100% { filter: brightness(1); text-shadow: 0 0 8px rgba(59,130,246,0.2); transform: scale(1); }
+}
+
+.logo-glow-active {
+  animation: logo-glow-flicker 2.5s ease-in-out forwards !important;
+}
+
+
+/* Logo sparkle particles — burst outward from logo */
+@keyframes sparkle-particle {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  50% { opacity: 0.8; }
+  100% { transform: translate(var(--sx), var(--sy)) scale(0); opacity: 0; }
+}
+
+.logo-sparkle-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 99999;
+}
+
+.logo-sparkle {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: sparkle-particle var(--dur) ease-out forwards;
+}
+
+
+/* Logo ring pulse — rectangular shockwave expanding from logo */
+@keyframes logo-ring-pulse {
+  0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; border-width: 3px; }
+  50% { opacity: 0.4; border-width: 2px; }
+  100% { transform: translate(-50%, -50%) scale(var(--ring-scale)); opacity: 0; border-width: 1px; }
+}
+
+.logo-ring {
+  position: fixed;
+  border-style: solid;
+  border-color: rgba(59, 130, 246, 0.6);
+  border-radius: 12px;
+  pointer-events: none;
+  animation: logo-ring-pulse var(--ring-dur) ease-out forwards;
 }

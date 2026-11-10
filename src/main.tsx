@@ -7,7 +7,7 @@ import './styles/index.css'
 // Set tab title based on portal
 const portal = import.meta.env.VITE_PORTAL as string | undefined;
 if (portal === 'chapterBreakdown') {
-  document.title = 'ChapterBreakdown by Priyanka & Sagar';
+  document.title = 'RevisionBhai';
 } else if (portal === 'devStack') {
   document.title = 'devStack by Sagar Kumar';
 }

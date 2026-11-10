@@ -101,7 +101,7 @@ export default function SubTopicTracker({
     const startPageIdx = label.startPage ?? (labelIdx === 0 ? 0 : (labels[labelIdx - 1].endPage ?? 0) + 1);
     const endPageIdx = label.endPage ?? label.endStep ?? 0;
 
-    // Count total steps and completed steps within this label's page range
+    // Count only Highlight steps within this label's page range
     let totalStepsInRange = 0;
     let completedSteps = 0;
 
@@ -109,8 +109,8 @@ export default function SubTopicTracker({
       const pid = pageIds[pi];
       for (let si = 0; si < steps.length; si++) {
         if ((steps[si].pageId || 'page:page') === pid) {
-          // Skip preloaded steps — they don't count towards progress
-          if (steps[si].animation === 'none' && (steps[si].action || 'enter') === 'enter') continue;
+          // Only count Highlight, Paint B&W, and Mask steps for progress
+          if (steps[si].label !== 'Highlight' && steps[si].label !== 'Paint B&W' && steps[si].label !== 'Mask') continue;
           totalStepsInRange++;
           if (currentStep >= si) completedSteps++;
         }
@@ -150,6 +150,22 @@ export default function SubTopicTracker({
     }
     prevStepRef.current = currentStep;
   }, [currentStep, isLocked, labels, steps, getLastStepIndexForPage]);
+
+  // ─── Play sound when a sub topic becomes active ─────────────────────────
+  const prevActiveIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isLocked || labels.length === 0) return;
+    // Find the currently active label
+    let activeId: string | null = null;
+    for (let i = 0; i < labels.length; i++) {
+      const status = getStatus(labels[i], i);
+      if (status === 'active') { activeId = labels[i].id; break; }
+    }
+    if (activeId && activeId !== prevActiveIdRef.current) {
+      try { const a = new Audio('/sounds/short_reveal.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+    }
+    prevActiveIdRef.current = activeId;
+  }, [currentStep, isLocked, labels]);
 
   // Auto-scroll
   useEffect(() => {
@@ -254,7 +270,25 @@ export default function SubTopicTracker({
     }
 
     // Active if current page is within this label's range
-    if (currentPageIndex >= startPageIdx && currentPageIndex <= endPageIdx) return 'active';
+    // BUT only after glow steps (glowAll / glowOne for this label) have been played
+    if (currentPageIndex >= startPageIdx && currentPageIndex <= endPageIdx) {
+      // Check if any glow steps exist for this page range and haven't been reached yet
+      let glowStepIndex = -1;
+      for (let si = 0; si < steps.length; si++) {
+        const s = steps[si];
+        if (s.action === 'topicRollCall') {
+          // Glow All — must be reached before any topic becomes active
+          if (glowStepIndex < si) glowStepIndex = si;
+        }
+        if (s.action === 'topicGlowOne' && s.topicGlowTargetId === label.id) {
+          // Glow One for THIS specific topic
+          if (glowStepIndex < si) glowStepIndex = si;
+        }
+      }
+      // If glow steps exist but haven't been reached, stay pending
+      if (glowStepIndex >= 0 && currentStep < glowStepIndex) return 'pending';
+      return 'active';
+    }
     if (currentPageIndex > endPageIdx) return 'complete';
     return 'pending';
   };
@@ -272,7 +306,7 @@ export default function SubTopicTracker({
   if (sidebar) {
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <div className={`flex items-center justify-between px-3 py-2.5 ${isLocked ? 'border-b border-white/[0.08]' : 'border-b border-white/[0.06]'}`} style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.025), transparent)' }}>
+        <div className={`flex items-center justify-between px-3 py-1.5 ${isLocked ? 'border-b border-white/[0.08]' : 'border-b border-white/[0.06]'}`} style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.025), transparent)' }}>
           {isLocked ? (
             <span className="text-xs font-semibold text-white/90">🎬 {sidebarTitle}</span>
           ) : (
@@ -300,7 +334,7 @@ export default function SubTopicTracker({
         {/* Collapsible content — always visible when locked, toggleable when unlocked */}
         {(isLocked || !collapsed) && (
         <>
-        <div ref={listRef} className="flex-1 overflow-y-auto px-1 py-2 space-y-1">
+        <div ref={listRef} className="flex-1 overflow-y-auto px-1 py-1 space-y-1">
           {labels.length === 0 && !isLocked && (
             <p className="text-[10px] text-slate-500 text-center py-4">Click + to add sub topics</p>
           )}
@@ -328,28 +362,28 @@ export default function SubTopicTracker({
                     : 'px-2 py-1.5'
                 } ${
                   isLocked
-                    ? (glowType === 'green' ? 'border-2 border-emerald-400 bg-emerald-950/60 shadow-lg shadow-emerald-500/30' :
-                       glowType === 'orange' ? 'border-2 border-orange-400 bg-orange-950/40 shadow-lg shadow-orange-500/30' :
-                       status === 'complete' ? 'border border-emerald-500/30 bg-emerald-500/8' :
-                       status === 'active' ? 'border border-amber-400/30 shadow-[0_0_12px_rgba(255,170,60,0.10)]' :
+                    ? (glowType === 'green' ? 'border-2 border-[#00D9FF] bg-[#00D9FF]/5 shadow-lg shadow-[#008CFF]/30' :
+                       glowType === 'orange' ? 'border-2 border-[#008CFF] bg-[#008CFF]/5 shadow-lg shadow-[#008CFF]/30' :
+                       status === 'complete' ? 'border border-emerald-400/30 bg-emerald-500/8' :
+                       status === 'active' ? 'border border-[#008CFF]/40 shadow-[0_0_12px_rgba(0,140,255,0.10)]' :
                        'border border-white/[0.12]')
                     : (status === 'complete' ? 'bg-emerald-500/8 border border-emerald-400/30' :
-                       status === 'active' ? 'border border-amber-400/30' :
+                       status === 'active' ? 'border border-[#008CFF]/30' :
                        'border border-white/[0.12]')
                 }`}
-                style={{ background: status === 'active' ? 'linear-gradient(90deg, rgba(255,170,60,0.08), rgba(255,255,255,0.015))' : 'linear-gradient(180deg, #14171A, #0D0F11)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.035)' }}
+                style={{ background: status === 'active' ? 'linear-gradient(90deg, rgba(0,140,255,0.08), rgba(0,20,60,0.4))' : 'linear-gradient(180deg, #14171A, #0D0F11)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.035)' }}
               >
                 <div className="flex items-center gap-2 relative z-10">
                   <div className="relative flex-shrink-0">
                     <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center transition-all duration-500 ${
                       status === 'complete' ? 'bg-emerald-400 shadow-md shadow-emerald-400/60 scale-110' :
-                      status === 'active' ? 'bg-orange-400 shadow-md shadow-orange-400/50' :
+                      status === 'active' ? 'bg-[#008CFF] shadow-md shadow-[#008CFF]/50' :
                       'bg-slate-600'
                     } ${justCompletedId === label.id ? 'celebrate-glow' : ''}`}>
                       {status === 'complete' && <Check className="w-2 h-2 text-white" />}
                     </div>
                     {justCompletedId === label.id && (
-                      <div className="absolute inset-0 rounded-full bg-green-400 celebrate-ring" />
+                      <div className="absolute inset-0 rounded-full bg-emerald-400 celebrate-ring" />
                     )}
                   </div>
                   {!isLocked ? (
@@ -366,7 +400,7 @@ export default function SubTopicTracker({
                   )}
                   {isLocked && status !== 'pending' && (
                     <span className={`text-[8px] font-bold ml-auto flex-shrink-0 ${
-                      status === 'complete' ? 'text-emerald-400' : 'text-orange-300'
+                      status === 'complete' ? 'text-emerald-400' : 'text-[#008CFF]'
                     }`}>{Math.round(getProgress(label, i) * 100)}%</span>
                   )}
                   {!isLocked && !label.id.startsWith('auto-') && (
@@ -384,7 +418,7 @@ export default function SubTopicTracker({
                         status === 'complete'
                           ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 shadow-[0_0_6px_rgba(52,211,153,0.5)]'
                           : status === 'active'
-                          ? 'bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-300 shadow-[0_0_6px_rgba(251,191,36,0.5)]'
+                          ? 'bg-gradient-to-r from-[#008CFF] via-[#00AAFF] to-[#00D9FF] shadow-[0_0_6px_rgba(0,140,255,0.5)]'
                           : ''
                       }`}
                       style={{ width: `${Math.round(getProgress(label, i) * 100)}%` }}

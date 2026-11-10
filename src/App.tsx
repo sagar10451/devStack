@@ -39,7 +39,7 @@ function PortalPicker() {
             <div className="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center mb-5 mx-auto group-hover:scale-110 transition-transform" style={{ boxShadow: '0 0 20px rgba(16,185,129,0.3)' }}>
               <BookOpen className="w-7 h-7 text-white" />
             </div>
-            <h2 className="text-xl font-bold text-gray-100">Chapter<span className="text-emerald-400">Breakdown</span></h2>
+            <h2 className="text-xl font-bold text-gray-100">Revision<span className="text-emerald-400">Bhai</span></h2>
             <p className="text-sm text-slate-500 mt-1.5">School — Class 10, 12</p>
           </Link>
         </div>

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, memo } from 'react';
 import { Tldraw, loadSnapshot } from 'tldraw';
 import type { Editor } from 'tldraw';
 import 'tldraw/tldraw.css';
@@ -6,8 +6,9 @@ import { CodeBlockShapeUtil } from './shapes/CodeBlockShape';
 import { MarkdownBlockShapeUtil } from './shapes/MarkdownBlockShape';
 import { GlowNotesShapeUtil } from './shapes/GlowNotesShape';
 import { StickyNoteShapeUtil } from './shapes/StickyNoteShape';
+import { ChapterNameShapeUtil } from './shapes/ChapterNameShape';
 
-const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesShapeUtil, StickyNoteShapeUtil];
+const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesShapeUtil, StickyNoteShapeUtil, ChapterNameShapeUtil];
 
 interface CanvasEditorProps {
   snapshot: unknown | null;
@@ -17,7 +18,7 @@ interface CanvasEditorProps {
   hideUi?: boolean;
 }
 
-export default function CanvasEditor({
+export default memo(function CanvasEditor({
   snapshot,
   onEditorReady,
   onDocumentChange,
@@ -56,8 +57,8 @@ export default function CanvasEditor({
         hideUi={hideUi}
         shapeUtils={customShapeUtils}
         colorScheme="dark"
-        components={{ PageMenu: null, MainMenu: null, QuickActions: null, ActionsMenu: null, HelpMenu: null }}
+        components={{ PageMenu: null, MainMenu: null, QuickActions: null, ActionsMenu: null, HelpMenu: null, Watermark: null }}
       />
     </div>
   );
-}
+});

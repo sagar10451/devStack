@@ -87,6 +87,11 @@ const PAGE_COLORS = [
 export function getShapeIcon(editor: Editor | null, shapeId: string, diagramData?: DiagramData): { icon: React.ReactNode; label: string } {
   const cls = "w-3.5 h-3.5";
 
+  if (!shapeId) {
+    // Use step label if available for glow steps
+    return { icon: <Star className={cls} />, label: 'Glow' };
+  }
+
   if (!shapeId.includes(':')) {
     const node = diagramData?.nodes.find((n: any) => n.id === shapeId) as any;
     if (node) {
@@ -702,7 +707,11 @@ export default function TimelineBar({
         ) : (
           <>
             {currentPageSteps.map((step, pageLocalIndex) => {
-              const info = getShapeIcon(editor, step.shapeIds[0], diagramData);
+              const info = step.shapeIds.length === 0 
+                ? { icon: <Star className="w-3.5 h-3.5" />, label: step.label }
+                : (step.label === 'Highlight' || step.label === 'Paint B&W' || step.label === 'Mask' || step.label === 'Pointer')
+                ? { icon: <Star className="w-3.5 h-3.5" />, label: step.label }
+                : getShapeIcon(editor, step.shapeIds[0], diagramData);
               const extra = step.shapeIds.length > 1 ? `+${step.shapeIds.length - 1}` : '';
               const hasCamera = !!step.cameraPosition;
               const isSelected = step.shapeIds.some(id => selectedShapeIds.includes(id));

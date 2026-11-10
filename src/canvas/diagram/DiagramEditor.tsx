@@ -224,10 +224,18 @@ function FlowCanvas({
 
   // ─── Propagate changes to parent ────────────────────────────────────────
   const propagateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPropagatedRef = useRef<string>('');
 
   useEffect(() => {
+    // Build a fingerprint of current state to avoid propagating unchanged data
+    const fingerprint = `${nodes.length}:${edges.length}:${edgeType}:${pathType}:${arrowType}:${color}:${JSON.stringify(nodes.map(n => n.id + n.position.x + n.position.y))}:${JSON.stringify(edges.map(e => e.id))}`;
+    if (fingerprint === lastPropagatedRef.current) return; // no change, skip
+
     if (propagateTimeoutRef.current) clearTimeout(propagateTimeoutRef.current);
     propagateTimeoutRef.current = setTimeout(() => {
+      // Double-check fingerprint hasn't been propagated already
+      if (fingerprint === lastPropagatedRef.current) return;
+      lastPropagatedRef.current = fingerprint;
       onDiagramChange({
         nodes: structuredClone(nodes),
         edges: structuredClone(edges),

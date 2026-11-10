@@ -42,10 +42,10 @@ export const sites: Record<string, SiteConfig> = {
   'flowchart-notes': {
     id: 'flowchart-notes',
     basePath: PORTAL_ENV === 'chapterBreakdown' ? '' : '/chapterBreakdown',
-    brandName: 'Chapter',
-    brandAccent: 'Breakdown',
-    brandSubtitle: 'by Priyanka & Sagar',
-    watermark: 'Chapter Breakdown by Priyanka & Sagar',
+    brandName: 'Revision',
+    brandAccent: 'Bhai',
+    brandSubtitle: 'BY P&S',
+    watermark: 'RevisionBhai by P&S',
     youtubeUrl: 'https://www.youtube.com/@chapterBreakdown',
   },
 };
