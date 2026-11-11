@@ -73,7 +73,8 @@ export default function Header({ searchQuery, onSearchChange }: HeaderProps) {
           <div className="w-11 h-11 rounded-xl overflow-hidden shadow-md group-hover:shadow-lg transition-shadow" style={{ boxShadow: '0 0 12px rgba(0,140,255,0.3)' }}>
             <img src="/revision-bhai-logo.png" alt="RevisionBhai" className="w-full h-full object-cover" />
           </div>
-          <div>
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', top: -14, left: 0, right: 0, height: 0, borderTop: '1px solid #FF3B30' }} />
             <h1 className="text-xl leading-tight" style={{ fontFamily: "'Segoe UI', Arial, sans-serif" }}>
               <span className="font-semibold text-white">Revision</span><span className="font-bold" style={{ color: '#00BFFF' }}> Bhai</span>
             </h1>

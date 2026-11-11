@@ -24,6 +24,9 @@ interface TimelineBarProps {
   isLocked: boolean;
   diagramData?: DiagramData;
   selectedShapeIds?: string[];
+  highlightedStepId?: string | null;
+  onStepHighlight?: (stepId: string | null) => void;
+  onRegionsRepoint?: (removedStepIds: string[], survivingStepId: string) => void;
   fullyCollapsed?: boolean;
   onFullyCollapsedChange?: (v: boolean) => void;
   roughMode?: boolean;
@@ -194,6 +197,9 @@ export default function TimelineBar({
   isLocked,
   diagramData,
   selectedShapeIds = [],
+  highlightedStepId,
+  onStepHighlight,
+  onRegionsRepoint,
   fullyCollapsed: _fullyCollapsed = false,
   onFullyCollapsedChange,
   roughMode = false,
@@ -239,7 +245,9 @@ export default function TimelineBar({
     if (step && editor) {
       const action = step.action || 'enter';
       const isManual = action === 'exit' || action === 'move' || action === 'teleport' || action === 'swap';
-      if (!isManual) {
+      // Don't delete tldraw shapes for Highlight/Mask/Pointer steps — they reference shared shapes (images)
+      const isOverlayStep = step.label === 'Highlight' || step.label === 'Mask' || step.label === 'Paint B&W' || step.label === 'Pointer';
+      if (!isManual && !isOverlayStep) {
         const tldrawIds = step.shapeIds.filter(sid => sid.includes(':'));
         const rfIds = step.shapeIds.filter(sid => !sid.includes(':'));
         if (tldrawIds.length > 0) {
@@ -408,12 +416,16 @@ export default function TimelineBar({
       shapeIds: [...new Set(mergedShapeIds)],
     };
     const idsToRemove = new Set(selectedSteps.slice(1).map(s => s.id));
+    // Re-point highlight regions from removed steps to the surviving step
+    if (idsToRemove.size > 0) {
+      onRegionsRepoint?.([...idsToRemove], firstStep.id);
+    }
     const newSteps = steps
       .map(s => s.id === firstStep.id ? mergedStep : s)
       .filter(s => !idsToRemove.has(s.id));
     onStepsChange(newSteps);
     setSelectedCardIds(new Set());
-  }, [selectedCardIds, steps, onStepsChange]);
+  }, [selectedCardIds, steps, onStepsChange, onRegionsRepoint]);
 
   const ungroupCard = useCallback((stepId: string) => {
     const step = steps.find(s => s.id === stepId);
@@ -725,6 +737,8 @@ export default function TimelineBar({
               // Find the global index for data-timeline-index (used by auto-scroll)
               const globalIndex = steps.findIndex(s => s.id === step.id);
 
+              const isStepHighlighted = highlightedStepId === step.id;
+
               return (
                 <div key={step.id} className="flex items-stretch" data-timeline-index={globalIndex}>
                   {/* Card */}
@@ -733,9 +747,12 @@ export default function TimelineBar({
                       toggleCardSelection(step.id, e);
                       if (!e.metaKey && !e.ctrlKey) handleCardClick(step);
                       if (moveMenuStepId && moveMenuStepId !== step.id) setMoveMenuStepId(null);
+                      onStepHighlight?.(highlightedStepId === step.id ? null : step.id);
                     }}
                     className={`flex-shrink-0 w-44 rounded-lg border flex flex-col overflow-hidden transition-all cursor-pointer mx-1 ${
-                      selectedCardIds.has(step.id)
+                      isStepHighlighted
+                        ? 'border-cyan-400/60 bg-cyan-500/10 ring-1 ring-cyan-400/40 shadow-[0_0_12px_rgba(6,182,212,0.2)]'
+                        : selectedCardIds.has(step.id)
                         ? 'border-emerald-400/50 bg-emerald-500/8 ring-1 ring-emerald-400/30 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
                         : isHelper
                         ? 'border-cyan-500/40 bg-cyan-500/5 hover:border-cyan-400/50 shadow-[0_0_6px_rgba(6,182,212,0.08)]'

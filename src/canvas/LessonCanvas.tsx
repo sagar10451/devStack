@@ -195,6 +195,8 @@ export default function LessonCanvas({
 }: LessonCanvasProps) {
   const { isPresenting, togglePresentation, presentationTool } = usePresentation();
   const [isLocked, setIsLocked] = useState(true);
+  const isLockedRef = useRef(true);
+  isLockedRef.current = isLocked;
   // Audio Notes split canvas: left/right paste target
   const [canvasSplitEnabled, setCanvasSplitEnabled] = useState(initialData?.canvasSplitEnabled || false);
   const canvasSplitEnabledRef = useRef(false);
@@ -298,6 +300,7 @@ export default function LessonCanvas({
   const [editingArrowId, setEditingArrowId] = useState<string | null>(null);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [showGuideZoomPicker, setShowGuideZoomPicker] = useState(false);
+  const [highlightedStepId, setHighlightedStepId] = useState<string | null>(null);
   // ─── Hidden tools state (persisted in localStorage) ─────────────────────
   const [hiddenTools, setHiddenTools] = useState<Set<string>>(() => {
     try {
@@ -615,13 +618,16 @@ export default function LessonCanvas({
       // Clear any false dirty flag from initial loadSnapshot triggering store listener
       isDirtyRef.current = false;
     }, 50);
-    // Retry at 300ms
+    // Retry at 300ms — only if still locked
     setTimeout(() => {
+      if (!isLockedRef.current) return;
       applyAnimationState(ed, animationStepsRef.current, -1);
     }, 300);
-    // Retry at 1500ms and remove blanket style
+    // Retry at 1500ms and remove blanket style — only apply animation state if still locked
     setTimeout(() => {
-      applyAnimationState(ed, animationStepsRef.current, -1);
+      if (isLockedRef.current) {
+        applyAnimationState(ed, animationStepsRef.current, -1);
+      }
       const el = document.getElementById('editor-ready-hide');
       if (el) el.remove();
     }, 1500);
@@ -629,6 +635,17 @@ export default function LessonCanvas({
     // Runs multiple times to handle slow loading of large base64 images
     const recoverImages = (attempt: number) => {
       if (attempt > 5) return;
+      // If unlocked, just ensure all image shapes are visible
+      if (!isLockedRef.current) {
+        ed.getCurrentPageShapes().forEach(shape => {
+          if ((shape as any).type !== 'image') return;
+          const shapeEl = document.querySelector(`[data-shape-id="${shape.id}"]`) as HTMLElement | null;
+          if (shapeEl && shapeEl.style.visibility === 'hidden') {
+            shapeEl.style.visibility = '';
+            shapeEl.style.opacity = '';
+          }
+        });
+      }
       const shapes = ed.getCurrentPageShapes();
       let anyBroken = false;
       shapes.forEach(shape => {
@@ -637,8 +654,13 @@ export default function LessonCanvas({
         if (!assetId) return;
         const asset = ed.getAsset(assetId as any) as any;
         if (!asset?.props?.src) return;
-        const shapeEl = document.querySelector(`[data-shape-id="${shape.id}"]`);
+        const shapeEl = document.querySelector(`[data-shape-id="${shape.id}"]`) as HTMLElement | null;
         if (!shapeEl) { anyBroken = true; return; }
+        // Also clear parent visibility if hidden (leftover from applyAnimationState)
+        if (!isLockedRef.current && shapeEl.style.visibility === 'hidden') {
+          shapeEl.style.visibility = '';
+          shapeEl.style.opacity = '';
+        }
         const imgEl = shapeEl.querySelector('img') as HTMLImageElement | null;
         if (!imgEl) { anyBroken = true; return; }
         if (!imgEl.src || imgEl.naturalWidth === 0 || imgEl.complete === false) {
@@ -1462,10 +1484,25 @@ export default function LessonCanvas({
     }, 50);
   }, [editor, isLocked, animationSteps, currentStep, applyAnimationState]);
 
+  const handleRegionsRepoint = useCallback((removedStepIds: string[], survivingStepId: string) => {
+    const removedSet = new Set(removedStepIds);
+    setHighlightRegions(prev => {
+      let changed = false;
+      const updated = prev.map(r => {
+        if (removedSet.has(r.stepId)) {
+          changed = true;
+          return { ...r, stepId: survivingStepId };
+        }
+        return r;
+      });
+      return changed ? updated : prev;
+    });
+  }, []);
+
   const handleStepsChange = useCallback((newSteps: AnimationStep[]) => {
     setAnimationSteps(newSteps);
-    // Remove orphaned highlight regions whose step was deleted
     const newStepIds = new Set(newSteps.map(s => s.id));
+    // Delete orphaned highlight regions whose step was deleted
     setHighlightRegions(prev => {
       const filtered = prev.filter(r => newStepIds.has(r.stepId));
       return filtered.length !== prev.length ? filtered : prev;
@@ -2151,7 +2188,7 @@ export default function LessonCanvas({
     });
 
     // Start 10-second countdown
-    setAudioCountdown(10);
+    setAudioCountdown(40);
     if (audioCountdownRef.current) clearInterval(audioCountdownRef.current);
     audioCountdownRef.current = setInterval(() => {
       setAudioCountdown(prev => {
@@ -5770,7 +5807,7 @@ export default function LessonCanvas({
 
           {/* Canvas Area */}
           <div className="flex-1 relative" style={{ overflow: 'hidden', minHeight: 0 }}>
-            <div id="canvas-export-area" className="absolute inset-0" onClick={() => { setEditingHighlightId(null); setEditingArrowId(null); }}>
+            <div id="canvas-export-area" className="absolute inset-0" onClick={() => { setEditingHighlightId(null); setEditingArrowId(null); setHighlightedStepId(null); }}>
           {/* tldraw canvas — always visible */}
           <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${showGlobalTimeline ? 'hide-tldraw-toolbar' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`} style={(highlightDrawing || maskDrawing) ? { pointerEvents: 'none', willChange: 'auto' } : undefined}>
             <CanvasEditor
@@ -5956,10 +5993,11 @@ export default function LessonCanvas({
                     }
                   }
                   const isInteractive = !isLocked && !highlightDrawing && !maskDrawing;
+                  const isRegionHighlighted = !isLocked && highlightedStepId === region.stepId;
                   return (
                     <div key={region.id}>
                       <div
-                        className={`absolute ${!isLocked && highlightDrawing ? 'cursor-pointer' : 'pointer-events-none'} ${isLocked && !isMask ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${maskRevealing ? 'mask-radial-reveal' : ''}`}
+                        className={`absolute ${!isLocked && (highlightDrawing || !maskDrawing) ? 'cursor-pointer' : 'pointer-events-none'} ${isLocked && !isMask ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${maskRevealing ? 'mask-radial-reveal' : ''} ${isRegionHighlighted ? 'region-highlighted' : ''}`}
                         style={{
                           left: screenX, top: screenY, width: screenW, height: screenH,
                           background: isMask ? 'transparent' : region.color,
@@ -5971,7 +6009,7 @@ export default function LessonCanvas({
                           display: isLocked && !showRegion ? (isMask ? 'none' : undefined) : undefined,
                           opacity: isLocked && !showRegion && !isMask ? 0 : 1,
                         }}
-                        onClick={(!isLocked && highlightDrawing) ? (e) => { e.stopPropagation(); setEditingHighlightId(prev => prev === region.id ? null : region.id); } : undefined}
+                        onClick={(!isLocked && highlightDrawing) ? (e) => { e.stopPropagation(); setEditingHighlightId(prev => prev === region.id ? null : region.id); } : (!isLocked && !maskDrawing) ? (e) => { e.stopPropagation(); setHighlightedStepId(prev => prev === region.stepId ? null : region.stepId); } : undefined}
                       />
                       {/* White flash overlay when B&W mask reveals */}
                       {maskRevealing && (
@@ -6443,6 +6481,9 @@ export default function LessonCanvas({
                   isLocked={isLocked}
                   diagramData={diagramData}
                   selectedShapeIds={selectedShapeIds}
+                  highlightedStepId={highlightedStepId}
+                  onStepHighlight={setHighlightedStepId}
+                  onRegionsRepoint={handleRegionsRepoint}
                   fullyCollapsed={timelineFullyCollapsed}
                   onFullyCollapsedChange={setTimelineFullyCollapsed}
                   roughMode={roughMode}
