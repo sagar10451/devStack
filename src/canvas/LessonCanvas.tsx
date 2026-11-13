@@ -71,7 +71,8 @@ export const TOOLBAR_TOOLS = [
   { id: 'audiosync', label: 'Audio Sync' },
   { id: 'lasersync', label: 'Laser Sync' },
   { id: 'drawhighlight', label: 'Draw Highlight' },
-  { id: 'paintbw', label: 'Paint B&W' },
+  { id: 'paintbw', label: 'Paint B&W Rect' },
+  { id: 'paintbwfree', label: 'Paint B&W Free' },
   { id: 'pointer', label: 'Pointer' },
   { id: 'glowall', label: 'Glow All' },
   { id: 'glowone', label: 'Glow One' },
@@ -210,6 +211,12 @@ export default function LessonCanvas({
   const editorRef = useRef<Editor | null>(null);
   const [snapshot] = useState<unknown>(initialData?.snapshot || null);
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
+  // Swipe reveal animation progress per region (0 = fully hidden, 1 = fully revealed)
+  const [swipeProgress, setSwipeProgress] = useState<Record<string, number>>({});
+  // Swipe animation tracking
+  const swipeAnimRunningRef = useRef<Record<string, boolean>>({});
+  const swipeProgressRef = useRef<Record<string, number>>({});
+  swipeProgressRef.current = swipeProgress;
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
   const [sidebarTitle, setSidebarTitle] = useState(initialData?.sidebarTitle || 'Topics');
   const sidebarTitleRef = useRef(sidebarTitle);
@@ -220,7 +227,6 @@ export default function LessonCanvas({
   const [currentStep, setCurrentStep] = useState(-1);
   const currentStepRef = useRef(currentStep);
   currentStepRef.current = currentStep;
-  // Track which virtual topic/subtitle steps have been revealed per page
   const [revealedTopicPages, setRevealedTopicPages] = useState<Set<string>>(new Set());
   const [revealedSubtitlePages, setRevealedSubtitlePages] = useState<Set<string>>(new Set());
   const [showAnimBar, setShowAnimBar] = useState(false);
@@ -285,6 +291,64 @@ export default function LessonCanvas({
   const [highlightRegions, setHighlightRegions] = useState<HighlightRegion[]>(initialData?.highlightRegions || []);
   const highlightRegionsRef = useRef(highlightRegions);
   highlightRegionsRef.current = highlightRegions;
+
+  // ─── Swipe animation effect ──────────────────────────────────────────────
+  useEffect(() => {
+    console.log('[SWIPE_DEBUG_EFFECT] Triggered', { isLocked, currentStep, animationStepsLength: animationSteps.length, highlightRegionsLength: highlightRegions.length });
+    if (!isLocked) {
+      console.log('[SWIPE_DEBUG_EFFECT] Not locked, skipping');
+      return;
+    }
+    
+    // Check all mask regions in highlightRegions that have revealType: 'swipe' and are being revealed now
+    let foundSwipeRegions = 0;
+    highlightRegions.forEach((region, index) => {
+      if (region.type !== 'mask') return;
+      console.log('[SWIPE_DEBUG_EFFECT] Found mask region in highlightRegions', { index, regionId: region.id, hasPath: !!region.path, revealType: region.revealType });
+      if (!region.path || region.path.length < 3) return;
+      if (region.revealType !== 'swipe') return;
+      
+      foundSwipeRegions++;
+      const stepIdx = animationSteps.findIndex(s => s.id === region.stepId);
+      const regionId = region.id;
+      const justRevealed = stepIdx >= 0 && stepIdx === currentStep;
+      console.log('[SWIPE_DEBUG_EFFECT] Checking region', { regionId, stepIdx, currentStep, justRevealed });
+      if (!justRevealed) {
+        console.log('[SWIPE_DEBUG_EFFECT] Not just revealed, skipping');
+        return;
+      }
+      if (swipeAnimRunningRef.current[regionId]) {
+        console.log('[SWIPE_DEBUG_EFFECT] Animation already running');
+        return;
+      }
+      console.log('[SWIPE_DEBUG_EFFECT] Starting animation for', regionId);
+      // Play highlight sound effect (same as Draw Highlight)
+      try { const a = new Audio('/sounds/highlight_line.mp3'); a.volume = 0.2; a.play().catch(() => {}); } catch {}
+      swipeAnimRunningRef.current[regionId] = true;
+      swipeProgressRef.current[regionId] = 0;
+      setSwipeProgress(prev => ({ ...prev, [regionId]: 0 }));
+      const startTime = performance.now();
+      const duration = 1200; // ms — matches highlight swipe speed
+      const animate = (now: number) => {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Ease-out cubic
+        const eased = 1 - Math.pow(1 - progress, 3);
+        swipeProgressRef.current[regionId] = eased;
+        setSwipeProgress(prev => ({ ...prev, [regionId]: eased }));
+        console.log('[SWIPE_DEBUG_ANIMATION] Progress update', { regionId, progress, eased });
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          console.log('[SWIPE_DEBUG_ANIMATION] Animation complete for', regionId);
+          swipeAnimRunningRef.current[regionId] = false;
+        }
+      };
+      requestAnimationFrame(animate);
+    });
+    console.log('[SWIPE_DEBUG_EFFECT] Total swipe regions found:', foundSwipeRegions);
+  }, [currentStep, isLocked, highlightRegions, animationSteps]);
+
   const [highlightDrawing, setHighlightDrawing] = useState(false);
   const highlightDrawingRef = useRef(false);
   highlightDrawingRef.current = highlightDrawing;
@@ -293,6 +357,9 @@ export default function LessonCanvas({
   const [maskDrawing, setMaskDrawing] = useState(false);
   const maskDrawingRef = useRef(false);
   maskDrawingRef.current = maskDrawing;
+  const [freehandMaskDrawing, setFreehandMaskDrawing] = useState<false | 'fade' | 'swipe'>(false);
+  const freehandMaskDrawingRef = useRef<false | 'fade' | 'swipe'>(false);
+  freehandMaskDrawingRef.current = freehandMaskDrawing;
   const [pointerArrows, setPointerArrows] = useState<PointerArrow[]>(initialData?.pointerArrows || []);
   const pointerArrowsRef = useRef(pointerArrows);
   pointerArrowsRef.current = pointerArrows;
@@ -1543,7 +1610,7 @@ export default function LessonCanvas({
 
     const cleanup = () => {
       // Skip during highlight/mask drawing to prevent re-renders that cause flash
-      if (highlightDrawingRef.current || maskDrawingRef.current) return;
+      if (highlightDrawingRef.current || maskDrawingRef.current || freehandMaskDrawingRef.current) return;
       const currentPageId = editor.getCurrentPageId() as string;
       const existingShapeIds = new Set(
         editor.getCurrentPageShapeIds() as Set<string>
@@ -1639,7 +1706,7 @@ export default function LessonCanvas({
 
     const detectNewShapes = () => {
       // Skip during highlight/mask drawing to prevent re-renders that cause flash
-      if (highlightDrawingRef.current || maskDrawingRef.current) return;
+      if (highlightDrawingRef.current || maskDrawingRef.current || freehandMaskDrawingRef.current) return;
       const currentShapes = editor.getCurrentPageShapes();
       const currentIds = new Set(currentShapes.map(s => s.id as string));
       const newIds: string[] = [];
@@ -3168,9 +3235,12 @@ export default function LessonCanvas({
           applyAnimationState(editor!, animationSteps, nextStep);
           // Skip CSS animation for Highlight/Mask steps — their visibility is managed by overlay divs
           const isHighlightStep = step.label === 'Highlight' || step.label === 'Mask' || step.label === 'Paint B&W' || step.label === 'Pointer';
-          // Play sound for Paint B&W reveal
+          // Play sound for Paint B&W reveal (skip for swipe — swipe plays its own sound)
           if (step.label === 'Paint B&W' || step.label === 'Mask') {
-            try { const a = new Audio('/sounds/border_animation.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+            const isSwipeStep = highlightRegions.some(r => r.stepId === step.id && r.type === 'mask' && r.revealType === 'swipe' && r.path && r.path.length > 2);
+            if (!isSwipeStep) {
+              try { const a = new Audio('/sounds/border_animation.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
+            }
           }
           // Play sound for Highlight reveal
           if (step.label === 'Highlight') {
@@ -5434,9 +5504,57 @@ export default function LessonCanvas({
                 }
               }}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${maskDrawing ? 'bg-slate-500/15 text-slate-300 border border-slate-500/30 shadow-[0_0_10px_rgba(148,163,184,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-              data-tool="paintbw" title="Paint B&W regions on images — covered in grayscale, revealed during playback"
+              data-tool="paintbw" title="Paint B&W Rect — covered in grayscale, revealed during playback"
             >
-              🔲 Paint B&W
+              🔲 Paint B&W Rect
+            </button>
+            )}
+            {/* Paint B&W Free — freehand mode */}
+            {canvasMode === 'reveal' && !isLocked && (
+            <button
+              onClick={() => {
+                const wasDrawing = freehandMaskDrawing;
+                setFreehandMaskDrawing(v => v === 'fade' ? false : 'fade');
+                setEditingHighlightId(null);
+                if (!wasDrawing) {
+                  setHighlightDrawing(false);
+                  setMaskDrawing(false);
+                  setPointerPlacing(false);
+                  if (editor) { editor.selectNone(); editor.updateInstanceState({ isReadonly: true }); }
+                }
+                if (wasDrawing && editor) {
+                  editor.updateInstanceState({ isReadonly: false });
+                  markDirty();
+                }
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${freehandMaskDrawing === 'fade' ? 'bg-slate-500/15 text-slate-300 border border-slate-500/30 shadow-[0_0_10px_rgba(148,163,184,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              data-tool="paintbwfree" title="Freehand Paint B&W — draw freehand shape, fade reveal during playback"
+            >
+              ✏️ Paint B&W Free R
+            </button>
+            )}
+            {/* Paint B&W Free S — freehand with swipe reveal */}
+            {canvasMode === 'reveal' && !isLocked && (
+            <button
+              onClick={() => {
+                const wasDrawing = freehandMaskDrawing;
+                setFreehandMaskDrawing(v => v === 'swipe' ? false : 'swipe' as any);
+                setEditingHighlightId(null);
+                if (!wasDrawing) {
+                  setHighlightDrawing(false);
+                  setMaskDrawing(false);
+                  setPointerPlacing(false);
+                  if (editor) { editor.selectNone(); editor.updateInstanceState({ isReadonly: true }); }
+                }
+                if (wasDrawing && editor) {
+                  editor.updateInstanceState({ isReadonly: false });
+                  markDirty();
+                }
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${freehandMaskDrawing === 'swipe' ? 'bg-slate-500/15 text-slate-300 border border-slate-500/30 shadow-[0_0_10px_rgba(148,163,184,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              data-tool="paintbwfrees" title="Freehand Paint B&W — draw freehand shape, swipe reveal during playback"
+            >
+              ✏️ Paint B&W Free S
             </button>
             )}
             {/* Pointer Arrow — highlight mode only */}
@@ -5809,7 +5927,7 @@ export default function LessonCanvas({
           <div className="flex-1 relative" style={{ overflow: 'hidden', minHeight: 0 }}>
             <div id="canvas-export-area" className="absolute inset-0" onClick={() => { setEditingHighlightId(null); setEditingArrowId(null); setHighlightedStepId(null); }}>
           {/* tldraw canvas — always visible */}
-          <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${showGlobalTimeline ? 'hide-tldraw-toolbar' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`} style={(highlightDrawing || maskDrawing) ? { pointerEvents: 'none', willChange: 'auto' } : undefined}>
+          <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${showGlobalTimeline ? 'hide-tldraw-toolbar' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`} style={(highlightDrawing || maskDrawing || freehandMaskDrawing) ? { pointerEvents: 'none', willChange: 'auto' } : undefined}>
             <CanvasEditor
               snapshot={snapshot}
               onEditorReady={handleEditorReady}
@@ -5976,29 +6094,122 @@ export default function LessonCanvas({
                   const screenX = (pageX + cam.x) * cam.z, screenY = (pageY + cam.y) * cam.z;
                   const screenW = pageW * cam.z, screenH = pageH * cam.z;
                   const isMask = region.type === 'mask';
+                  const hasFreehandPath = isMask && region.path && region.path.length > 2;
                   let showRegion = true;
                   let maskRevealing = false;
+                  console.log('[DEBUG0] START region render', { regionId: region.id, stepId: region.stepId, isLocked, currentStep, type: region.type });
                   if (isLocked) {
                     const stepIdx = animationSteps.findIndex(s => s.id === region.stepId);
+                    console.log('[DEBUG0a] stepIdx lookup', { regionStepId: region.stepId, stepIdx, currentStep, totalSteps: animationSteps.length });
                     if (isMask) {
                       // Mask: visible UNTIL step plays, then radial-reveal animation removes it
                       const justRevealed = stepIdx >= 0 && stepIdx === currentStep;
                       const alreadyRevealed = stepIdx >= 0 && stepIdx < currentStep;
-                      if (alreadyRevealed) { showRegion = false; }
-                      else if (justRevealed) { showRegion = true; maskRevealing = true; }
-                      else { showRegion = true; }
+                      console.log('[DEBUG0b] mask logic', { stepIdx, currentStep, justRevealed, alreadyRevealed });
+                      if (alreadyRevealed) { showRegion = false; console.log('[DEBUG0c] alreadyRevealed set showRegion=false'); }
+                      else if (justRevealed) { showRegion = true; maskRevealing = true; console.log('[DEBUG0d] justRevealed set showRegion=true maskRevealing=true'); }
+                      else { showRegion = true; console.log('[DEBUG0e] future step set showRegion=true'); }
                     } else {
                       // Highlight: hidden until step plays, then visible
                       showRegion = stepIdx >= 0 && stepIdx <= currentStep;
+                      console.log('[DEBUG0f] highlight logic', { stepIdx, currentStep, showRegion });
                     }
+                  } else {
+                    console.log('[DEBUG0g] not locked, showRegion=true by default');
                   }
                   const isInteractive = !isLocked && !highlightDrawing && !maskDrawing;
+                  console.log('[DEBUG0h] isInteractive', { isLocked, highlightDrawing, maskDrawing });
                   const isRegionHighlighted = !isLocked && highlightedStepId === region.stepId;
+                  console.log('[DEBUG0i] isRegionHighlighted', { highlightedStepId, regionStepId: region.stepId, isRegionHighlighted });
+                  const isSwipeMask = isMask && hasFreehandPath && region.revealType === 'swipe';
+                  console.log('[DEBUG1] isSwipeMask check', { isMask, hasFreehandPath, revealType: region.revealType, result: isSwipeMask });
+                  console.log('[DEBUG1] isSwipeMask check', { isMask, hasFreehandPath, revealType: region.revealType, result: isSwipeMask });
+                  const isFadeMask = isMask && hasFreehandPath && region.revealType !== 'swipe';
+                  console.log('[DEBUG2] isFadeMask check', { isMask, hasFreehandPath, revealType: region.revealType, result: isFadeMask });
+                  const polygonClip = hasFreehandPath ? `polygon(${region.path!.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})` : undefined;
+                  console.log('[DEBUG3] polygonClip', { hasFreehandPath, clip: polygonClip ? 'defined' : 'undefined' });
+                  // Swipe animation: only when locked AND revealing (swipeHidden = true)
+                  const swipeHidden = isSwipeMask && isLocked && maskRevealing;
+                  console.log('[DEBUG4] swipeHidden calc', { isSwipeMask, isLocked, maskRevealing, result: swipeHidden });
+                  const swipeVisibleClass = isSwipeMask && isLocked && !maskRevealing && !showRegion ? 'mask-swipe-visible' : '';
+                  console.log('[DEBUG5] swipeVisibleClass calc', { isSwipeMask, isLocked, maskRevealing, showRegion, result: swipeVisibleClass });
+                  const swipeHiddenClass = isSwipeMask && isLocked && maskRevealing ? 'mask-swipe-hidden' : '';
+                  console.log('[DEBUG6] swipeHiddenClass calc', { isSwipeMask, isLocked, maskRevealing, result: swipeHiddenClass });
+                  console.log('[DEBUG7] FINAL CLASSES', { swipeVisibleClass, swipeHiddenClass, isSwipeMask });
+
+                  // Swipe progress: 0 = B&W fully visible, 1 = B&W fully removed
+                  const currentSwipeProgress = isSwipeMask ? (isLocked ? (swipeProgress[region.id] ?? 0) : 1) : 0;
+
+                  // Compute swipe-clipped polygon: clip original polygon to x >= progress
+                  // This shrinks the B&W area from left to right as progress goes 0→1
+                  let swipeClip = polygonClip;
+                  if (isSwipeMask && currentSwipeProgress > 0 && currentSwipeProgress < 1 && region.path) {
+                    const xMin = currentSwipeProgress; // normalized 0-1
+                    const pts = region.path;
+                    const clipped: { x: number; y: number }[] = [];
+                    for (let i = 0; i < pts.length; i++) {
+                      const p1 = pts[i];
+                      const p2 = pts[(i + 1) % pts.length];
+                      const p1In = p1.x >= xMin;
+                      const p2In = p2.x >= xMin;
+                      if (p1In && p2In) {
+                        clipped.push(p2);
+                      } else if (p1In && !p2In) {
+                        const t = (xMin - p1.x) / (p2.x - p1.x);
+                        clipped.push({ x: xMin, y: p1.y + t * (p2.y - p1.y) });
+                      } else if (!p1In && p2In) {
+                        const t = (xMin - p1.x) / (p2.x - p1.x);
+                        clipped.push({ x: xMin, y: p1.y + t * (p2.y - p1.y) });
+                        clipped.push(p2);
+                      }
+                      // both outside: skip
+                    }
+                    if (clipped.length >= 3) {
+                      swipeClip = `polygon(${clipped.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})`;
+                    } else {
+                      swipeClip = 'polygon(0% 0%, 0% 0%, 0% 0%)'; // degenerate = hidden
+                    }
+                  }
+
                   return (
                     <div key={region.id}>
+                      {isSwipeMask && isLocked ? (
+                        // Single div: animated polygon clip + backdropFilter = B&W swipe
+                        <div
+                          className="absolute pointer-events-none"
+                          data-region-id={region.id}
+                          style={{
+                            left: (imgBounds.x + cam.x) * cam.z,
+                            top: (imgBounds.y + cam.y) * cam.z,
+                            width: imgBounds.w * cam.z,
+                            height: imgBounds.h * cam.z,
+                            background: 'transparent',
+                            backdropFilter: 'grayscale(1)',
+                            WebkitBackdropFilter: 'grayscale(1)',
+                            clipPath: currentSwipeProgress >= 1 ? 'polygon(0% 0%, 0% 0%, 0% 0%)' : swipeClip,
+                            borderRadius: 0,
+                            zIndex: 99990,
+                            display: (!showRegion && !maskRevealing) || currentSwipeProgress >= 1 ? 'none' : undefined,
+                          }}
+                        />
+                      ) : (
                       <div
-                        className={`absolute ${!isLocked && (highlightDrawing || !maskDrawing) ? 'cursor-pointer' : 'pointer-events-none'} ${isLocked && !isMask ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${maskRevealing ? 'mask-radial-reveal' : ''} ${isRegionHighlighted ? 'region-highlighted' : ''}`}
-                        style={{
+                        data-region-id={region.id}
+                        className={`absolute pointer-events-none ${isLocked && !isMask ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${maskRevealing && !hasFreehandPath ? 'mask-radial-reveal' : ''} ${isFadeMask && maskRevealing ? 'mask-fade-reveal' : ''} ${isRegionHighlighted ? 'region-highlighted' : ''}`}
+                        style={hasFreehandPath ? {
+                          left: (imgBounds.x + cam.x) * cam.z,
+                          top: (imgBounds.y + cam.y) * cam.z,
+                          width: imgBounds.w * cam.z,
+                          height: imgBounds.h * cam.z,
+                          background: 'transparent',
+                          backdropFilter: isMask && showRegion ? 'grayscale(1)' : undefined,
+                          WebkitBackdropFilter: isMask && showRegion ? 'grayscale(1)' : undefined,
+                          clipPath: polygonClip,
+                          borderRadius: 0,
+                          zIndex: 99990,
+                          display: isLocked && !showRegion ? (isMask ? 'none' : undefined) : undefined,
+                          opacity: isLocked && !showRegion && !isMask ? 0 : 1,
+                        } : {
                           left: screenX, top: screenY, width: screenW, height: screenH,
                           background: isMask ? 'transparent' : region.color,
                           backdropFilter: isMask && showRegion ? 'grayscale(1)' : undefined,
@@ -6009,11 +6220,22 @@ export default function LessonCanvas({
                           display: isLocked && !showRegion ? (isMask ? 'none' : undefined) : undefined,
                           opacity: isLocked && !showRegion && !isMask ? 0 : 1,
                         }}
-                        onClick={(!isLocked && highlightDrawing) ? (e) => { e.stopPropagation(); setEditingHighlightId(prev => prev === region.id ? null : region.id); } : (!isLocked && !maskDrawing) ? (e) => { e.stopPropagation(); setHighlightedStepId(prev => prev === region.stepId ? null : region.stepId); } : undefined}
+                        onClick={undefined}
                       />
-                      {/* White flash overlay when B&W mask reveals */}
-                      {maskRevealing && (
-                        <div className="absolute pointer-events-none mask-reveal-flash" style={{ left: screenX, top: screenY, width: screenW, height: screenH, borderRadius: 6, zIndex: 99992, background: 'white' }} />
+                      )}
+                      {/* White flash overlay when B&W mask reveals (skip for swipe — clip-path handles it) */}
+                      {maskRevealing && !isSwipeMask && (
+                        <div className="absolute pointer-events-none mask-reveal-flash" style={hasFreehandPath ? {
+                          left: (imgBounds.x + cam.x) * cam.z,
+                          top: (imgBounds.y + cam.y) * cam.z,
+                          width: imgBounds.w * cam.z,
+                          height: imgBounds.h * cam.z,
+                          clipPath: `polygon(${region.path!.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})`,
+                          borderRadius: 0, zIndex: 99992, background: 'white',
+                        } : {
+                          left: screenX, top: screenY, width: screenW, height: screenH,
+                          borderRadius: 6, zIndex: 99992, background: 'white',
+                        }} />
                       )}
                       {editingHighlightId === region.id && !isLocked && highlightDrawing && (
                         <div className="absolute z-[99999] flex items-center gap-1 px-2 py-1.5 rounded-lg bg-[#101214] border border-[#2a2a4e] shadow-xl" style={{ left: screenX, top: screenY - 36 }}>
@@ -6048,7 +6270,7 @@ export default function LessonCanvas({
                     const container = e.currentTarget.getBoundingClientRect();
                     const startScreenX = e.clientX - container.left, startScreenY = e.clientY - container.top;
                     const startPageX = startScreenX / cam.z - cam.x, startPageY = startScreenY / cam.z - cam.y;
-                    const targetImg = imageShapes.find((s: any) => { const b = editor.getShapePageBounds(s.id as any); return b && startPageX >= b.x && startPageX <= b.x + b.w && startPageY >= b.y && startPageY <= b.y + b.h; });
+                    const targetImg = imageShapes.find((s: any) => { const b = editor.getShapePageBounds(s.id as any); return b && startPageX >= b.x - 2 && startPageX <= b.x + b.w + 2 && startPageY >= b.y - 2 && startPageY <= b.y + b.h + 2; });
                     if (!targetImg) return;
                     const imgBounds = editor.getShapePageBounds(targetImg.id as any); if (!imgBounds) return;
                     const preview = document.createElement('div'); preview.className = 'highlight-preview-rect';
@@ -6063,10 +6285,10 @@ export default function LessonCanvas({
                       const esx = ev.clientX - container.left, esy = ev.clientY - container.top;
                       const epx = esx / cam.z - cam.x, epy = esy / cam.z - cam.y;
                       const rx = Math.min(startPageX, epx), ry = Math.min(startPageY, epy), rw = Math.abs(epx - startPageX), rh = Math.abs(epy - startPageY);
-                      if (rw < 5 || rh < 5) return;
+                      if (rw < 2 || rh < 2) return;
                       const cx = Math.max(imgBounds.x, rx), cy = Math.max(imgBounds.y, ry);
                       const cw = Math.min(imgBounds.x + imgBounds.w, rx + rw) - cx, ch = Math.min(imgBounds.y + imgBounds.h, ry + rh) - cy;
-                      if (cw < 5 || ch < 5) return;
+                      if (cw < 2 || ch < 2) return;
                       const regionId = `hl-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-hl`;
                       const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: hexToRgba(highlightColor, 0.55), stepId, pageId: pid };
                       const camNow = editor.getCamera();
@@ -6085,7 +6307,7 @@ export default function LessonCanvas({
                     const container = e.currentTarget.getBoundingClientRect();
                     const startScreenX = e.clientX - container.left, startScreenY = e.clientY - container.top;
                     const startPageX = startScreenX / cam.z - cam.x, startPageY = startScreenY / cam.z - cam.y;
-                    const targetImg = imageShapes.find((s: any) => { const b = editor.getShapePageBounds(s.id as any); return b && startPageX >= b.x && startPageX <= b.x + b.w && startPageY >= b.y && startPageY <= b.y + b.h; });
+                    const targetImg = imageShapes.find((s: any) => { const b = editor.getShapePageBounds(s.id as any); return b && startPageX >= b.x - 2 && startPageX <= b.x + b.w + 2 && startPageY >= b.y - 2 && startPageY <= b.y + b.h + 2; });
                     if (!targetImg) return;
                     const imgBounds = editor.getShapePageBounds(targetImg.id as any); if (!imgBounds) return;
                     const preview = document.createElement('div'); preview.className = 'mask-preview-rect';
@@ -6098,10 +6320,10 @@ export default function LessonCanvas({
                       const esx = ev.clientX - container.left, esy = ev.clientY - container.top;
                       const epx = esx / cam.z - cam.x, epy = esy / cam.z - cam.y;
                       const rx = Math.min(startPageX, epx), ry = Math.min(startPageY, epy), rw = Math.abs(epx - startPageX), rh = Math.abs(epy - startPageY);
-                      if (rw < 5 || rh < 5) return;
+                      if (rw < 2 || rh < 2) return;
                       const cx = Math.max(imgBounds.x, rx), cy = Math.max(imgBounds.y, ry);
                       const cw = Math.min(imgBounds.x + imgBounds.w, rx + rw) - cx, ch = Math.min(imgBounds.y + imgBounds.h, ry + rh) - cy;
-                      if (cw < 5 || ch < 5) return;
+                      if (cw < 2 || ch < 2) return;
                       const regionId = `mask-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-mask`;
                       const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: '#1a1a1a', stepId, pageId: pid, type: 'mask' };
                       const camNow = editor.getCamera();
@@ -6111,6 +6333,64 @@ export default function LessonCanvas({
                       isDirtyRef.current = true;
                     };
                     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+                  }} />
+                )}
+                {/* Freehand Paint B&W drawing overlay — pencil tool */}
+                {freehandMaskDrawing && !isLocked && (
+                  <div className="absolute inset-0 z-[20] cursor-crosshair" style={{ willChange: 'transform', isolation: 'isolate' }} onMouseDown={(e) => {
+                    e.stopPropagation(); e.preventDefault();
+                    const container = e.currentTarget.getBoundingClientRect();
+                    const startSX = e.clientX - container.left, startSY = e.clientY - container.top;
+                    const startPX = startSX / cam.z - cam.x, startPY = startSY / cam.z - cam.y;
+                    const targetImg = imageShapes.find((s: any) => { const b = editor.getShapePageBounds(s.id as any); return b && startPX >= b.x - 2 && startPX <= b.x + b.w + 2 && startPY >= b.y - 2 && startPY <= b.y + b.h + 2; });
+                    if (!targetImg) return;
+                    const imgB = editor.getShapePageBounds(targetImg.id as any); if (!imgB) return;
+                    // SVG preview
+                    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:25';
+                    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    pathEl.setAttribute('fill', 'none');
+                    pathEl.setAttribute('stroke', '#FF3B30');
+                    pathEl.setAttribute('stroke-width', '2');
+                    svg.appendChild(pathEl);
+                    // Red dot at start
+                    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    dot.setAttribute('cx', String(startSX)); dot.setAttribute('cy', String(startSY));
+                    dot.setAttribute('r', '5'); dot.setAttribute('fill', '#FF3B30');
+                    dot.setAttribute('stroke', '#fff'); dot.setAttribute('stroke-width', '1.5');
+                    svg.appendChild(dot);
+                    e.currentTarget.appendChild(svg);
+                    const pts: { sx: number; sy: number; px: number; py: number }[] = [{ sx: startSX, sy: startSY, px: startPX, py: startPY }];
+                    const onMove = (ev: MouseEvent) => {
+                      const sx = ev.clientX - container.left, sy = ev.clientY - container.top;
+                      const px = sx / cam.z - cam.x, py = sy / cam.z - cam.y;
+                      pts.push({ sx, sy, px, py });
+                      pathEl.setAttribute('d', 'M' + pts.map(p => `${p.sx},${p.sy}`).join(' L'));
+                    };
+                    const onUp = () => {
+                      document.removeEventListener('mousemove', onMove);
+                      document.removeEventListener('mouseup', onUp);
+                      svg.remove();
+                      if (pts.length < 10) return; // too short
+                      // Check if enclosed — start and end within 25px
+                      const last = pts[pts.length - 1];
+                      const dx = last.sx - startSX, dy = last.sy - startSY;
+                      if (Math.sqrt(dx * dx + dy * dy) > 25) return; // not enclosed, discard
+                      // Enclosed — create B&W region
+                      const normalizedPath = pts.map(p => ({
+                        x: Math.max(0, Math.min(1, (p.px - imgB.x) / imgB.w)),
+                        y: Math.max(0, Math.min(1, (p.py - imgB.y) / imgB.h)),
+                      }));
+                      const regionId = `mask-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-mask`;
+                      const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: 0, y: 0, w: 1, h: 1, color: '#1a1a1a', stepId, pageId: pid, type: 'mask', path: normalizedPath, revealType: freehandMaskDrawingRef.current === 'swipe' ? 'swipe' : 'fade' };
+                      const camNow = editor.getCamera();
+                      const newStep: AnimationStep = { id: stepId, shapeIds: [targetImg.id as string], animation: 'appear' as AnimationType, duration: 100, label: 'Paint B&W', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: camNow.x, y: camNow.y, z: camNow.z } };
+                      setHighlightRegions(prev => [...prev, newRegion]);
+                      setAnimationSteps(prev => [...prev, newStep]);
+                      isDirtyRef.current = true;
+                    };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
                   }} />
                 )}
                 {/* ─── Pointer Arrows ─────────────────────────────────── */}

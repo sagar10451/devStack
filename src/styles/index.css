@@ -1422,3 +1422,31 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
   outline: 2px solid rgba(6, 182, 212, 0.6) !important;
   outline-offset: 2px;
 }
+
+
+/* Freehand mask fade reveal — simple fade out for freehand B&W regions */
+@keyframes mask-fade-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.mask-fade-reveal {
+  animation: mask-fade-out 0.8s ease-in-out forwards !important;
+}
+
+
+/* Freehand mask swipe — clip-path transition like highlight swipe, but inverse (visible → hidden) */
+/* NOTE: Use only when locked and revealing. When unlocked, inline polygonClip defines shape. */
+.mask-swipe-visible {
+  /* Don't set clip-path here — let inline polygonClip define shape when unlocked */
+  transition: clip-path 1.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.mask-swipe-hidden {
+  /* Left-to-right wipe: start with right 100% hidden (inset from right) */
+  clip-path: inset(0 100% 0 0) !important;
+  transition: clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.mask-swipe-visible {
+  clip-path: inset(0 0 0 0) !important;
+  transition: clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
