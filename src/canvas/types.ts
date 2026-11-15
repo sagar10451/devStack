@@ -242,6 +242,12 @@ export interface HighlightRegion {
   pageId: string;
   /** Type: 'highlight' for color overlay, 'mask' for B&W reveal mask */
   type?: 'highlight' | 'mask';
+  /** Freehand path points (normalized 0-1 relative to image), used for freehand B&W */
+  path?: { x: number; y: number }[];
+  /** Reveal animation type: 'fade' (default) or 'swipe' (left-to-right wipe) */
+  revealType?: 'fade' | 'swipe';
+  /** Shape style: 'rect' (default sharp rectangle) or 'cloud' (organic bumpy blob) */
+  shape?: 'rect' | 'cloud';
 }
 
 /** A pointer arrow placed on the canvas */

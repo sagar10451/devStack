@@ -29,17 +29,62 @@ import './diagram/diagramStyles.css';
 
 // ─── Highlight color palette ──────────────────────────────────────────────
 const HIGHLIGHT_COLORS = [
-  { hex: '#FFEB00', label: 'Yellow' },
-  { hex: '#00D65B', label: 'Green' },
-  { hex: '#00BFFF', label: 'Sky Blue' },
-  { hex: '#FF4FA3', label: 'Hot Pink' },
-  { hex: '#C04BFF', label: 'Violet' },
-  { hex: '#FF941A', label: 'Orange' },
-  { hex: '#00C8B4', label: 'Turquoise' },
-  { hex: '#FF5252', label: 'Coral Red' },
-  { hex: '#A6E000', label: 'Lime' },
-  { hex: '#FF6D00', label: 'Deep Orange' },
+  { hex: '#FFE66D', label: 'Classic Highlight Yellow' },
+  { hex: '#FFB7C5', label: 'Soft Rose Pink' },
+  { hex: '#B5EAD7', label: 'Fresh Mint' },
+  { hex: '#B8C9FF', label: 'Periwinkle Blue' },
+  { hex: '#DCC6FF', label: 'Lilac Purple' },
+  { hex: '#FFD6A5', label: 'Apricot Peach' },
+  { hex: '#FFB5A7', label: 'Pastel Coral' },
+  { hex: '#A8E6E0', label: 'Soft Turquoise' },
+  { hex: '#D9F99D', label: 'Lime Sorbet' },
+  { hex: '#FFE8A3', label: 'Golden Butter' },
 ];
+
+/** Generate an SVG path `d` attribute for a hand-drawn marker highlight stroke.
+ *  Fits a 200×50 viewBox — SVG scales it to any size.
+ *  Uses seed for deterministic randomness: same seed = same shape. */
+function generateHandDrawnHighlightPath(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+  let s = Math.abs(hash) || 1;
+  const rand = () => { s = (s * 16807) % 2147483647; return (s & 0x7fffffff) / 0x7fffffff; };
+  const W = 200, H = 50;
+  const m = 4, er = 10, ns = 14, wav = 3.5, rough = 1.8;
+  const pts: { x: number; y: number }[] = [];
+  // Left rounded end
+  pts.push({ x: m + er * 0.4, y: H - m - rough * rand() });
+  pts.push({ x: m - er * 0.2 * rand(), y: H * 0.55 + rough * (rand() - 0.5) });
+  pts.push({ x: m + er * 0.4, y: m + rough * rand() });
+  // Top edge (left→right, wavy)
+  for (let i = 1; i <= ns; i++) {
+    const t = i / (ns + 1);
+    const x = m + er + t * (W - 2 * m - 2 * er);
+    const y = m + wav * Math.sin(t * Math.PI * 3.4 + rand() * 5) + rough * (rand() - 0.5);
+    pts.push({ x, y: Math.max(1, y) });
+  }
+  // Right rounded end
+  pts.push({ x: W - m - er * 0.4, y: m + rough * rand() });
+  pts.push({ x: W - m + er * 0.2 * rand(), y: H * 0.45 + rough * (rand() - 0.5) });
+  pts.push({ x: W - m - er * 0.4, y: H - m - rough * rand() });
+  // Bottom edge (right→left, wavy — different freq)
+  for (let i = ns; i >= 1; i--) {
+    const t = i / (ns + 1);
+    const x = m + er + t * (W - 2 * m - 2 * er);
+    const y = H - m + wav * Math.sin(t * Math.PI * 2.8 + rand() * 5) + rough * (rand() - 0.5);
+    pts.push({ x, y: Math.min(H - 1, y) });
+  }
+  // Smooth closed path via quadratic Bezier through midpoints
+  const f = pts[0];
+  let d = `M ${f.x.toFixed(1)},${f.y.toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1], c = pts[i];
+    d += ` Q ${p.x.toFixed(1)},${p.y.toFixed(1)} ${((p.x + c.x) / 2).toFixed(1)},${((p.y + c.y) / 2).toFixed(1)}`;
+  }
+  const l = pts[pts.length - 1];
+  d += ` Q ${l.x.toFixed(1)},${l.y.toFixed(1)} ${f.x.toFixed(1)},${f.y.toFixed(1)} Z`;
+  return d;
+}
 
 function hexToRgba(hex: string, _alpha: number): string {
   // Return full hex color — we use mix-blend-mode: multiply instead of alpha transparency
@@ -71,6 +116,7 @@ export const TOOLBAR_TOOLS = [
   { id: 'audiosync', label: 'Audio Sync' },
   { id: 'lasersync', label: 'Laser Sync' },
   { id: 'drawhighlight', label: 'Draw Highlight' },
+  { id: 'drawhighlightr', label: 'Draw Highlight R' },
   { id: 'paintbw', label: 'Paint B&W Rect' },
   { id: 'paintbwfree', label: 'Paint B&W Free' },
   { id: 'pointer', label: 'Pointer' },
@@ -352,7 +398,10 @@ export default function LessonCanvas({
   const [highlightDrawing, setHighlightDrawing] = useState(false);
   const highlightDrawingRef = useRef(false);
   highlightDrawingRef.current = highlightDrawing;
-  const [highlightColor, setHighlightColor] = useState('#FFEB00');
+  const [cloudHighlightMode, setCloudHighlightMode] = useState(false);
+  const cloudHighlightModeRef = useRef(false);
+  cloudHighlightModeRef.current = cloudHighlightMode;
+  const [highlightColor, setHighlightColor] = useState('#FFE66D');
   const [editingHighlightId, setEditingHighlightId] = useState<string | null>(null);
   const [maskDrawing, setMaskDrawing] = useState(false);
   const maskDrawingRef = useRef(false);
@@ -455,12 +504,12 @@ export default function LessonCanvas({
   const [guideResizeTick, setGuideResizeTick] = useState(0);
   // Multiple guide borders — per-page positions, shared count
   // guideBordersMap: { [pageId]: [{x,y}, ...] }
-  // guideCount: number of guides (same on all pages)
+  // guideCountMap: per-page guide count (default 1)
   const [guideBordersMap, setGuideBordersMap] = useState<Record<string, { x: number; y: number }[]>>(
     initialData?.guideBordersMap || (initialData?.guideBorders ? { '_default': initialData.guideBorders } : {})
   );
-  const [guideCount, setGuideCount] = useState<number>(
-    initialData?.guideCount ?? (initialData?.guideBorders?.length ?? 1)
+  const [guideCountMap, setGuideCountMap] = useState<Record<string, number>>(
+    initialData?.guideCountMap || (initialData?.guideCount ? { '_default': initialData.guideCount } : {})
   );
   // Guide height presets (width is always auto = screen width at 75%)
   type GuidePreset = { name: string; h: number };
@@ -493,19 +542,25 @@ export default function LessonCanvas({
   const autoGuidePageH = getAutoGuidePageH();
   const guideBordersMapRef = useRef(guideBordersMap);
   guideBordersMapRef.current = guideBordersMap;
-  const guideCountRef = useRef(guideCount);
-  guideCountRef.current = guideCount;
+  const guideCountMapRef = useRef(guideCountMap);
+  guideCountMapRef.current = guideCountMap;
   const guideCustomHRef = useRef(guideCustomH);
   guideCustomHRef.current = guideCustomH;
 
+  // Helper: get guide count for a specific page (default 1)
+  const getGuideCountForPage = (pageId: string): number => {
+    return guideCountMap[pageId] ?? guideCountMap['_default'] ?? 1;
+  };
+
   // Helper: get guide borders for the current page, falling back to defaults
   const getGuideBordersForPage = (pageId: string): { x: number; y: number }[] => {
+    const count = getGuideCountForPage(pageId);
     const existing = guideBordersMap[pageId];
-    if (existing && existing.length === guideCount) return existing;
-    // Generate defaults or pad/trim to match guideCount
+    if (existing && existing.length === count) return existing;
+    // Generate defaults or pad/trim to match count
     const base = existing || guideBordersMap['_default'] || [];
     const result: { x: number; y: number }[] = [];
-    for (let i = 0; i < guideCount; i++) {
+    for (let i = 0; i < count; i++) {
       result.push(base[i] || { x: i * 50, y: 0 });
     }
     return result;
@@ -2349,7 +2404,7 @@ export default function LessonCanvas({
       pageSubtitleModes,
       bwMode,
       guideBordersMap,
-      guideCount,
+      guideCountMap,
       guideCustomH: guideCustomH || undefined,
       imageGlowColors,
       roughMode: roughMode || undefined,
@@ -2367,7 +2422,7 @@ export default function LessonCanvas({
       highlightRegions: highlightRegions.length > 0 ? highlightRegions : undefined,
       pointerArrows: pointerArrows.length > 0 ? pointerArrows : undefined,
     };
-  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCount, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings, showSidebar, pageTopicVisible, pageSubtitleVisible, canvasSplitEnabled, highlightRegions, pointerArrows]);
+  }, [editor, snapshot, topicSlug, subtopicSlug, subtopicTitle, animationSteps, subTopicLabels, sidebarTitle, shapeAnimations, diagramData, initialData, pageTopics, pageSubtitles, pageTopicColors, pageSubtitleColors, pageTopicBorderColors, pageSubtitleBorderColors, pageTopicAnimations, pageSubtitleAnimations, pageTopicModes, pageSubtitleModes, bwMode, roughMode, canvasMode, helperShapeIds, guideBordersMap, guideCountMap, guideCustomH, imageGlowColors, excludedPages, globalAudioFileName, globalAudioDurations, laserStrokes, laserTimings, showSidebar, pageTopicVisible, pageSubtitleVisible, canvasSplitEnabled, highlightRegions, pointerArrows]);
 
 
   // Auto-save to disk via Vite plugin — interval-based for reliability
@@ -2442,7 +2497,7 @@ export default function LessonCanvas({
         pageSubtitleModes: pageSubtitleModesRef.current,
         bwMode,
         guideBordersMap: guideBordersMapRef.current,
-        guideCount: guideCountRef.current,
+        guideCountMap: guideCountMapRef.current,
         guideCustomH: guideCustomHRef.current || undefined,
         imageGlowColors: imageGlowColorsRef.current,
         roughMode: roughModeRef.current || undefined,
@@ -4554,7 +4609,7 @@ export default function LessonCanvas({
     } finally {
       setIsExportingPdf(false);
     }
-  }, [editor, isExportingPdf, topicSlug, subtopicSlug, getGuideBordersForPage, guideCount, pageTopicVisible, pageSubtitleVisible, showGuideBorder]);
+  }, [editor, isExportingPdf, topicSlug, subtopicSlug, getGuideBordersForPage, guideCountMap, pageTopicVisible, pageSubtitleVisible, showGuideBorder]);
 
   const [isExportingPpt, setIsExportingPpt] = useState(false);
 
@@ -4739,7 +4794,7 @@ export default function LessonCanvas({
     } finally {
       setIsExportingPpt(false);
     }
-  }, [editor, isExportingPpt, topicSlug, subtopicSlug, getGuideBordersForPage, guideCount, pageTopicVisible, pageSubtitleVisible]);
+  }, [editor, isExportingPpt, topicSlug, subtopicSlug, getGuideBordersForPage, guideCountMap, pageTopicVisible, pageSubtitleVisible]);
 
   const handleImport = useCallback(() => {
     const input = window.document.createElement('input');
@@ -5114,19 +5169,19 @@ export default function LessonCanvas({
                   data-tool="guide" title="Show/hide presentation guide borders (visible area at 75% zoom)"
                 >
                   <Frame className="w-3 h-3" />
-                  Guide {guideCount > 1 ? `(${guideCount})` : ''}
+                  Guide {(() => { const c = getGuideCountForPage(editor?.getCurrentPageId() as string || ''); return c > 1 ? `(${c})` : ''; })()}
                 </button>
               </div>
               {showGuideBorder && (
                 <>
                   <button
-                    onClick={() => { setGuideCount(prev => prev + 1); markDirty(); }}
+                    onClick={() => { const pid = editor?.getCurrentPageId() as string || ''; setGuideCountMap(prev => ({ ...prev, [pid]: (prev[pid] ?? prev['_default'] ?? 1) + 1 })); markDirty(); }}
                     className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-cyan-300 border border-cyan-500/20 hover:border-cyan-400/40 hover:shadow-[0_0_8px_rgba(6,182,212,0.15)] transition-all flex-shrink-0"
                     title="Add guide border"
                   >+</button>
-                  {guideCount > 1 && (
+                  {getGuideCountForPage(editor?.getCurrentPageId() as string || '') > 1 && (
                     <button
-                      onClick={() => { setGuideCount(prev => Math.max(1, prev - 1)); markDirty(); }}
+                      onClick={() => { const pid = editor?.getCurrentPageId() as string || ''; setGuideCountMap(prev => ({ ...prev, [pid]: Math.max(1, (prev[pid] ?? prev['_default'] ?? 1) - 1) })); markDirty(); }}
                       className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0"
                       title="Remove last guide border"
                     >−</button>
@@ -5302,9 +5357,9 @@ export default function LessonCanvas({
               >
                 75%
               </button>
-              {showGuideZoomPicker && guideCount > 1 && (
+              {showGuideZoomPicker && getGuideCountForPage(editor?.getCurrentPageId() as string || '') > 1 && (
                 <div className="fixed z-[9999] bg-[#101214] border border-[#2a2a4e] rounded-lg shadow-xl p-1 min-w-[120px]" ref={(el) => { if (el) { const btn = el.parentElement?.querySelector('button'); if (btn) { const rect = btn.getBoundingClientRect(); el.style.top = (rect.bottom + 4) + 'px'; el.style.left = rect.left + 'px'; } } }} onClick={(e) => e.stopPropagation()}>
-                  {Array.from({ length: guideCount }, (_, i) => (
+                  {Array.from({ length: getGuideCountForPage(editor?.getCurrentPageId() as string || '') }, (_, i) => (
                     <button
                       key={i}
                       onClick={() => {
@@ -5449,23 +5504,56 @@ export default function LessonCanvas({
               onClick={() => {
                 const wasDrawing = highlightDrawing;
                 setHighlightDrawing(v => !v);
+                setCloudHighlightMode(false); // ensure cloud mode off for rect highlights
                 setEditingHighlightId(null);
                 if (!wasDrawing && editor) {
                   setMaskDrawing(false);
                   editor.selectNone();
                   editor.updateInstanceState({ isReadonly: true });
+                  setTimelineFullyCollapsed(true); // hide timeline in highlight mode
                 }
                 if (wasDrawing && editor) {
                   editor.updateInstanceState({ isReadonly: false });
+                  setTimelineFullyCollapsed(false); // restore timeline
                 }
                 if (wasDrawing) {
                   markDirty();
                 }
               }}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${highlightDrawing ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(250,204,21,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${highlightDrawing && !cloudHighlightMode ? 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 shadow-[0_0_10px_rgba(250,204,21,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
               data-tool="drawhighlight" title="Draw highlight regions on images"
             >
               🖍 Draw Highlight
+            </button>
+            {/* Draw Highlight R — cloud-shaped highlight */}
+            <button
+              onClick={() => {
+                const wasCloud = highlightDrawing && cloudHighlightMode;
+                if (wasCloud) {
+                  // Turn off
+                  setHighlightDrawing(false);
+                  setCloudHighlightMode(false);
+                  setEditingHighlightId(null);
+                  if (editor) editor.updateInstanceState({ isReadonly: false });
+                  setTimelineFullyCollapsed(false); // restore timeline
+                  markDirty();
+                } else {
+                  // Turn on cloud mode
+                  setHighlightDrawing(true);
+                  setCloudHighlightMode(true);
+                  setEditingHighlightId(null);
+                  if (editor) {
+                    setMaskDrawing(false);
+                    editor.selectNone();
+                    editor.updateInstanceState({ isReadonly: true });
+                  }
+                  setTimelineFullyCollapsed(true); // hide timeline in highlight mode
+                }
+              }}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${highlightDrawing && cloudHighlightMode ? 'bg-pink-500/15 text-pink-300 border border-pink-500/30 shadow-[0_0_10px_rgba(236,72,153,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
+              data-tool="drawhighlightr" title="Draw cloud-shaped highlight regions on images"
+            >
+              ☁️ Draw Highlight R
             </button>
             <div className="flex items-center gap-0.5 px-1" style={{ display: highlightDrawing ? undefined : 'none' }}>
               {HIGHLIGHT_COLORS.map(c => (
@@ -6193,9 +6281,30 @@ export default function LessonCanvas({
                           }}
                         />
                       ) : (
+                      region.shape === 'cloud' && !isMask && !hasFreehandPath ? (
+                      // Hand-drawn marker highlight: SVG path with organic wavy edges
+                      <svg
+                        data-region-id={region.id}
+                        className={`absolute ${highlightDrawing && !isLocked ? 'cursor-pointer' : 'pointer-events-none'} ${isLocked ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${isRegionHighlighted ? 'region-highlighted' : ''}`}
+                        onClick={highlightDrawing && !isLocked ? (e) => { e.stopPropagation(); setEditingHighlightId(prev => prev === region.id ? null : region.id); } : undefined}
+                        style={{
+                          left: screenX - screenW * 0.03,
+                          top: screenY - screenH * 0.15,
+                          width: screenW * 1.06,
+                          height: screenH * 1.3,
+                          zIndex: 99990,
+                          mixBlendMode: 'multiply',
+                          overflow: 'visible',
+                        }}
+                        viewBox="0 0 200 50"
+                        preserveAspectRatio="none"
+                      >
+                        <path d={generateHandDrawnHighlightPath(region.id)} fill={region.color} opacity="0.82" />
+                      </svg>
+                      ) : (
                       <div
                         data-region-id={region.id}
-                        className={`absolute pointer-events-none ${isLocked && !isMask ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${maskRevealing && !hasFreehandPath ? 'mask-radial-reveal' : ''} ${isFadeMask && maskRevealing ? 'mask-fade-reveal' : ''} ${isRegionHighlighted ? 'region-highlighted' : ''}`}
+                        className={`absolute ${highlightDrawing && !isLocked && !isMask ? 'cursor-pointer' : 'pointer-events-none'} ${isLocked && !isMask ? (showRegion ? 'reveal-shown reveal-glow' : 'reveal-dimmed') : ''} ${maskRevealing && !hasFreehandPath ? 'mask-radial-reveal' : ''} ${isFadeMask && maskRevealing ? 'mask-fade-reveal' : ''} ${isRegionHighlighted ? 'region-highlighted' : ''}`}
                         style={hasFreehandPath ? {
                           left: (imgBounds.x + cam.x) * cam.z,
                           top: (imgBounds.y + cam.y) * cam.z,
@@ -6220,9 +6329,9 @@ export default function LessonCanvas({
                           display: isLocked && !showRegion ? (isMask ? 'none' : undefined) : undefined,
                           opacity: isLocked && !showRegion && !isMask ? 0 : 1,
                         }}
-                        onClick={undefined}
+                        onClick={highlightDrawing && !isLocked && !isMask ? (e) => { e.stopPropagation(); setEditingHighlightId(prev => prev === region.id ? null : region.id); } : undefined}
                       />
-                      )}
+                      ))}
                       {/* White flash overlay when B&W mask reveals (skip for swipe — clip-path handles it) */}
                       {maskRevealing && !isSwipeMask && (
                         <div className="absolute pointer-events-none mask-reveal-flash" style={hasFreehandPath ? {
@@ -6290,7 +6399,7 @@ export default function LessonCanvas({
                       const cw = Math.min(imgBounds.x + imgBounds.w, rx + rw) - cx, ch = Math.min(imgBounds.y + imgBounds.h, ry + rh) - cy;
                       if (cw < 2 || ch < 2) return;
                       const regionId = `hl-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-hl`;
-                      const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: hexToRgba(highlightColor, 0.55), stepId, pageId: pid };
+                      const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: hexToRgba(highlightColor, 0.55), stepId, pageId: pid, ...(cloudHighlightModeRef.current ? { shape: 'cloud' as const } : {}) };
                       const camNow = editor.getCamera();
                       const newStep: AnimationStep = { id: stepId, shapeIds: [targetImg.id as string], animation: 'appear' as AnimationType, duration: 100, label: 'Highlight', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: camNow.x, y: camNow.y, z: camNow.z } };
                       pendingHighlightsRef.current.push({ region: newRegion, step: newStep });
