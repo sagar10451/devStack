@@ -49,13 +49,24 @@ export function IntroArtwork({ shape, editing, onText }: { shape: IntroShape; ed
     </svg>}
   </div>;
 
-  const progress = playback.locked ? swipeProgressAt(elapsed) : 1;
+  const progress = playback.locked ? swipeProgressAt(elapsed) : 0;
   const fontSize = Math.max(20, Math.min(50, Math.sqrt((w - 90) * (h - 40) / Math.max(1, text.length) / .7)));
-  return <div data-intro-chapter style={{ width: w, height: h, borderRadius: 45, background: 'linear-gradient(120deg,#f2eaff,#d9c1f8,#eee4ff)', border: '3px solid #9364c9', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' }}>
-    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', padding: '14px 34px', clipPath: `inset(0 ${(1 - progress) * 100}% 0 0)` }}>
-      {editing && !playback.locked ? <textarea aria-label="Intro chapter name" autoFocus value={text} onChange={event => onText(event.target.value)} onPointerDown={event => event.stopPropagation()} style={{ width: '100%', height: '100%', resize: 'none', background: 'transparent', border: 0, outline: 0, color: '#111126', textAlign: 'center', fontSize, fontWeight: 700, fontFamily: 'Georgia, serif' }} /> : <div style={{ color: '#111126', textAlign: 'center', fontSize, fontWeight: 700, fontFamily: 'Georgia, serif', lineHeight: 1.18, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{text || 'Chapter name'}</div>}
+  const titleStyle = { color: '#111126', textAlign: 'center' as const, fontSize, fontWeight: 700, fontStyle: 'italic', fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive', lineHeight: 1.18 };
+  return <div data-intro-chapter style={{ width: w, height: h, position: 'relative', boxSizing: 'border-box' }}>
+    <svg aria-hidden="true" viewBox="0 0 1200 150" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+      <defs><linearGradient id={`${glowId}-lavender`} x2="0.8" y2="1"><stop stopColor="#e6d6ff" /><stop offset=".5" stopColor="#d7bdf5" /><stop offset="1" stopColor="#eee2ff" /></linearGradient></defs>
+      <path d="M42 12 Q105 0 225 10 T570 8 T920 9 Q1135 0 1172 23 Q1203 49 1183 85 Q1202 127 1158 137 Q981 150 815 139 T450 142 T85 138 Q7 145 16 101 Q-5 57 21 33 Z" fill={`url(#${glowId}-lavender)`} opacity=".85" />
+      <path d="M34 126 Q210 148 390 136 T795 138 T1165 127" fill="none" stroke="#9364c9" strokeWidth="2" strokeLinecap="round" />
+      <path d="M5 43 L-16 31 M3 72 L-23 70 M8 99 L-13 113 M1194 43 L1215 31 M1197 72 L1223 70 M1192 99 L1213 113" fill="none" stroke="#ff287b" strokeWidth="5" strokeLinecap="round" />
+    </svg>
+    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', padding: '14px 34px', position: 'relative' }}>
+      {editing && !playback.locked ? <textarea aria-label="Intro chapter name" autoFocus value={text} onChange={event => onText(event.target.value)} onPointerDown={event => event.stopPropagation()} style={{ ...titleStyle, width: '100%', height: '100%', resize: 'none', background: 'transparent', border: 0, outline: 0 }} /> : <div style={{ ...titleStyle, position: 'relative', maxWidth: '100%', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+        <svg data-intro-highlight data-progress={progress} aria-hidden="true" viewBox="0 0 1000 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: '-5% -1%', width: '102%', height: '110%', pointerEvents: 'none', clipPath: `inset(0 ${(1 - progress) * 100}% 0 0)` }}>
+          <path d="M12 14 Q120 5 255 13 T540 10 T810 14 Q940 5 985 17 L990 76 Q940 97 800 86 T520 90 T250 88 Q80 99 9 83 Z" fill="#ffe735" opacity=".9" />
+        </svg>
+        <span style={{ position: 'relative' }}>{text || 'Chapter name'}</span>
+      </div>}
     </div>
-    {playback.locked && progress > 0 && progress < 1 && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: `linear-gradient(90deg, transparent calc(${progress * 100}% - 12px), #fff3ad88 calc(${progress * 100}% - 4px), #fffef5 ${progress * 100}%, #fff3ad88 calc(${progress * 100}% + 4px), transparent calc(${progress * 100}% + 12px))` }} />}
   </div>;
 }
 

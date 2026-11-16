@@ -84,12 +84,13 @@ try {
   try { await page.waitForSelector('[data-intro-electricity]', { timeout: 5000 }); }
   catch (error) { console.log(await page.evaluate(() => ({ logo: document.querySelector('[data-intro-logo]')?.outerHTML.slice(0, 300), counter: document.querySelector('[data-tool="nextstep"]')?.parentElement.textContent }))); throw error; }
   await page.screenshot({ path: join(directory, 'intro-electricity.png') });
-  assert.equal(await page.$eval('[data-intro-chapter] > div', element => getComputedStyle(element).clipPath), 'inset(0px 100% 0px 0px)', 'chapter stays hidden before its own step');
+  assert.equal(await page.$eval('[data-intro-highlight]', element => Number(element.dataset.progress)), 0, 'chapter highlight waits for its own step');
+  assert.equal(await page.$eval('[data-intro-chapter] > div', element => getComputedStyle(element).clipPath), 'none', 'chapter text stays visible before its highlight');
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-intro-chapter] > div')).clipPath === 'inset(0px 0% 0px 0px)');
+  await page.waitForFunction(() => Number(document.querySelector('[data-intro-highlight]')?.dataset.progress) === 1);
   await page.click('[data-tool="playback"]');
   await page.waitForSelector('[data-intro-electricity]', { timeout: 6000 });
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-intro-chapter] > div')).clipPath === 'inset(0px 0% 0px 0px)', { timeout: 10000 });
+  await page.waitForFunction(() => Number(document.querySelector('[data-intro-highlight]')?.dataset.progress) === 1, { timeout: 10000 });
   assert.ok(await page.evaluate(() => document.fullscreenElement !== null || document.documentElement.classList.contains('presenting-mode')), 'Quick Play must run the intro in presentation');
   assert.deepEqual(errors, []);
   console.log('Intro UI checks passed: insertion, existing content, repeat click, undo/redo, editable title, PNG registration, persistence, manual effects and Quick Play.');
@@ -121,10 +122,13 @@ function crop(at, rectangle) {
 function count(buffer, predicate) { let count = 0; for (let i = 0; i < buffer.length; i += 3) if (predicate(buffer[i], buffer[i + 1], buffer[i + 2])) count++; return count; }
 const titleBox = '1300:120:300:370';
 const dark = (r, g, b) => Math.max(r, g, b) < 65;
-const before = count(crop(.7, titleBox), dark), during = count(crop(1.1, titleBox), dark), after = count(crop(1.9, titleBox), dark);
-assert.ok(after > 100 && during > before && during < after, `chapter must reveal progressively in the MP4: ${before}, ${during}, ${after}`);
+const before = count(crop(.1, titleBox), dark), during = count(crop(.7, titleBox), dark), after = count(crop(1.9, titleBox), dark);
+assert.ok(before > 100 && Math.abs(after - before) < before * .1, `chapter text must be visible from the start: ${before}, ${after}`);
+const yellow = (r, g, b) => r > 180 && g > 160 && b < 120;
+const markerBefore = count(crop(.1, titleBox), yellow), markerDuring = count(crop(.7, titleBox), yellow), markerAfter = count(crop(1.9, titleBox), yellow);
+assert.ok(markerAfter > markerDuring && markerDuring > markerBefore, `chapter marker must sweep behind visible text: ${markerBefore}, ${markerDuring}, ${markerAfter}`);
 const champagne = (r, g, b) => r > 140 && r > g && g > b * 1.15 && b > 65;
-const active = count(crop(.7, '1600:260:200:40'), champagne), settled = count(crop(2.3, '1600:260:200:40'), champagne);
+const active = count(crop(.35, '1600:260:200:40'), champagne), settled = count(crop(2.3, '1600:260:200:40'), champagne);
 assert.ok(active > settled + 100, `electricity must appear and settle in the MP4: ${active}, ${settled}`);
 const png = crop(2.1, '2:2:400:650');
 assert.ok(png[0] > png[1] * 3, 'PNG must appear at its own timeline step');

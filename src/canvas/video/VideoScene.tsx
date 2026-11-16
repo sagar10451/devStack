@@ -211,7 +211,8 @@ export default function VideoScene({ timeline, onReady, onError }: {
         const style = { left: (x + cam.x) * cam.z, top: (y + cam.y) * cam.z, width: w, height: h };
         if (!mask && region.shape === 'cloud') return <svg key={region.id} data-overlay-step={region.stepId} viewBox="0 0 200 50" preserveAspectRatio="none" className="video-region video-highlight-reveal" style={{ ...style, left: style.left - w * .03, top: style.top - h * .15, width: w * 1.06, height: h * 1.3, mixBlendMode: 'multiply' }}><path d={generateHandDrawnHighlightPath(region.id)} fill={region.color} opacity=".82" /></svg>;
         if (mask && freehand && region.revealType === 'swipe') {
-          return <FreehandSwipeMask key={region.id} path={region.path!} elapsed={elapsed} stepId={region.stepId} {...style} />;
+          if (!shapeStateAt(timeline, region.imageShapeId, time).visible) return null;
+          return <FreehandSwipeMask key={region.id} path={region.path!} elapsed={elapsed} stepId={region.stepId} frostScale={outputScale} {...style} />;
         }
         return <div key={region.id}>
           <div data-overlay-step={region.stepId} className={`video-region ${!mask ? 'video-highlight-reveal' : elapsed >= 0 ? freehand ? 'mask-fade-reveal' : 'mask-radial-reveal' : ''}`}

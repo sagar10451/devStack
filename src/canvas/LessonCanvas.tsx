@@ -1,6 +1,8 @@
 import { createIntro, introStepsForPage, rebaseIntroLabels } from './intro/createIntro';
 import { useIntroPlayback } from './intro/useIntroPlayback';
 import { useToolbarPreferences } from './useToolbarPreferences';
+import { isShapeVisibleAtStep } from './stepVisibility';
+import { flushSync } from 'react-dom';
 import VideoExportDialog from './video/VideoExportDialog';
 import FreehandSwipeMask from './FreehandSwipeMask';
 import { SWIPE_GLOW_SECONDS, SWIPE_SECONDS } from './swipeReveal';
@@ -944,10 +946,21 @@ export default function LessonCanvas({
       setGuidePageId(currentPid);
       const previousPid = lastTrackedPageRef.current;
       lastTrackedPageRef.current = currentPid;
+      const pageChanged = previousPid !== currentPid;
       if ((!isLocked || sceneLayoutRef.current) && previousPid && currentPid !== previousPid) {
         const guide = getActiveGuideForPage(currentPid);
         setSceneCamera(editor, { x: -guide.x, y: -guide.y, z: sceneLayoutRef.current ? 1 : 0.75 }, { force: true });
         tldrawCameraRef.current = { x: -guide.x, y: -guide.y, z: (sceneLayoutRef.current ? 1 : 0.75) * getSceneScale(editor) };
+      }
+
+      // A glass overlay paints even over empty canvas. Keep it on the same
+      // camera update as its image during playback/page switches, rather than
+      // letting the editing throttle expose its previous position for 100ms.
+      if (isLocked || pageChanged) {
+        if (throttleTimer) { clearTimeout(throttleTimer); throttleTimer = null; }
+        const next = tldrawCameraRef.current;
+        setTldrawCamera(prev => prev && next && prev.x === next.x && prev.y === next.y && prev.z === next.z ? prev : next);
+        return;
       }
 
       if (!throttleTimer) {
@@ -3389,7 +3402,7 @@ export default function LessonCanvas({
       hideStyle.textContent = allTargetShapeIds
         .filter(id => !preloadedOnTarget.has(id))
         .map(id => id.includes(':') 
-          ? `[data-shape-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`
+          ? `[data-shape-id="${id}"], [data-mask-image="${id}"] { visibility: hidden !important; opacity: 0 !important; }`
           : `[data-id="${id}"] { visibility: hidden !important; opacity: 0 !important; }`)
         .join('\n');
       document.head.appendChild(hideStyle);
@@ -3406,10 +3419,8 @@ export default function LessonCanvas({
       // Now apply proper animation state and remove the blanket hide
       requestAnimationFrame(() => {
         applyAnimationState(editor, animationSteps, nextStep - 1);
-        // Remove blanket hide — applyAnimationState has set correct per-shape visibility
-        hideStyle.remove();
-        
         if (targetTopicNeedsStep || targetSubtitleNeedsStep) {
+          hideStyle.remove();
           // Target page has virtual steps — auto-reveal the first one during page switch
           editor.setCameraOptions({ isLocked: true });
           if (step.cameraPosition) {
@@ -3426,13 +3437,16 @@ export default function LessonCanvas({
           setCurrentStep(nextStep - 1);
         } else {
           requestAnimationFrame(() => {
-            runStepAction();
             editor.setCameraOptions({ isLocked: true });
             handleCamera();
+            // Mount the image's glass in the same commit, then prime both
+            // entrance animations before either can be painted on the page.
+            flushSync(() => setCurrentStep(nextStep));
+            runStepAction();
             playStepAudio(step);
             playPageCountdownSound(nextStep);
             playGlowSound(nextStep);
-            setCurrentStep(nextStep);
+            requestAnimationFrame(() => hideStyle.remove());
           });
         }
       });
@@ -6518,6 +6532,7 @@ export default function LessonCanvas({
                   }
                   const isRegionHighlighted = !isLocked && highlightedStepId === region.stepId;
                   const isSwipeMask = isMask && hasFreehandPath && region.revealType === 'swipe';
+                  if (isSwipeMask && isLocked && !isShapeVisibleAtStep(animationSteps, region.imageShapeId, currentStep)) return null;
                   const isFadeMask = isMask && hasFreehandPath && region.revealType !== 'swipe';
                   const polygonClip = hasFreehandPath ? `polygon(${region.path!.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})` : undefined;
                   const swipeStepIndex = animationSteps.findIndex(step => step.id === region.stepId);
@@ -6525,9 +6540,10 @@ export default function LessonCanvas({
 
                   return (
                     <div key={region.id}>
-                      {isSwipeMask && isLocked ? (
+                      {isSwipeMask ? (
                         <FreehandSwipeMask
-                          path={region.path!} elapsed={swipeTime} regionId={region.id}
+                          path={region.path!} elapsed={isLocked ? swipeTime : -1} regionId={region.id} imageShapeId={region.imageShapeId}
+                          frostScale={sceneLayout ? stageScale : 1} className={isRegionHighlighted ? 'region-highlighted' : undefined}
                           left={(imgBounds.x + cam.x) * cam.z} top={(imgBounds.y + cam.y) * cam.z}
                           width={imgBounds.w * cam.z} height={imgBounds.h * cam.z} zIndex={99990}
                         />

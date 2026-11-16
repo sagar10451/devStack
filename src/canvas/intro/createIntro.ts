@@ -1,5 +1,6 @@
 import { createShapeId, getIndexBelow, PageRecordType, type Editor } from 'tldraw';
 import type { AnimationStep } from '../types';
+import { INTRO_ELECTRIC_SECONDS } from './playback';
 import type { IntroShape } from './IntroShape';
 import type { SubTopicLabel } from '../types';
 
@@ -9,9 +10,9 @@ export function introStepsForPage(editor: Editor, pageId: string): AnimationStep
   return [
     ...(logo ? [
       { id: `intro-logo-${logo.id}`, shapeIds: [logo.id], animation: 'none' as const, action: 'enter' as const, duration: 0, label: 'Channel logo', pageId, cameraPosition: { x: 0, y: 0, z: 1 } },
-      { id: logo.props.effectStepId, shapeIds: [logo.id], animation: 'none' as const, action: 'none' as const, duration: 2200, label: '⚡ Channel electricity', pageId, introEffect: 'electricity' as const },
+      { id: logo.props.effectStepId, shapeIds: [logo.id], animation: 'none' as const, action: 'none' as const, duration: INTRO_ELECTRIC_SECONDS * 1000, label: 'Channel · Gold sheen', pageId, introEffect: 'electricity' as const },
     ] : []),
-    ...(chapter ? [{ id: chapter.props.effectStepId, shapeIds: [chapter.id], animation: 'none' as const, action: 'none' as const, duration: 800, label: 'Chapter · Free S', pageId, introEffect: 'chapter' as const }] : []),
+    ...(chapter ? [{ id: chapter.props.effectStepId, shapeIds: [chapter.id], animation: 'none' as const, action: 'none' as const, duration: 800, label: 'Chapter · Highlight', pageId, introEffect: 'chapter' as const }] : []),
   ];
 }
 
@@ -35,8 +36,8 @@ export function createIntro(editor: Editor, steps: AnimationStep[], title: strin
   const logoStep = `intro-logo-${logoId}`, electricStep = `intro-electric-${logoId}`, titleStep = `intro-title-${titleId}`;
   const introSteps: AnimationStep[] = [
     { id: logoStep, shapeIds: [logoId], animation: 'none', action: 'enter', duration: 0, label: 'Channel logo', pageId, cameraPosition: { x: 0, y: 0, z: 1 } },
-    { id: electricStep, shapeIds: [logoId], animation: 'none', action: 'none', duration: 2200, label: '⚡ Channel electricity', pageId, introEffect: 'electricity' },
-    { id: titleStep, shapeIds: [titleId], animation: 'none', action: 'none', duration: 800, label: 'Chapter · Free S', pageId, introEffect: 'chapter' },
+    { id: electricStep, shapeIds: [logoId], animation: 'none', action: 'none', duration: INTRO_ELECTRIC_SECONDS * 1000, label: 'Channel · Gold sheen', pageId, introEffect: 'electricity' },
+    { id: titleStep, shapeIds: [titleId], animation: 'none', action: 'none', duration: 800, label: 'Chapter · Highlight', pageId, introEffect: 'chapter' },
   ];
   beforeCreate?.(pageId);
   editor.markHistoryStoppingPoint('Create intro');

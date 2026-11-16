@@ -33,8 +33,13 @@ export function applyStepAnimation(shapeIds: string[], animation: AnimationType,
   const durationMs = `${duration}ms`;
   const isLooping = isIdleAnimation(animation);
   requestAnimationFrame(() => {
-    for (const id of shapeIds) {
-      const el = findElement(id);
+    const elements = shapeIds.flatMap(id => {
+      const shape = findElement(id);
+      const frost = ['appear', 'fadeIn', 'fadeOut'].includes(animation)
+        ? [...document.querySelectorAll<HTMLElement>(`[data-mask-image="${CSS.escape(id)}"]`)] : [];
+      return [...(shape ? [shape] : []), ...frost];
+    });
+    for (const el of elements) {
       if (!el) continue;
       clearStepAnimation(el);
       void el.offsetHeight;

@@ -4,7 +4,8 @@ import { compileVideoTimeline, shapeStateAt, videoStateAt, videoPreflight, inclu
 import { computeGoNextTimes, computeTimedEntries } from '../src/canvas/audioTimingUtils.ts';
 import { createFramePlan, reuseUntilFrame } from '../src/canvas/video/framePlan.ts';
 import { SWIPE_SECONDS, swipeProgressAt, swipeRevealAt } from '../src/canvas/swipeReveal.ts';
-import { logoSheenStateAt, introPlaybackAt } from '../src/canvas/intro/playback.ts';
+import { INTRO_ELECTRIC_SECONDS, logoSheenStateAt, introPlaybackAt } from '../src/canvas/intro/playback.ts';
+import { isShapeVisibleAtStep } from '../src/canvas/stepVisibility.ts';
 
 function lesson(steps = []) {
   return {
@@ -21,6 +22,16 @@ function lesson(steps = []) {
 function step(id, patch = {}) {
   return { id, shapeIds: ['shape:a'], pageId: 'page:a', label: id, animation: 'appear', duration: 400, ...patch };
 }
+test('frost stays hidden until its image appears and follows exits and rewinds', () => {
+  const steps = [step('other', { shapeIds: ['shape:b'] }), step('image'), step('mask', { label: 'Paint B&W' }), step('exit', { action: 'exit' })];
+  assert.equal(isShapeVisibleAtStep(steps, 'shape:a', -1), false, 'no floating frost on a blank locked canvas');
+  assert.equal(isShapeVisibleAtStep(steps, 'shape:a', 0), false, 'another image playing cannot reveal this overlay');
+  assert.equal(isShapeVisibleAtStep(steps, 'shape:a', 1), true, 'cover the image before its Free S reveal');
+  assert.equal(isShapeVisibleAtStep(steps, 'shape:a', 3), false);
+  assert.equal(isShapeVisibleAtStep(steps, 'shape:a', -1), false, 'rewind restores the blank state');
+  assert.equal(isShapeVisibleAtStep([step('image', { animation: 'none' })], 'shape:a', -1), true, 'preloaded images keep their frost');
+  assert.equal(isShapeVisibleAtStep([step('mask', { label: 'Paint B&W' })], 'shape:a', -1), true, 'overlay-only images remain visible');
+});
 test('export shares normal playback timestamps, including merged and preloaded steps', () => {
   const source = lesson([step('first', { animation: 'none' }), step('second'), step('third')]);
   source.globalAudioDurations = { first: .5, second: 1, __merge_third: 1 };
@@ -206,7 +217,7 @@ test('intro effects stay deterministic on backward seeks and disable static fram
   ]);
   source.globalAudioDurations = { logo: 0, electric: .4, chapter: .1 };
   const timeline = compileVideoTimeline(source, 0, 0);
-  assert.ok(timeline.duration >= 2.2, 'short scheduling durations cannot truncate electricity');
+  assert.ok(timeline.duration >= INTRO_ELECTRIC_SECONDS, 'short scheduling durations cannot truncate electricity');
   assert.ok(introPlaybackAt(timeline.events, .2).elapsed.electric >= 0);
   assert.ok(introPlaybackAt(timeline.events, .2).elapsed.chapter < 0, 'chapter has a separate reveal marker');
   const expected = introPlaybackAt(timeline.events, .2);
@@ -216,8 +227,8 @@ test('intro effects stay deterministic on backward seeks and disable static fram
   assert.ok(active.visible && active.opacity > 0);
   assert.deepEqual(logoSheenStateAt(.6), active);
   assert.equal(logoSheenStateAt(-1).visible, false);
-  assert.equal(logoSheenStateAt(2.2).visible, false);
-  assert.equal(reuseUntilFrame(createFramePlan(timeline), 30, false), 31);
+  assert.equal(logoSheenStateAt(INTRO_ELECTRIC_SECONDS).visible, false);
+  assert.equal(reuseUntilFrame(createFramePlan(timeline), 18, false), 19);
 });
 
 test('adding an intro preserves the original first content page topic in Audio Sync', () => {

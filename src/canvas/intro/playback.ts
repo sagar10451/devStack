@@ -1,7 +1,7 @@
 import type { AnimationStep } from '../types.ts';
 import { SWIPE_SECONDS } from '../swipeReveal.ts';
 
-export const INTRO_ELECTRIC_SECONDS = 2.2;
+export const INTRO_ELECTRIC_SECONDS = .9;
 export const INTRO_REVEAL_SECONDS = SWIPE_SECONDS;
 export const INTRO_TYPE = 'intro-scene';
 export const INTRO_LOGO_URL = '/intro/channel-banner.png';
@@ -16,14 +16,14 @@ export function introPlaybackAt(steps: { step: AnimationStep; start: number }[],
 
 export function logoSheenStateAt(elapsed: number) {
   const clamp = (value: number) => Math.max(0, Math.min(1, value));
-  const sweep = clamp((elapsed - .15) / 1.6);
+  const sweep = clamp((elapsed - .04) / .64);
   const smooth = sweep * sweep * (3 - 2 * sweep);
-  const envelope = clamp(elapsed / .18) * clamp((INTRO_ELECTRIC_SECONDS - elapsed) / .3);
+  const envelope = clamp(elapsed / .07) * clamp((INTRO_ELECTRIC_SECONDS - elapsed) / .12);
   return {
     visible: elapsed >= 0 && elapsed < INTRO_ELECTRIC_SECONDS,
     center: 320 + smooth * 1140,
     opacity: envelope,
-    ignition: Math.sin(clamp(elapsed / .4) * Math.PI) ** 2 * envelope,
-    glint: Math.sin(clamp((elapsed - 1.55) / .65) * Math.PI) ** 2 * envelope,
+    ignition: Math.sin(clamp(elapsed / .16) * Math.PI) ** 2 * envelope,
+    glint: Math.sin(clamp((elapsed - .62) / .28) * Math.PI) ** 2 * envelope,
   };
 }
