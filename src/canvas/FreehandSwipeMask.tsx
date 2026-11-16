@@ -15,7 +15,7 @@ export default function FreehandSwipeMask({ path, elapsed, left, top, width, hei
   const frost = `grayscale(1) blur(${3 * frostScale}px)`;
   return <>
     <div className={className} data-mask-image={imageShapeId} data-region-id={regionId} data-overlay-step={stepId} style={{ ...style, background: 'rgba(255,255,255,0.1)', backdropFilter: frost, WebkitBackdropFilter: frost, clipPath: maskClip }} />
-    {progress > 0 && <div data-overlay-step={stepId} style={{
+    {progress > 0 && <div data-mask-image={imageShapeId} data-mask-opacity={Math.min(1, progress / .08, (1 - progress) / .12)} data-overlay-step={stepId} style={{
       ...style,
       clipPath: outline,
       opacity: Math.min(1, progress / .08, (1 - progress) / .12),
