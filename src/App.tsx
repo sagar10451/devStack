@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
+const VideoRenderPage = lazy(() => import('./canvas/video/VideoRenderPage'));
 import { Routes, Route, Link } from 'react-router-dom';
 import { PortalProvider, usePortal } from './data/portalContext';
 import { PresentationProvider } from './data/presentationContext';
@@ -68,6 +69,7 @@ function AppContent() {
 }
 
 export default function App() {
+  if (window.location.pathname === '/__video-render') return <Suspense fallback={<div>Loading renderer…</div>}><VideoRenderPage /></Suspense>;
   return (
     <PortalProvider>
       <PresentationProvider>

@@ -17,6 +17,8 @@ interface SubTopicTrackerProps {
   currentStep: number;
   editor?: Editor | null;
   sidebar?: boolean;
+  scene?: boolean;
+  deterministic?: boolean;
   sidebarTitle?: string;
   onSidebarTitleChange?: (title: string) => void;
   collapsed?: boolean;
@@ -44,7 +46,7 @@ function getOrderedPageIds(steps: AnimationStep[], editor?: Editor | null): stri
 
 export default function SubTopicTracker({
   labels, onLabelsChange, steps, isLocked, currentStep, editor,
-  sidebar, sidebarTitle = 'Outline', onSidebarTitleChange,
+  sidebar, scene = false, deterministic = false, sidebarTitle = 'Outline', onSidebarTitleChange,
   collapsed: collapsedProp = false, onCollapsedChange, pageGlow, excludedPages,
 }: SubTopicTrackerProps) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -126,7 +128,7 @@ export default function SubTopicTracker({
   const [justCompletedId, setJustCompletedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLocked) return;
+    if (deterministic || !isLocked) return;
     if (currentStep <= prevStepRef.current) { prevStepRef.current = currentStep; return; }
 
     for (const label of labels) {
@@ -149,12 +151,12 @@ export default function SubTopicTracker({
       }
     }
     prevStepRef.current = currentStep;
-  }, [currentStep, isLocked, labels, steps, getLastStepIndexForPage]);
+  }, [currentStep, isLocked, labels, steps, getLastStepIndexForPage, deterministic]);
 
   // ─── Play sound when a sub topic becomes active ─────────────────────────
   const prevActiveIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isLocked || labels.length === 0) return;
+    if (deterministic || !isLocked || labels.length === 0) return;
     // Find the currently active label
     let activeId: string | null = null;
     for (let i = 0; i < labels.length; i++) {
@@ -165,11 +167,11 @@ export default function SubTopicTracker({
       try { const a = new Audio('/sounds/short_reveal.mp3'); a.volume = 0.7; a.play().catch(() => {}); } catch {}
     }
     prevActiveIdRef.current = activeId;
-  }, [currentStep, isLocked, labels]);
+  }, [currentStep, isLocked, labels, deterministic]);
 
   // Auto-scroll
   useEffect(() => {
-    if (!isLocked || !listRef.current) return;
+    if (deterministic || !isLocked || !listRef.current) return;
     let activeIdx = -1;
     for (let i = 0; i < labels.length; i++) {
       const startPageIdx = labels[i].startPage ?? (i === 0 ? 0 : (labels[i - 1].endPage ?? labels[i - 1].endStep ?? 0) + 1);
@@ -189,7 +191,7 @@ export default function SubTopicTracker({
     } else if (listRef.current) {
       listRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [currentStep, isLocked, labels, currentPageIndex]);
+  }, [currentStep, isLocked, labels, currentPageIndex, deterministic]);
 
   // ─── CRUD ───────────────────────────────────────────────────────────────
   const addLabel = () => {
@@ -308,7 +310,7 @@ export default function SubTopicTracker({
       <div className="flex flex-col h-full overflow-hidden">
         <div className={`flex items-center justify-between px-3 py-1.5 ${isLocked ? 'border-b border-white/[0.08]' : 'border-b border-white/[0.06]'}`} style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.025), transparent)' }}>
           {isLocked ? (
-            <span className="text-xs font-semibold text-white/90">🎬 {sidebarTitle}</span>
+            <span className={`${scene ? 'text-base py-1' : 'text-xs'} font-semibold text-white/90`}>🎬 {sidebarTitle}</span>
           ) : (
             <select
               value={sidebarTitle}
@@ -356,6 +358,8 @@ export default function SubTopicTracker({
             return (
               <div
                 key={label.id}
+                data-topic-id={label.id}
+                data-topic-status={status}
                 className={`rounded-lg transition-all duration-300 relative overflow-hidden ${
                   isLocked
                     ? 'px-3 py-2'
@@ -394,12 +398,12 @@ export default function SubTopicTracker({
                       className="text-[10px] font-medium text-slate-300 bg-transparent border-none outline-none flex-1 min-w-0"
                     />
                   ) : (
-                    <span className={`text-[10px] font-semibold transition-colors duration-300 ${
+                    <span className={`${scene ? 'text-sm flex-1 min-w-0 break-words' : 'text-[10px]'} font-semibold transition-colors duration-300 ${
                       status === 'complete' ? 'text-emerald-300' : status === 'active' ? 'text-white' : 'text-slate-500'
                     }`}>{label.title}</span>
                   )}
                   {isLocked && status !== 'pending' && (
-                    <span className={`text-[8px] font-bold ml-auto flex-shrink-0 ${
+                    <span className={`${scene ? 'text-[11px]' : 'text-[8px]'} font-bold ml-auto flex-shrink-0 ${
                       status === 'complete' ? 'text-emerald-400' : 'text-[#008CFF]'
                     }`}>{Math.round(getProgress(label, i) * 100)}%</span>
                   )}

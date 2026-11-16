@@ -1,0 +1,17 @@
+.video-stage { position: relative; width: 1920px; height: 1080px; overflow: clip; background: var(--scene-matte); color: #e2e8f0; }
+.video-canvas { position: absolute; inset: 0; overflow: hidden; }
+.video-stage *, .video-stage *::before, .video-stage *::after { transition: none !important; scroll-behavior: auto !important; caret-color: transparent !important; }
+.video-stage .tlui-layout, .video-stage .react-flow__controls, .video-stage .react-flow__attribution { display: none !important; }
+.video-diagram, .video-laser { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.video-region, .video-pointer { position: absolute; z-index: 20; pointer-events: none; }
+.video-laser { z-index: 30; }
+/* Match playback's reveal-shown transition using seekable CSS animations.
+   VideoScene seeks both animations to time relative to the highlight step. */
+@keyframes video-highlight-wipe {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+.video-highlight-reveal {
+  animation: video-highlight-wipe 0.5s cubic-bezier(0.4, 0, 0.2, 1) both,
+    reveal-glow-pulse 1s ease-out both;
+}

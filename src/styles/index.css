@@ -176,6 +176,21 @@ a[href*="tldraw.dev"] {
   background-color: #0B0D0F !important;
 }
 
+/* Original dark matte for the fixed scene and its video output. */
+.scene-composition {
+  --scene-matte: #0B0D0F;
+}
+.scene-progress-panel {
+  background: #0B0D0F;
+  border-left: 1px solid rgba(59, 130, 246, 0.5);
+  box-shadow: inset 2px 0 8px rgba(59, 130, 246, 0.15);
+}
+.presenting-mode .scene-composition > .sub-topic-sidebar {
+  border-left: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
 /* Refined graphite grid */
 .tl-grid {
   opacity: 0.5 !important;
@@ -1432,21 +1447,4 @@ body.audio-playing-fullscreen button[title*="Switch to"] {
 
 .mask-fade-reveal {
   animation: mask-fade-out 0.8s ease-in-out forwards !important;
-}
-
-
-/* Freehand mask swipe — clip-path transition like highlight swipe, but inverse (visible → hidden) */
-/* NOTE: Use only when locked and revealing. When unlocked, inline polygonClip defines shape. */
-.mask-swipe-visible {
-  /* Don't set clip-path here — let inline polygonClip define shape when unlocked */
-  transition: clip-path 1.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-.mask-swipe-hidden {
-  /* Left-to-right wipe: start with right 100% hidden (inset from right) */
-  clip-path: inset(0 100% 0 0) !important;
-  transition: clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-.mask-swipe-visible {
-  clip-path: inset(0 0 0 0) !important;
-  transition: clip-path 0.5s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }

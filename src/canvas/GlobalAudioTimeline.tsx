@@ -109,7 +109,7 @@ export default function GlobalAudioTimeline({
       const pid = pageIds[pi];
 
       // Topic (page 1 only)
-      if (pi === 0 && pageTopicVisible.has(pid)) {
+      if (pid === pageIds.find(id => !steps.some(step => step.pageId === id && step.introEffect)) && pageTopicVisible.has(pid)) {
         result.push({
           id: `__topic__${pid}`,
           type: 'topic',
@@ -176,11 +176,6 @@ export default function GlobalAudioTimeline({
     return audioDurations[id] ?? (isPreloaded ? 0 : DEFAULT_DURATION);
   }, [audioDurations]);
 
-  const adjustDuration = useCallback((id: string, delta: number, isPreloaded: boolean) => {
-    const current = audioDurations[id] ?? (isPreloaded ? 0 : DEFAULT_DURATION);
-    onDurationsChange({ ...audioDurations, [id]: Math.max(0, Math.round((current + delta) * 10) / 10) });
-  }, [audioDurations, onDurationsChange]);
-
   const adjustStartOffset = useCallback((id: string, delta: number) => {
     const key = `__start_${id}`;
     const current = audioDurations[key] ?? 0;
@@ -212,7 +207,7 @@ export default function GlobalAudioTimeline({
   }, [audioDurations, onDurationsChange, unifiedSteps, adjustStartOffset]);
 
   // Adjust a card's end (duration) — cascades forward to adjust next card's start
-  const adjustCardEnd = useCallback((id: string, delta: number, isPreloaded: boolean, idx: number) => {
+  const adjustCardEnd = useCallback((id: string, delta: number, isPreloaded: boolean) => {
     const current = audioDurations[id] ?? (isPreloaded ? 0 : DEFAULT_DURATION);
     const newDur = Math.max(0, Math.round((current + delta) * 10) / 10);
     onDurationsChange({ ...audioDurations, [id]: newDur });
@@ -483,9 +478,9 @@ export default function GlobalAudioTimeline({
                           {/* Animate end time */}
                           <div className="flex items-center gap-1">
                             <span className="text-[7px] text-slate-600 w-7">End</span>
-                            <button onClick={(e) => { e.stopPropagation(); adjustCardEnd(us.id, -0.5, us.isPreloaded, idx); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Minus className="w-2 h-2" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); adjustCardEnd(us.id, -0.5, us.isPreloaded); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Minus className="w-2 h-2" /></button>
                             <span className={`text-[8px] font-mono min-w-[40px] text-center ${stepDuration === 0 ? 'text-slate-600' : 'text-amber-300'}`}>{formatShort(stepStart + stepDuration)}</span>
-                            <button onClick={(e) => { e.stopPropagation(); adjustCardEnd(us.id, 0.5, us.isPreloaded, idx); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Plus className="w-2 h-2" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); adjustCardEnd(us.id, 0.5, us.isPreloaded); }} className="flex items-center justify-center w-4 h-4 rounded bg-[#0d0d18] text-slate-500 border border-[#2a2a4e] hover:text-blue-300 hover:border-blue-500/30 transition-all"><Plus className="w-2 h-2" /></button>
                           </div>
                             </>
                           )}

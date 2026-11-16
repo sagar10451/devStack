@@ -7,8 +7,10 @@ import { MarkdownBlockShapeUtil } from './shapes/MarkdownBlockShape';
 import { GlowNotesShapeUtil } from './shapes/GlowNotesShape';
 import { StickyNoteShapeUtil } from './shapes/StickyNoteShape';
 import { ChapterNameShapeUtil } from './shapes/ChapterNameShape';
+import { IntroShapeUtil, IntroPlaybackContext } from './intro/IntroShape';
+import { INTRO_EDITING, type IntroPlayback } from './intro/playback';
 
-const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesShapeUtil, StickyNoteShapeUtil, ChapterNameShapeUtil];
+const customShapeUtils = [CodeBlockShapeUtil, MarkdownBlockShapeUtil, GlowNotesShapeUtil, StickyNoteShapeUtil, ChapterNameShapeUtil, IntroShapeUtil];
 
 interface CanvasEditorProps {
   snapshot: unknown | null;
@@ -16,6 +18,8 @@ interface CanvasEditorProps {
   onDocumentChange: () => void;
   onSeedCanvas?: (editor: Editor) => void;
   hideUi?: boolean;
+  onLoadError?: (error: Error) => void;
+  introPlayback?: IntroPlayback;
 }
 
 export default memo(function CanvasEditor({
@@ -24,6 +28,8 @@ export default memo(function CanvasEditor({
   onDocumentChange,
   onSeedCanvas,
   hideUi = false,
+  onLoadError,
+  introPlayback = INTRO_EDITING,
 }: CanvasEditorProps) {
   const editorRef = useRef<Editor | null>(null);
 
@@ -35,6 +41,7 @@ export default memo(function CanvasEditor({
       try {
         loadSnapshot(editor.store, snapshot as Parameters<typeof loadSnapshot>[1]);
       } catch (e) {
+        if (onLoadError) { onLoadError(e as Error); return; }
         console.warn('Failed to load snapshot:', e);
       }
     }
@@ -47,18 +54,18 @@ export default memo(function CanvasEditor({
     }
 
     // Lightweight change listener — just marks dirty, no serialization
-    editor.store.listen(onDocumentChange, { scope: 'document' });
-  }, [snapshot, onEditorReady, onDocumentChange]);
+    return editor.store.listen(onDocumentChange, { scope: 'document' });
+  }, [snapshot, onEditorReady, onDocumentChange, onSeedCanvas, onLoadError]);
 
   return (
     <div className="w-full h-full">
-      <Tldraw
+      <IntroPlaybackContext.Provider value={introPlayback}><Tldraw
         onMount={handleMount}
         hideUi={hideUi}
         shapeUtils={customShapeUtils}
         colorScheme="dark"
-        components={{ PageMenu: null, MainMenu: null, QuickActions: null, ActionsMenu: null, HelpMenu: null, Watermark: null }}
-      />
+        components={{ PageMenu: null, MainMenu: null, QuickActions: null, ActionsMenu: null, HelpMenu: null }}
+      /></IntroPlaybackContext.Provider>
     </div>
   );
 });

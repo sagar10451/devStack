@@ -1,33 +1,11 @@
 import { Link } from 'react-router-dom';
-import { Search, BookOpen, Code2, Maximize, Info } from 'lucide-react';
+import { Search, Maximize, Info } from 'lucide-react';
 import { usePortalSafe } from '../data/portalContext';
 import { usePresentation } from '../data/presentationContext';
 import { findNodeByPath } from '../data/contentTree';
 import { useState } from 'react';
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-function PresentationToolToggle() {
-  const { presentationTool, setPresentationTool } = usePresentation();
-  return (
-    <button
-      onClick={() => setPresentationTool(presentationTool === 'laser' ? 'pointer' : 'laser')}
-      className={`w-9 h-9 flex items-center justify-center rounded-full transition-all ${
-        presentationTool === 'laser'
-          ? 'bg-red-500/15 border border-red-500/30 shadow-md shadow-red-500/10'
-          : 'bg-[#12121f] border border-[#2a2a4e] hover:border-blue-500/30'
-      }`}
-      title={presentationTool === 'laser' ? 'Switch to Pointer' : 'Activate Laser Pen'}
-    >
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={presentationTool === 'laser' ? 'text-red-600' : 'text-gray-500'}>
-        <path d="M12 19l7-7 3 3-7 7-3-3z" />
-        <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-        <path d="M2 2l7.586 7.586" />
-        <circle cx="11" cy="11" r="2" fill={presentationTool === 'laser' ? '#ef4444' : '#9ca3af'} stroke="none" />
-      </svg>
-    </button>
-  );
-}
 
 interface HeaderProps {
   searchQuery: string;

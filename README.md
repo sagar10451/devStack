@@ -2,6 +2,60 @@
 
 Interactive canvas-based notes platform with step-by-step animations, system design diagrams, code blocks, markdown rendering, and presentation mode.
 
+## Fixed 16:9 scenes
+
+New lessons start in **16:9 Scene** mode. For an existing lesson, enable **16:9 Scene** beside the lock button before arranging content. The preview shows a full-frame 16:9 canvas with no progress panel or reserved top/bottom padding. Existing 1600 × 900 guides and saved cameras keep their coordinates; the full guide scales proportionally to the available window and to 1920 × 1080 for video export. A fitted 16:9 image fills the frame; other aspect ratios retain the original dark background in their margins without cropping.
+
+1. Unlock the canvas. Use the **Guide 1 / Guide 2 / …** selector beside **16:9 Scene** to explicitly choose the target guide. Clicking a guide's label or dragging its border also selects it; the active guide has an amber border.
+2. Add or select an image, then click **Fit image to Guide N**. To fit into a different guide, use **Choose guide…** immediately beside that button and pick **Fit image to Guide 2**, for example; the image fits there immediately and that guide becomes active. This restores its original proportions, removes cropping/rotation, and centres the complete image in the chosen guide. Other images remain unchanged. A 16:9 image fills the guide; other proportions leave background space.
+3. Use **+** beside the Guide toggle to add another guide. New scene guides are placed beyond the existing guides with an 80 px gap and are selected automatically. Existing guide positions are preserved. Removing the last guide keeps all page content and selects a remaining guide if necessary.
+4. Arrange highlights, text and other elements inside each guide. **View Guide N** returns the camera to the active guide; the canvas still supports zooming and panning while editing. Each guide can hold multiple images arranged manually.
+5. Lock and play. Presentation shows only the full-frame canvas. Guide selection is saved separately for each page; existing timeline camera transitions continue to control playback.
+
+Existing lessons retain their original layout until opted in. Enabling the mode does not resize existing shapes automatically. Image fitting is undoable.
+
+Run geometry and camera normalization checks with `npm run test:scene` (Node 22+).
+
+## Channel intro
+
+Unlock the canvas and click **⚡ Intro**. This creates a dedicated first page / Guide 1 with fixed **Doubt का THE END!** branding, a champagne-gold light reveal step, and an editable chapter card. Existing pages and their content remain in place after it. An empty first page is reused. Clicking Intro again opens the existing intro without resetting its text or audio timing.
+
+Double-click the chapter card to edit its text; the title fits and wraps inside the card. Add PNG images in the empty lower area normally: each gets one entrance step. **Channel logo**, **Channel electricity**, **Chapter · Free S**, and PNG entries appear in both the page timeline and Audio Sync. The logo is preloaded; a gold-white sheen travels across the lettering for 2.2 seconds, followed by a small finishing glint; the chapter reveals with the 0.8-second white-gold Free S sweep. Set the Audio Sync durations/start offsets to match the welcome and chapter announcement. Manual arrows, Quick Play and MP4 export use the same effects. Play restarts audio and visuals from the beginning after a manual preview.
+
+The fixed source artwork is in `public/intro/channel-banner.png`; `src/canvas/intro/logoWiring.json` contains the lettering contours used to mask the light reveal. Both are included with the project. The intro does not depend on the original Downloads file.
+
+Run `npm run test:intro` with the local editor running to check intro insertion, repeat clicks, undo/redo, title edits, PNG registration, original page associations, manual playback, Quick Play, and a validated MP4 with pixel checks for electricity, progressive title reveal and PNG visibility. All editor saves are intercepted and fixtures are temporary; saved user lessons are not modified.
+
+## Toolbar preferences
+
+**Show/hide toolbar buttons** saves each lesson's choices in `data/toolbar-preferences.json`. The shared file takes priority over the browser cache; existing browser choices migrate automatically the first time a lesson has no shared entry. Keep this JSON file synced with the project on other machines (for example, commit/push and pull it with Git). This does not provide live synchronization between separate project copies. The local Vite editor supplies the settings API.
+
+## Local video export
+
+Run the local editor with `npm run dev`. Video export requires Node 22+, Google Chrome, and `ffmpeg` / `ffprobe` on PATH. Optional `CHROME_PATH`, `FFMPEG_PATH`, and `FFPROBE_PATH` environment variables can point to their installed executables. These tools run locally; a cloud service or macOS screen recording is not needed.
+
+1. Arrange the lesson in **16:9 Scene** mode. On pages with several guides, view each guide and capture its camera using **Lock** on the timeline step that begins that view. The editing guide selector does not define video order.
+2. Set durations in **Audio Sync**. Rough-mode exports require ordered audio start times on every camera group. Every recorded laser stroke needs a saved **Laser Sync** start time. Attach any missing step audio clips before exporting.
+3. Click **Export video** beside **16:9 Scene**, choose narration, background music, and a final hold, then click **Create MP4**.
+4. The export copies the lesson, images, and audio, then renders exact timeline frames at 1920 × 1080 / 30 fps. The frame slider previews the same renderer. After preparation, you can close the dialog and reopen it to check progress while keeping the dev server running. **Cancel export** stops the job.
+5. **Download MP4** appears only after checking video dimensions, frame count, duration, audio presence, a full decode, and whether seeking back to the first frame produces a consistent image (allowing only tiny antialiasing differences). Validated MP4s and validation reports are also kept in `data/video-exports/` (ignored by Git).
+
+The initial renderer handles multiple pages/guides, still images, text and the existing custom canvas shapes, React Flow diagrams, entrance/idle animations, enter/exit/swap/blink/move/teleport, saved camera transitions, highlights, rectangular/freehand grayscale masks, pointer arrows, and recorded lasers. Narration, attached step clips (trims/loops/volume), enabled background music, and supported timeline sound effects are mixed from their source files. Rendering never opens an editable lesson or runs its autosave.
+
+Paint B&W Free S uses a slower 0.8-second swipe with the same easing curve as Draw Highlight R, sweeping across the freehand region’s own bounds to reveal the original colours. A thin white-gold light follows the moving edge, clipped to the selected region, and disappears when the swipe finishes. Playback and export share the reveal drawing and timing. Advancing a step lets an in-progress swipe finish; rewinding resets it for replay.
+
+Export automatically reuses captured pixels during unchanged pauses, while still encoding every frame at 30 fps. Active CSS animations, camera moves, laser drawing and swipe reveals continue to be captured frame by frame. Shape timeline lookups are cached within the render session. Resolution, encoding quality, audio timing and output validation stay the same. Validation reports include captured/reused frame counts and preparation, rendering, encoding and validation times. Scenes with long still pauses benefit most.
+
+Unsupported features are reported before rendering: embedded videos/animated images, animated groups (ungroup them first), pinned title/subtitle overlays, the Audio Notes splitter, and Logo Glow targeting the excluded app header. Missing files, invalid timing/cameras, and unavailable fonts also stop export. Imported remote/blob images must be stored as local or embedded canvas assets. Existing real lessons and longer exports still need representative acceptance testing; this is not a claim of universal compatibility or identical rendering across every browser version.
+
+Validation commands:
+
+- `npm run build` — TypeScript and production build.
+- `npm run test:scene` — scene geometry and screen-independent cameras.
+- `npm run test:video` — shared timeline, merged/preloaded steps, guide/page transitions, backwards seeking, durations and invalid inputs.
+- `npm run test:video:integration` — requires the local dev server; creates isolated synthetic lessons and verifies encoded MP4 frame colors, masks/highlights/lasers/fonts, audio marker timing, download ranges, cancellation and explicit failures. It does not modify saved user lessons. Set `VIDEO_TEST_URL` if the server uses a different port.
+- `node scripts/benchmark-video-export.mjs --baseline`, then `--optimized` — compare export times, every decoded video frame and decoded audio using frozen fixtures. The baseline requires a separate unchanged reference checkout running on port 5175; the optimized editor defaults to port 5173. Override either with `VIDEO_TEST_URL`, and the fixture/result directory with `VIDEO_BENCHMARK_DIR`. `--cases=name` compares an existing fixture in that directory.
+
 ---
 
 ## Recent Changes (Aug 30, 2026) — Laser Sync & Rough Mode Audio

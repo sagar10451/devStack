@@ -1,3 +1,4 @@
+import { getSceneCamera, setSceneCamera } from './sceneLayout';
 /**
  * TimelineBar — horizontal bottom bar showing animation steps as a page-grouped timeline.
  * Each step is a card showing shape info, action type, and camera lock button.
@@ -263,14 +264,14 @@ export default function TimelineBar({
 
   const captureCamera = useCallback((stepId: string) => {
     if (!editor) return;
-    const cam = editor.getCamera();
+    const cam = getSceneCamera(editor);
     updateStep(stepId, { cameraPosition: { x: Math.round(cam.x), y: Math.round(cam.y), z: Math.round(cam.z * 100) / 100 } });
   }, [editor, updateStep]);
 
   // Lock camera for ALL steps on the current page at once
   const lockAllCameras = useCallback(() => {
     if (!editor) return;
-    const cam = editor.getCamera();
+    const cam = getSceneCamera(editor);
     const camPos = { x: Math.round(cam.x), y: Math.round(cam.y), z: Math.round(cam.z * 100) / 100 };
     const pageId = editor.getCurrentPageId() as string;
     const updatedSteps = steps.map(s => {
@@ -288,7 +289,7 @@ export default function TimelineBar({
 
   const viewPosition = useCallback((step: AnimationStep) => {
     if (!editor || !step.cameraPosition) return;
-    editor.setCamera(step.cameraPosition, { force: true, animation: { duration: 300 } });
+    setSceneCamera(editor, step.cameraPosition, { force: true, animation: { duration: 300 } });
   }, [editor]);
 
   // ─── Audio ──────────────────────────────────────────────────────────────
@@ -561,7 +562,7 @@ export default function TimelineBar({
     }
 
     if (step.cameraPosition) {
-      editor.setCamera(step.cameraPosition, { force: true, animation: { duration: 300 } });
+      setSceneCamera(editor, step.cameraPosition, { force: true, animation: { duration: 300 } });
     } else if (tldrawIds.length > 0 || rfIds.length > 0) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const id of tldrawIds) {
@@ -607,9 +608,6 @@ export default function TimelineBar({
     }
   }, [editor, isLocked, diagramData]);
 
-  if (isLocked) {
-    return null;
-  }
 
   // ─── Track current page ID (re-renders on page switch) ─────────────────
   const [currentPageId, setCurrentPageId] = useState<string>(() =>
@@ -625,6 +623,8 @@ export default function TimelineBar({
     }, 200);
     return () => clearInterval(interval);
   }, [editor]);
+
+  if (isLocked) return null;
 
   // ─── Filter steps to current page ──────────────────────────────────────
   const currentPageSteps = steps.filter(s => {
@@ -880,7 +880,7 @@ export default function TimelineBar({
                               const v = Number(e.target.value);
                               if (!isNaN(v)) {
                                 updateStep(step.id, { cameraPosition: { ...step.cameraPosition!, x: v } });
-                                if (editor) editor.setCamera({ ...step.cameraPosition!, x: v }, { force: true, animation: { duration: 200 } });
+                                if (editor) setSceneCamera(editor, { ...step.cameraPosition!, x: v }, { force: true, animation: { duration: 200 } });
                               }
                             }}
                             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
@@ -896,7 +896,7 @@ export default function TimelineBar({
                               const v = Number(e.target.value);
                               if (!isNaN(v)) {
                                 updateStep(step.id, { cameraPosition: { ...step.cameraPosition!, y: v } });
-                                if (editor) editor.setCamera({ ...step.cameraPosition!, y: v }, { force: true, animation: { duration: 200 } });
+                                if (editor) setSceneCamera(editor, { ...step.cameraPosition!, y: v }, { force: true, animation: { duration: 200 } });
                               }
                             }}
                             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}
@@ -912,7 +912,7 @@ export default function TimelineBar({
                               const v = Number(e.target.value);
                               if (!isNaN(v) && v > 0) {
                                 updateStep(step.id, { cameraPosition: { ...step.cameraPosition!, z: v } });
-                                if (editor) editor.setCamera({ ...step.cameraPosition!, z: v }, { force: true, animation: { duration: 200 } });
+                                if (editor) setSceneCamera(editor, { ...step.cameraPosition!, z: v }, { force: true, animation: { duration: 200 } });
                               }
                             }}
                             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); e.stopPropagation(); }}

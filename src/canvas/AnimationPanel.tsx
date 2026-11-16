@@ -1,3 +1,4 @@
+import { getSceneCamera, setSceneCamera } from './sceneLayout';
 import {
   Plus, Trash2, ChevronUp, ChevronDown,
   Type, Square, ArrowRight, Image, Pencil, Circle, Triangle, Star, Minus,
@@ -185,7 +186,7 @@ export default function AnimationPanel({
     };
     // Save current camera at step creation — used to restore after capture
     if (editor) {
-      const cam = editor.getCamera();
+      const cam = getSceneCamera(editor);
       preZoomCameraRef.current[newStep.id] = { x: cam.x, y: cam.y, z: cam.z };
     }
     onStepsChange([...steps, newStep]);
@@ -434,12 +435,12 @@ export default function AnimationPanel({
                       onClick={() => {
                         if (!editor) return;
                         // Capture current camera view
-                        const cam = editor.getCamera();
+                        const cam = getSceneCamera(editor);
                         updateStep(step.id, { cameraPosition: { x: cam.x, y: cam.y, z: cam.z } });
                         // Restore to pre-capture view (saved when step was created)
                         const preCam = preZoomCameraRef.current[step.id];
                         if (preCam) {
-                          editor.setCamera(preCam, { force: true });
+                          setSceneCamera(editor, preCam, { force: true });
                         }
                       }}
                       className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-all ${step.cameraPosition ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30' : 'bg-slate-700/50 text-slate-300 border border-slate-600/30 hover:bg-slate-700'}`}

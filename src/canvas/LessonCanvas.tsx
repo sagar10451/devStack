@@ -1,4 +1,12 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { createIntro, introStepsForPage, rebaseIntroLabels } from './intro/createIntro';
+import { useIntroPlayback } from './intro/useIntroPlayback';
+import { useToolbarPreferences } from './useToolbarPreferences';
+import VideoExportDialog from './video/VideoExportDialog';
+import FreehandSwipeMask from './FreehandSwipeMask';
+import { SWIPE_GLOW_SECONDS, SWIPE_SECONDS } from './swipeReveal';
+import type { VideoPayload } from './video/timeline';
+import { generateHandDrawnHighlightPath } from './video/highlightGeometry';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { getSnapshot, loadSnapshot, toRichText, createShapeId } from 'tldraw';
 import type { Editor } from 'tldraw';
 import { Lock, Unlock, Save, ArrowLeft, ChevronLeft, ChevronRight, ChevronUp, Download, Upload, Palette, Boxes, Code2, FileText, Eye, ImageDown, RotateCcw, Trash2, PanelRight, FlipHorizontal2, Frame, Music } from 'lucide-react';
@@ -8,11 +16,12 @@ import { createSampleOOPLesson } from './sampleLesson';
 import type { AnimationStep, AnimationType, StepAction, SubTopicLabel, LessonCanvasData, ShapeAnimationConfig, HighlightRegion, PointerArrow } from './types';
 import SubTopicTracker from './SubTopicTracker';
 import RecordingGuide from './RecordingGuide';
+import { SCENE, clampGuideIndex, nextSceneOrigin, resolveSceneGuides, fitImageToScene, getSceneCamera, getSceneScale, setSceneCamera } from './sceneLayout';
 import PagePanel from './PagePanel';
 import { applyIdleAnimation } from './animationEngine';
 import { applyStepAnimation, clearStepAnimations, applyBlinkAnimation, applyMoveAnimation, applyTeleportAnimation, rewindMoveRecords, applyZoomToShapes, rewindZoom } from './stepAnimations';
 import type { MoveRecord } from './stepAnimations';
-import { computeGoNextTimes } from './audioTimingUtils';
+import { computeGoNextTimes, computeTimedEntries } from './audioTimingUtils';
 import { parseClipboardLines } from './pasteUtils';
 import { usePresentation } from '../data/presentationContext';
 import LaserPointer from '../components/LaserPointer';
@@ -44,47 +53,6 @@ const HIGHLIGHT_COLORS = [
 /** Generate an SVG path `d` attribute for a hand-drawn marker highlight stroke.
  *  Fits a 200×50 viewBox — SVG scales it to any size.
  *  Uses seed for deterministic randomness: same seed = same shape. */
-function generateHandDrawnHighlightPath(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
-  let s = Math.abs(hash) || 1;
-  const rand = () => { s = (s * 16807) % 2147483647; return (s & 0x7fffffff) / 0x7fffffff; };
-  const W = 200, H = 50;
-  const m = 4, er = 10, ns = 14, wav = 3.5, rough = 1.8;
-  const pts: { x: number; y: number }[] = [];
-  // Left rounded end
-  pts.push({ x: m + er * 0.4, y: H - m - rough * rand() });
-  pts.push({ x: m - er * 0.2 * rand(), y: H * 0.55 + rough * (rand() - 0.5) });
-  pts.push({ x: m + er * 0.4, y: m + rough * rand() });
-  // Top edge (left→right, wavy)
-  for (let i = 1; i <= ns; i++) {
-    const t = i / (ns + 1);
-    const x = m + er + t * (W - 2 * m - 2 * er);
-    const y = m + wav * Math.sin(t * Math.PI * 3.4 + rand() * 5) + rough * (rand() - 0.5);
-    pts.push({ x, y: Math.max(1, y) });
-  }
-  // Right rounded end
-  pts.push({ x: W - m - er * 0.4, y: m + rough * rand() });
-  pts.push({ x: W - m + er * 0.2 * rand(), y: H * 0.45 + rough * (rand() - 0.5) });
-  pts.push({ x: W - m - er * 0.4, y: H - m - rough * rand() });
-  // Bottom edge (right→left, wavy — different freq)
-  for (let i = ns; i >= 1; i--) {
-    const t = i / (ns + 1);
-    const x = m + er + t * (W - 2 * m - 2 * er);
-    const y = H - m + wav * Math.sin(t * Math.PI * 2.8 + rand() * 5) + rough * (rand() - 0.5);
-    pts.push({ x, y: Math.min(H - 1, y) });
-  }
-  // Smooth closed path via quadratic Bezier through midpoints
-  const f = pts[0];
-  let d = `M ${f.x.toFixed(1)},${f.y.toFixed(1)}`;
-  for (let i = 1; i < pts.length; i++) {
-    const p = pts[i - 1], c = pts[i];
-    d += ` Q ${p.x.toFixed(1)},${p.y.toFixed(1)} ${((p.x + c.x) / 2).toFixed(1)},${((p.y + c.y) / 2).toFixed(1)}`;
-  }
-  const l = pts[pts.length - 1];
-  d += ` Q ${l.x.toFixed(1)},${l.y.toFixed(1)} ${f.x.toFixed(1)},${f.y.toFixed(1)} Z`;
-  return d;
-}
 
 function hexToRgba(hex: string, _alpha: number): string {
   // Return full hex color — we use mix-blend-mode: multiply instead of alpha transparency
@@ -93,12 +61,22 @@ function hexToRgba(hex: string, _alpha: number): string {
 
 // ─── Toolbar tool IDs for hide/show toggle ────────────────────────────
 export const TOOLBAR_TOOLS = [
+  { id: 'previousstep', label: 'Previous step' },
+  { id: 'nextstep', label: 'Next step' },
+  { id: 'pagejump', label: 'Jump to page' },
+  { id: 'playback', label: 'Play / Pause / Cancel countdown' },
+  { id: 'bgmusic', label: 'Background music' },
+  { id: 'bgmusicloop', label: 'Background music loop' },
+  { id: 'bgmusicvolume', label: 'Background music volume' },
+  { id: 'intro', label: 'Intro' },
   { id: 'save', label: 'Save' },
+  { id: 'exportjson', label: 'Export JSON' },
+  { id: 'exportpng', label: 'Export PNG' },
   { id: 'pdf', label: 'PDF' },
   { id: 'ppt', label: 'PPT' },
   { id: 'import', label: 'Import' },
-  { id: 'undo', label: 'Undo/Redo' },
-  { id: 'delete', label: 'Delete' },
+  { id: 'undo', label: 'Reset canvas' },
+  { id: 'delete', label: 'Clear all app data' },
   { id: 'lines', label: 'Lines' },
   { id: 'colors', label: 'Colors' },
   { id: 'nodes', label: 'Nodes' },
@@ -108,22 +86,35 @@ export const TOOLBAR_TOOLS = [
   { id: 'glow', label: 'Glow' },
   { id: 'stickynote', label: 'Sticky Note' },
   { id: 'flip', label: 'Flip' },
+  { id: 'video', label: 'Export video' },
+  { id: 'scene', label: '16:9 Scene' },
+  { id: 'fitimage', label: 'Fit image to scene' },
+  { id: 'fitimageguide', label: 'Fit image: choose guide' },
   { id: 'guide', label: 'Guide' },
+  { id: 'addguide', label: 'Add guide' },
+  { id: 'removeguide', label: 'Remove guide' },
+  { id: 'guideheight', label: 'Guide dimensions / presets' },
+  { id: 'viewguide', label: 'View guide / 75% zoom' },
+  { id: 'sceneguide', label: 'Active guide selector' },
   { id: 'bw', label: 'B&W' },
   { id: 'mode', label: 'Mode' },
   { id: 'topic', label: 'Topic' },
-  { id: 'subtitle', label: 'Subtitle' },
+  { id: 'subtitle', label: 'Subtopic' },
+  { id: 'public', label: 'Public' },
   { id: 'audiosync', label: 'Audio Sync' },
   { id: 'lasersync', label: 'Laser Sync' },
   { id: 'drawhighlight', label: 'Draw Highlight' },
   { id: 'drawhighlightr', label: 'Draw Highlight R' },
   { id: 'paintbw', label: 'Paint B&W Rect' },
-  { id: 'paintbwfree', label: 'Paint B&W Free' },
+  { id: 'paintbwfree', label: 'Paint B&W Free R' },
+  { id: 'paintbwfrees', label: 'Paint B&W Free S' },
+  { id: 'highlightcolors', label: 'Highlight colour palette' },
   { id: 'pointer', label: 'Pointer' },
   { id: 'glowall', label: 'Glow All' },
   { id: 'glowone', label: 'Glow One' },
   { id: 'audionotes', label: 'Audio Notes' },
   { id: 'splitter', label: 'Canvas Splitter' },
+  { id: 'pasteside', label: 'Paste target: Left / Right' },
   { id: 'chaptername', label: 'Chapter' },
   { id: 'logoglow', label: 'Logo Glow' },
 ];
@@ -255,14 +246,52 @@ export default function LessonCanvas({
   const [publicCanvasData, setPublicCanvasData] = useState<PublicCanvasData | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  // Existing lessons opt in; new lessons start with a fixed scene.
+  const [videoExportPayload, setVideoExportPayload] = useState<VideoPayload | null>(null);
+  const [sceneLayout, setSceneLayout] = useState(initialData?.sceneLayout ?? !initialData);
+  const sceneLayoutRef = useRef(sceneLayout);
+  sceneLayoutRef.current = sceneLayout;
+  const stageHostRef = useRef<HTMLDivElement>(null);
+  const [stageScale, setStageScale] = useState(1);
+  const previousStageRef = useRef({ enabled: sceneLayout, scale: 1 });
+
+  useLayoutEffect(() => {
+    const host = stageHostRef.current;
+    if (!host) return;
+    const measure = () => {
+      const scale = Math.min(host.clientWidth / SCENE.width, host.clientHeight / SCENE.height);
+      if (scale > 0) setStageScale(scale);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [showPublicCanvas]);
+
+  useLayoutEffect(() => {
+    if (!editor) return;
+    const previous = previousStageRef.current;
+    const cam = editor.getCamera();
+    const logicalZoom = cam.z / (previous.enabled ? previous.scale : 1);
+    editor.updateViewportScreenBounds(editor.getContainer());
+    if (previous.enabled !== sceneLayout) {
+      // Entering/leaving scene mode changes framing, never shape positions.
+      const pid = editor.getCurrentPageId() as string;
+      const guide = getActiveGuideForPage(pid);
+      setSceneCamera(editor, { x: -guide.x, y: -guide.y, z: sceneLayout ? 1 : 0.75 }, { force: true });
+    } else {
+      editor.setCamera({ x: cam.x, y: cam.y, z: logicalZoom * (sceneLayout ? stageScale : 1) }, { force: true });
+    }
+    previousStageRef.current = { enabled: sceneLayout, scale: stageScale };
+  }, [editor, sceneLayout, stageScale, showPublicCanvas]);
   const [snapshot] = useState<unknown>(initialData?.snapshot || null);
   const [animationSteps, setAnimationSteps] = useState<AnimationStep[]>(initialData?.animationSteps || []);
-  // Swipe reveal animation progress per region (0 = fully hidden, 1 = fully revealed)
-  const [swipeProgress, setSwipeProgress] = useState<Record<string, number>>({});
-  // Swipe animation tracking
-  const swipeAnimRunningRef = useRef<Record<string, boolean>>({});
-  const swipeProgressRef = useRef<Record<string, number>>({});
-  swipeProgressRef.current = swipeProgress;
+  const creatingIntroRef = useRef(false);
+  const explicitIntroPagesRef = useRef(new Set<string>());
+  const [swipeElapsed, setSwipeElapsed] = useState<Record<string, number>>({});
+  const swipeStartsRef = useRef<Record<string, number>>({});
+  const previousSwipeStepRef = useRef(-1);
+  const audioSwipeFiredRef = useRef(new Set<string>());
   const [subTopicLabels, setSubTopicLabels] = useState<SubTopicLabel[]>(initialData?.subTopicLabels || []);
   const [sidebarTitle, setSidebarTitle] = useState(initialData?.sidebarTitle || 'Topics');
   const sidebarTitleRef = useRef(sidebarTitle);
@@ -278,8 +307,6 @@ export default function LessonCanvas({
   const [showAnimBar, setShowAnimBar] = useState(false);
   const [showLineConfig, setShowLineConfig] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
-  const [showTextBoundary] = useState(false); // kept for boundary frame exclusion checks
-  const showTextBoundaryRef = useRef(false);
   const [showSidebar, setShowSidebar] = useState(initialData?.showSidebar !== false);
   const showSidebarRef = useRef(showSidebar);
   showSidebarRef.current = showSidebar;
@@ -338,62 +365,88 @@ export default function LessonCanvas({
   const highlightRegionsRef = useRef(highlightRegions);
   highlightRegionsRef.current = highlightRegions;
 
-  // ─── Swipe animation effect ──────────────────────────────────────────────
+  // Keep one clock per reveal. Moving to the next step must not truncate it;
+  // rewinding or unlocking resets it so replay starts from the same state.
   useEffect(() => {
-    console.log('[SWIPE_DEBUG_EFFECT] Triggered', { isLocked, currentStep, animationStepsLength: animationSteps.length, highlightRegionsLength: highlightRegions.length });
-    if (!isLocked) {
-      console.log('[SWIPE_DEBUG_EFFECT] Not locked, skipping');
+    const regions = highlightRegions.filter(r => r.type === 'mask' && r.revealType === 'swipe' && r.path && r.path.length > 2);
+    const starts = swipeStartsRef.current;
+    let frame: number | undefined;
+    // Audio playback may batch/merge steps, so a swipe cannot depend on its
+    // index becoming the exact currentStep. Use the narration clock directly.
+    if (isLocked && globalAudioPlaying && globalAudioRef.current && editor) {
+      const entries = computeTimedEntries({
+        steps: animationSteps, pageIds: editor.getPages().map(page => page.id as string),
+        durations: globalAudioDurations,
+        pageTopicVisible: pageTopicVisibleRef.current, pageSubtitleVisible: pageSubtitleVisibleRef.current,
+        pageTopicModes: pageTopicModesRef.current, pageSubtitleModes: pageSubtitleModesRef.current,
+      });
+      const times = new Map(entries.map(entry => [entry.id, entry.start]));
+      if (roughMode) {
+        let groupStart = 0;
+        for (const step of animationSteps) {
+          if (step.cameraPosition) groupStart = step.audioStartTime ?? groupStart;
+          times.set(step.id, groupStart);
+        }
+      }
+      const tickAudio = () => {
+        const audio = globalAudioRef.current;
+        if (!audio) return;
+        const elapsed: Record<string, number> = {};
+        for (const region of regions) {
+          const start = times.get(region.stepId);
+          const time = start === undefined ? -1 : audio.currentTime - start;
+          elapsed[region.id] = Math.max(-1, Math.min(SWIPE_GLOW_SECONDS, time));
+          if (time < 0) audioSwipeFiredRef.current.delete(region.id);
+          else if (!audioSwipeFiredRef.current.has(region.id)) {
+            audioSwipeFiredRef.current.add(region.id);
+            if (time < SWIPE_SECONDS) {
+              try { const sound = new Audio('/sounds/highlight_line.mp3'); sound.volume = .2; sound.play().catch(() => {}); } catch {}
+            }
+          }
+          if (time >= 0) starts[region.id] = performance.now() - Math.min(time, SWIPE_GLOW_SECONDS) * 1000;
+        }
+        setSwipeElapsed(previous => regions.every(region => previous[region.id] === elapsed[region.id]) ? previous : elapsed);
+        frame = requestAnimationFrame(tickAudio);
+      };
+      tickAudio();
+      return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
+    }
+    audioSwipeFiredRef.current.clear();
+    if (!isLocked || currentStep < 0) {
+      swipeStartsRef.current = {};
+      previousSwipeStepRef.current = -1;
+      setSwipeElapsed({});
       return;
     }
-    
-    // Check all mask regions in highlightRegions that have revealType: 'swipe' and are being revealed now
-    let foundSwipeRegions = 0;
-    highlightRegions.forEach((region, index) => {
-      if (region.type !== 'mask') return;
-      console.log('[SWIPE_DEBUG_EFFECT] Found mask region in highlightRegions', { index, regionId: region.id, hasPath: !!region.path, revealType: region.revealType });
-      if (!region.path || region.path.length < 3) return;
-      if (region.revealType !== 'swipe') return;
-      
-      foundSwipeRegions++;
-      const stepIdx = animationSteps.findIndex(s => s.id === region.stepId);
-      const regionId = region.id;
-      const justRevealed = stepIdx >= 0 && stepIdx === currentStep;
-      console.log('[SWIPE_DEBUG_EFFECT] Checking region', { regionId, stepIdx, currentStep, justRevealed });
-      if (!justRevealed) {
-        console.log('[SWIPE_DEBUG_EFFECT] Not just revealed, skipping');
-        return;
+    const rewinding = currentStep < previousSwipeStepRef.current;
+    previousSwipeStepRef.current = currentStep;
+    const valid = new Set(regions.map(r => r.id));
+    for (const id of Object.keys(starts)) if (!valid.has(id)) delete starts[id];
+    for (const region of regions) {
+      const index = animationSteps.findIndex(step => step.id === region.stepId);
+      if (index < 0 || index > currentStep || rewinding && index >= currentStep) delete starts[region.id];
+      if (index === currentStep && starts[region.id] === undefined) {
+        starts[region.id] = performance.now();
+        try { const audio = new Audio('/sounds/highlight_line.mp3'); audio.volume = .2; audio.play().catch(() => {}); } catch {}
       }
-      if (swipeAnimRunningRef.current[regionId]) {
-        console.log('[SWIPE_DEBUG_EFFECT] Animation already running');
-        return;
+    }
+    const tick = (now: number) => {
+      const elapsed: Record<string, number> = {};
+      let active = false;
+      for (const region of regions) {
+        const index = animationSteps.findIndex(step => step.id === region.stepId);
+        const start = starts[region.id];
+        if (start !== undefined) {
+          elapsed[region.id] = Math.min(SWIPE_GLOW_SECONDS, Math.max(0, (now - start) / 1000));
+          if (elapsed[region.id] < SWIPE_GLOW_SECONDS) active = true;
+        } else if (index >= 0 && index < currentStep) elapsed[region.id] = SWIPE_GLOW_SECONDS;
       }
-      console.log('[SWIPE_DEBUG_EFFECT] Starting animation for', regionId);
-      // Play highlight sound effect (same as Draw Highlight)
-      try { const a = new Audio('/sounds/highlight_line.mp3'); a.volume = 0.2; a.play().catch(() => {}); } catch {}
-      swipeAnimRunningRef.current[regionId] = true;
-      swipeProgressRef.current[regionId] = 0;
-      setSwipeProgress(prev => ({ ...prev, [regionId]: 0 }));
-      const startTime = performance.now();
-      const duration = 1200; // ms — matches highlight swipe speed
-      const animate = (now: number) => {
-        const elapsed = now - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        // Ease-out cubic
-        const eased = 1 - Math.pow(1 - progress, 3);
-        swipeProgressRef.current[regionId] = eased;
-        setSwipeProgress(prev => ({ ...prev, [regionId]: eased }));
-        console.log('[SWIPE_DEBUG_ANIMATION] Progress update', { regionId, progress, eased });
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        } else {
-          console.log('[SWIPE_DEBUG_ANIMATION] Animation complete for', regionId);
-          swipeAnimRunningRef.current[regionId] = false;
-        }
-      };
-      requestAnimationFrame(animate);
-    });
-    console.log('[SWIPE_DEBUG_EFFECT] Total swipe regions found:', foundSwipeRegions);
-  }, [currentStep, isLocked, highlightRegions, animationSteps]);
+      setSwipeElapsed(elapsed);
+      if (active) frame = requestAnimationFrame(tick);
+    };
+    tick(performance.now());
+    return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
+  }, [currentStep, isLocked, highlightRegions, animationSteps, globalAudioPlaying, globalAudioDurations, editor, roughMode]);
 
   const [highlightDrawing, setHighlightDrawing] = useState(false);
   const highlightDrawingRef = useRef(false);
@@ -417,24 +470,9 @@ export default function LessonCanvas({
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [showGuideZoomPicker, setShowGuideZoomPicker] = useState(false);
   const [highlightedStepId, setHighlightedStepId] = useState<string | null>(null);
-  // ─── Hidden tools state (persisted in localStorage) ─────────────────────
-  const [hiddenTools, setHiddenTools] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem(`hiddenTools:${siteId}:${topicSlug}:${subtopicSlug}`);
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
-  });
-  const toggleTool = useCallback((toolId: string) => {
-    setHiddenTools(prev => {
-      const next = new Set(prev);
-      if (next.has(toolId)) next.delete(toolId); else next.add(toolId);
-      try { localStorage.setItem(`hiddenTools:${siteId}:${topicSlug}:${subtopicSlug}`, JSON.stringify([...next])); } catch {}
-      return next;
-    });
-  }, [siteId, topicSlug, subtopicSlug]);
+  const { hiddenTools, toggleTool, ready: toolbarPreferencesReady, error: toolbarPreferencesError } = useToolbarPreferences(siteId, topicSlug, subtopicSlug);
   const pendingHighlightsRef = useRef<{ region: HighlightRegion; step: AnimationStep }[]>([]);
-  const imageReloadingRef = useRef(false);
-  const [quickPlay, setQuickPlay] = useState(true);
+  const quickPlay = true;
   const [showGlowOnePicker, setShowGlowOnePicker] = useState(false);
   const globalAudioPlayingRef = useRef(globalAudioPlaying);
   globalAudioPlayingRef.current = globalAudioPlaying;
@@ -511,6 +549,10 @@ export default function LessonCanvas({
   const [guideCountMap, setGuideCountMap] = useState<Record<string, number>>(
     initialData?.guideCountMap || (initialData?.guideCount ? { '_default': initialData.guideCount } : {})
   );
+  const [activeGuideMap, setActiveGuideMap] = useState<Record<string, number>>(initialData?.activeGuideMap || {});
+  const activeGuideMapRef = useRef(activeGuideMap);
+  activeGuideMapRef.current = activeGuideMap;
+  const [guidePageId, setGuidePageId] = useState('');
   // Guide height presets (width is always auto = screen width at 75%)
   type GuidePreset = { name: string; h: number };
   const [guidePresets, setGuidePresets] = useState<GuidePreset[]>([]);
@@ -549,22 +591,31 @@ export default function LessonCanvas({
 
   // Helper: get guide count for a specific page (default 1)
   const getGuideCountForPage = (pageId: string): number => {
-    return guideCountMap[pageId] ?? guideCountMap['_default'] ?? 1;
+    return guideCountMapRef.current[pageId] ?? guideCountMapRef.current['_default'] ?? 1;
   };
 
   // Helper: get guide borders for the current page, falling back to defaults
   const getGuideBordersForPage = (pageId: string): { x: number; y: number }[] => {
     const count = getGuideCountForPage(pageId);
-    const existing = guideBordersMap[pageId];
+    const existing = guideBordersMapRef.current[pageId];
     if (existing && existing.length === count) return existing;
     // Generate defaults or pad/trim to match count
-    const base = existing || guideBordersMap['_default'] || [];
+    const base = existing || guideBordersMapRef.current['_default'] || [];
+    if (sceneLayoutRef.current) return resolveSceneGuides(count, base);
     const result: { x: number; y: number }[] = [];
     for (let i = 0; i < count; i++) {
       result.push(base[i] || { x: i * 50, y: 0 });
     }
     return result;
   };
+  const getActiveGuideIndex = (pageId: string) => clampGuideIndex(
+    activeGuideMapRef.current[pageId] ?? 0, getGuideCountForPage(pageId)
+  );
+  const getActiveGuideForPage = (pageId: string) => getGuideBordersForPage(pageId)[
+    sceneLayoutRef.current ? getActiveGuideIndex(pageId) : 0
+  ] || { x: 0, y: 0 };
+  const currentGuidePageId = guidePageId || (editor?.getCurrentPageId() as string) || '';
+  const activeGuideIndex = getActiveGuideIndex(currentGuidePageId);
   const guideDragRef = useRef<{ idx: number; startX: number; startY: number; origOffX: number; origOffY: number } | null>(null);
   useEffect(() => {
     const onResize = () => setGuideResizeTick(t => t + 1);
@@ -653,6 +704,84 @@ export default function LessonCanvas({
     setIsSaved(false);
   }, []);
 
+  const rememberActiveGuide = (pageId: string, index: number) => {
+    const next = { ...activeGuideMapRef.current, [pageId]: clampGuideIndex(index, getGuideCountForPage(pageId)) };
+    activeGuideMapRef.current = next;
+    setActiveGuideMap(next);
+    markDirty();
+  };
+
+  const selectSceneGuide = (index: number, frame = true) => {
+    if (!editor) return;
+    const pageId = editor.getCurrentPageId() as string;
+    rememberActiveGuide(pageId, index);
+    if (!isLocked) setShowGuideBorder(true);
+    if (frame) {
+      const origin = getActiveGuideForPage(pageId);
+      setSceneCamera(editor, { x: -origin.x, y: -origin.y, z: 1 }, { force: true });
+    }
+  };
+
+  const addGuide = () => {
+    if (!editor) return;
+    const pageId = editor.getCurrentPageId() as string;
+    const origins = getGuideBordersForPage(pageId);
+    const origin = sceneLayout ? nextSceneOrigin(origins) : { x: origins.length * 50, y: 0 };
+    const borders = { ...guideBordersMapRef.current, [pageId]: [...origins, origin] };
+    const counts = { ...guideCountMapRef.current, [pageId]: origins.length + 1 };
+    guideBordersMapRef.current = borders;
+    guideCountMapRef.current = counts;
+    setGuideBordersMap(borders);
+    setGuideCountMap(counts);
+    if (sceneLayout) selectSceneGuide(origins.length);
+    markDirty();
+  };
+
+  const removeLastGuide = () => {
+    if (!editor) return;
+    const pageId = editor.getCurrentPageId() as string;
+    const origins = getGuideBordersForPage(pageId);
+    if (origins.length <= 1) return;
+    const wasRemoved = getActiveGuideIndex(pageId) === origins.length - 1;
+    const borders = { ...guideBordersMapRef.current, [pageId]: origins.slice(0, -1) };
+    const counts = { ...guideCountMapRef.current, [pageId]: origins.length - 1 };
+    guideBordersMapRef.current = borders;
+    guideCountMapRef.current = counts;
+    setGuideBordersMap(borders);
+    setGuideCountMap(counts);
+    // Removing a guide never deletes the images or other content on the page.
+    rememberActiveGuide(pageId, getActiveGuideIndex(pageId));
+    if (sceneLayout && wasRemoved) selectSceneGuide(getActiveGuideIndex(pageId));
+    markDirty();
+  };
+
+  const fitSelectedImage = (guideIndex?: number) => {
+    if (!editor || isLocked || !sceneLayout) return;
+    const selected = editor.getSelectedShapes();
+    if (selected.length !== 1 || selected[0].type !== 'image') return;
+    const image = selected[0];
+    const asset = image.props.assetId ? editor.getAsset(image.props.assetId) : undefined;
+    // Use the original asset ratio, including when the shape was stretched/cropped.
+    const width = asset?.type === 'image' ? asset.props.w : image.props.w;
+    const height = asset?.type === 'image' ? asset.props.h : image.props.h;
+    const pageId = editor.getCurrentPageId() as string;
+    const targetIndex = clampGuideIndex(guideIndex ?? getActiveGuideIndex(pageId), getGuideCountForPage(pageId));
+    const origin = getGuideBordersForPage(pageId)[targetIndex];
+    const fitted = fitImageToScene(width, height, origin);
+    if (!fitted) return;
+    editor.markHistoryStoppingPoint('fit image to scene');
+    editor.run(() => {
+      editor.reparentShapes([image.id], editor.getCurrentPageId());
+      editor.updateShape({
+        id: image.id, type: 'image', x: fitted.x, y: fitted.y, rotation: 0,
+        props: { w: fitted.w, h: fitted.h, crop: null },
+      });
+    });
+    rememberActiveGuide(pageId, targetIndex);
+    setSceneCamera(editor, { x: -origin.x, y: -origin.y, z: 1 }, { force: true });
+    markDirty();
+  };
+
   // ─── Warn before leaving with unsaved changes ───────────────────────────
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -731,7 +860,10 @@ export default function LessonCanvas({
     setTimeout(() => {
       // Restore saved camera position
       if (initialData?.camera) {
-        ed.setCamera(initialData.camera);
+        setSceneCamera(ed, initialData.camera);
+      } else if (sceneLayoutRef.current) {
+        const origin = getActiveGuideForPage(ed.getCurrentPageId() as string);
+        setSceneCamera(ed, { x: -origin.x, y: -origin.y, z: 1 }, { force: true });
       }
       applyAnimationState(ed, animationStepsRef.current, -1);
       ed.updateInstanceState({ isReadonly: true });
@@ -806,14 +938,17 @@ export default function LessonCanvas({
       const val = { x: cam.x, y: cam.y, z: cam.z };
       tldrawCameraRef.current = val; // always fresh for non-render reads
 
-      // Detect page change in unlocked mode → snap to guide 1 at 75%
+      // Scene pages always start with the same framing on every screen.
+      // A step's saved camera, when present, is applied after the page switch.
       const currentPid = editor.getCurrentPageId() as string;
-      if (!isLocked && lastTrackedPageRef.current && currentPid !== lastTrackedPageRef.current) {
-        const guide = getGuideBordersForPage(currentPid)[0] || { x: 0, y: 0 };
-        editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
-        tldrawCameraRef.current = { x: -guide.x, y: -guide.y, z: 0.75 };
-      }
+      setGuidePageId(currentPid);
+      const previousPid = lastTrackedPageRef.current;
       lastTrackedPageRef.current = currentPid;
+      if ((!isLocked || sceneLayoutRef.current) && previousPid && currentPid !== previousPid) {
+        const guide = getActiveGuideForPage(currentPid);
+        setSceneCamera(editor, { x: -guide.x, y: -guide.y, z: sceneLayoutRef.current ? 1 : 0.75 }, { force: true });
+        tldrawCameraRef.current = { x: -guide.x, y: -guide.y, z: (sceneLayoutRef.current ? 1 : 0.75) * getSceneScale(editor) };
+      }
 
       if (!throttleTimer) {
         throttleTimer = setTimeout(() => {
@@ -1297,7 +1432,7 @@ export default function LessonCanvas({
     if (!editor) return;
     // tldraw caches viewport bounds — recalculate when strip height changes
     requestAnimationFrame(() => {
-      try { (editor as any).updateViewportScreenBounds(); } catch { /* ignore if method doesn't exist */ }
+      try { editor.updateViewportScreenBounds(editor.getContainer()); } catch { /* ignore if method doesn't exist */ }
     });
   }, [editor, pageTopicVisible, pageSubtitleVisible]);
 
@@ -1801,7 +1936,7 @@ export default function LessonCanvas({
         const shape = editor.getShape(id as any) as any;
         if (shape?.meta?.isPasteBoundary) return false;
         // Exclude sticky notes — they are static helpers, not timeline steps
-        if (shape?.type === 'sticky-note') return false;
+        if (shape?.type === 'sticky-note' || shape?.type === 'intro-scene') return false;
         return true;
       });
       if (trulyNew.length === 0) return;
@@ -1859,7 +1994,7 @@ export default function LessonCanvas({
             shapeIds: [id],
             animation: 'appear' as AnimationType,
             duration: 800,
-            label: 'Step',
+            label: shape?.type === 'image' && editor.getPage(pageId as any)?.meta.introPage ? `Intro PNG: ${editor.getAsset(shape.props.assetId)?.props.name || 'Image'}` : 'Step',
             action: 'enter' as StepAction,
             pageId,
           });
@@ -2056,6 +2191,36 @@ export default function LessonCanvas({
   const recentlyDuplicatedPagesRef = useRef<Set<string>>(new Set());
   const pageCheckIntervalRef = useRef<number | null>(null);
 
+  // Restore the intro's stable step identities when its document transaction is
+  // undone/redone, and keep existing labels anchored to their original pages.
+  useEffect(() => {
+    if (!editor) return;
+    let previousPages = editor.getPages();
+    return editor.store.listen(() => {
+      const pages = editor.getPages();
+      const oldIntro = previousPages.filter(page => page.meta.introPage);
+      const intro = pages.filter(page => page.meta.introPage);
+      const removed = oldIntro.filter(page => !pages.some(next => next.id === page.id));
+      const added = intro.filter(page => !previousPages.some(old => old.id === page.id));
+      const before = previousPages;
+      previousPages = pages;
+      const explicit = added.some(page => explicitIntroPagesRef.current.has(page.id));
+      for (const page of added) explicitIntroPagesRef.current.delete(page.id);
+      if (explicit || creatingIntroRef.current || !removed.length && !added.length) return;
+      const oldSteps = animationStepsRef.current;
+      const restored = added.flatMap(page => introStepsForPage(editor, page.id));
+      const ids = new Set(restored.map(step => step.id));
+      const steps = [...restored, ...oldSteps.filter(step => !ids.has(step.id) && !removed.some(page => page.id === step.pageId))]
+        .sort((a, b) => pages.findIndex(page => page.id === a.pageId) - pages.findIndex(page => page.id === b.pageId));
+      animationStepsRef.current = steps;
+      setAnimationSteps(steps);
+      setSubTopicLabels(labels => rebaseIntroLabels(labels, before.map(page => page.id), pages.map(page => page.id), oldSteps, steps));
+      knownPageIdsRef.current = new Set(pages.map(page => page.id));
+      for (const page of added) recentlyDuplicatedPagesRef.current.delete(page.id);
+      markDirty();
+    }, { scope: 'document' });
+  }, [editor, markDirty]);
+
   // Backfill pageId on existing steps that don't have one (runs once on mount)
   useEffect(() => {
     if (!editor) return;
@@ -2144,6 +2309,19 @@ export default function LessonCanvas({
           }
 
           if (sourcePageId) {
+            const borders = { ...guideBordersMapRef.current, [newPageId]: getGuideBordersForPage(sourcePageId).map(origin => ({ ...origin })) };
+            const counts = { ...guideCountMapRef.current, [newPageId]: getGuideCountForPage(sourcePageId) };
+            const selected = { ...activeGuideMapRef.current, [newPageId]: getActiveGuideIndex(sourcePageId) };
+            guideBordersMapRef.current = borders;
+            guideCountMapRef.current = counts;
+            activeGuideMapRef.current = selected;
+            setGuideBordersMap(borders);
+            setGuideCountMap(counts);
+            setActiveGuideMap(selected);
+            if (sceneLayoutRef.current && editor.getCurrentPageId() === newPageId) {
+              const origin = getActiveGuideForPage(newPageId);
+              setSceneCamera(editor, { x: -origin.x, y: -origin.y, z: 1 }, { force: true });
+            }
             setAnimationSteps(prev => {
               const sourceSteps = prev.filter(s => s.pageId === sourcePageId);
               if (sourceSteps.length === 0) return prev;
@@ -2339,6 +2517,21 @@ export default function LessonCanvas({
     if (!globalAudioRef.current || !globalAudioFileName) return;
     globalAudioRef.current.currentTime = 0;
     setGlobalAudioCurrentTime(0);
+    // Play restarts narration at zero; restart visual steps too, including an
+    // intro that was already previewed with the arrow keys.
+    stopStepAudio();
+    setCurrentStep(-1);
+    setRevealedTopicPages(new Set());
+    setRevealedSubtitlePages(new Set());
+    pendingCameraStepRef.current = null;
+    const ed = editorRef.current;
+    const first = animationStepsRef.current.find(step => !excludedPagesRef.current.has(step.pageId || ''));
+    if (ed && first?.pageId) {
+      ed.setCurrentPage(first.pageId as any);
+      const guide = getGuideBordersForPage(first.pageId)[0] || { x: 0, y: 0 };
+      setSceneCamera(ed, first.cameraPosition || { x: -guide.x, y: -guide.y, z: 1 }, { force: true });
+      applyAnimationState(ed, animationStepsRef.current, -1);
+    }
     togglePresentation();
     setTimeout(() => {
       if (globalAudioRef.current) {
@@ -2347,7 +2540,7 @@ export default function LessonCanvas({
         isAudioDrivenRef.current = true;
       }
     }, 1000);
-  }, [globalAudioFileName, togglePresentation]);
+  }, [globalAudioFileName, togglePresentation, applyAnimationState]);
 
   const pauseGlobalAudio = useCallback(() => {
     if (audioCountdownRef.current) {
@@ -2363,21 +2556,10 @@ export default function LessonCanvas({
     if (bgMusicRef.current) bgMusicRef.current.pause();
   }, []);
 
-  const resumeGlobalAudio = useCallback(() => {
-    if (globalAudioRef.current && globalAudioRef.current.paused) {
-      globalAudioRef.current.play().catch(() => {});
-      setGlobalAudioPlaying(true);
-      isAudioDrivenRef.current = true;
-    }
-    if (bgMusicRef.current && bgMusicEnabled && bgMusicRef.current.paused) {
-      bgMusicRef.current.play().catch(() => {});
-    }
-  }, [bgMusicEnabled]);
-
   // ─── Build save data helper ──────────────────────────────────────────────
   const buildSaveData = useCallback((): LessonCanvasData => {
     const doc = editor ? getSnapshot(editor.store).document : (snapshot as any)?.document;
-    const cam = editor?.getCamera();
+    const cam = editor ? getSceneCamera(editor) : undefined;
     return {
       version: 2,
       meta: {
@@ -2403,6 +2585,8 @@ export default function LessonCanvas({
       pageTopicModes,
       pageSubtitleModes,
       bwMode,
+      sceneLayout: sceneLayoutRef.current,
+      activeGuideMap: activeGuideMapRef.current,
       guideBordersMap,
       guideCountMap,
       guideCustomH: guideCustomH || undefined,
@@ -2470,7 +2654,7 @@ export default function LessonCanvas({
       isDirtyRef.current = false;
 
       const doc = getSnapshot(ed.store).document;
-      const cam = ed.getCamera();
+      const cam = getSceneCamera(ed);
       const data: LessonCanvasData = {
         version: 2,
         meta: {
@@ -2496,6 +2680,8 @@ export default function LessonCanvas({
         pageTopicModes: pageTopicModesRef.current,
         pageSubtitleModes: pageSubtitleModesRef.current,
         bwMode,
+        sceneLayout: sceneLayoutRef.current,
+        activeGuideMap: activeGuideMapRef.current,
         guideBordersMap: guideBordersMapRef.current,
         guideCountMap: guideCountMapRef.current,
         guideCustomH: guideCustomHRef.current || undefined,
@@ -2801,8 +2987,8 @@ export default function LessonCanvas({
       }
       {
         const pid = editor.getCurrentPageId() as string;
-        const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
-        editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true });
+        const guide = getActiveGuideForPage(pid);
+        setSceneCamera(editor, { x: -guide.x, y: -guide.y, z: sceneLayoutRef.current ? 1 : 0.75 }, { force: true });
       }
       // Unlock tldraw camera
       editor.setCameraOptions({ isLocked: false });
@@ -2837,7 +3023,7 @@ export default function LessonCanvas({
       moveOriginalPositionsRef.current = {};
       zoomSavedCamerasRef.current = {};
       // Save exact editing camera — restored on unlock and used as presentation start
-      const cam = editor.getCamera();
+      const cam = getSceneCamera(editor);
       editingCameraRef.current = { x: cam.x, y: cam.y, z: cam.z };
       editingPageIdRef.current = editor.getCurrentPageId() as string;
       presentationStartCameraRef.current = { x: cam.x, y: cam.y, z: cam.z };
@@ -2869,7 +3055,7 @@ export default function LessonCanvas({
         // Set camera to first preloaded step's position immediately
         const firstPreloaded = stepsToUse.find(s => s.pageId === firstStepPageId && s.animation === 'none' && s.cameraPosition);
         if (firstPreloaded?.cameraPosition) {
-          editor.setCamera(firstPreloaded.cameraPosition, { force: true });
+          setSceneCamera(editor, firstPreloaded.cameraPosition, { force: true });
         }
       }
 
@@ -3112,10 +3298,10 @@ export default function LessonCanvas({
         editor.setCameraOptions({ isLocked: false });
         if (currentStep < 0 || pageSwitched) {
           // First group or page switch — set camera instantly, no fly-in
-          editor.setCamera(groupStep.cameraPosition, { force: true });
+          setSceneCamera(editor, groupStep.cameraPosition, { force: true });
           editor.setCameraOptions({ isLocked: true });
         } else {
-          editor.setCamera(groupStep.cameraPosition, { force: true, animation: { duration: 800 } });
+          setSceneCamera(editor, groupStep.cameraPosition, { force: true, animation: { duration: 800 } });
           setTimeout(() => editor.setCameraOptions({ isLocked: true }), 850);
         }
       }
@@ -3214,7 +3400,7 @@ export default function LessonCanvas({
       // Set camera immediately after page switch — BEFORE any paint
       // This prevents the flash of tldraw's internal per-page camera
       if (step.cameraPosition) {
-        editor.setCamera(step.cameraPosition, { force: true });
+        setSceneCamera(editor, step.cameraPosition, { force: true });
       }
 
       // Now apply proper animation state and remove the blanket hide
@@ -3227,7 +3413,7 @@ export default function LessonCanvas({
           // Target page has virtual steps — auto-reveal the first one during page switch
           editor.setCameraOptions({ isLocked: true });
           if (step.cameraPosition) {
-            editor.setCamera(step.cameraPosition, { force: true });
+            setSceneCamera(editor, step.cameraPosition, { force: true });
           }
           // Auto-reveal topic if it needs animate, otherwise auto-reveal subtitle
           if (targetTopicNeedsStep) {
@@ -3254,7 +3440,7 @@ export default function LessonCanvas({
     }
 
     // Check if camera will move — if so, delay the step animation
-    const currentCam = editor.getCamera();
+    const currentCam = getSceneCamera(editor);
     const stepCam = step.cameraPosition;
     const cameraWillMove = stepCam && (
       Math.abs(currentCam.x - stepCam.x) > 1 ||
@@ -3483,7 +3669,7 @@ export default function LessonCanvas({
         applyAnimationState(editor, animationSteps, -1);
         if (presentationStartCameraRef.current) {
           editor.setCameraOptions({ isLocked: false });
-          editor.setCamera(presentationStartCameraRef.current, { force: true });
+          setSceneCamera(editor, presentationStartCameraRef.current, { force: true });
           editor.setCameraOptions({ isLocked: true });
         }
         setCurrentStep(-1);
@@ -3513,7 +3699,7 @@ export default function LessonCanvas({
       // Set camera to the previous group's camera position
       if (targetStep.cameraPosition) {
         editor.setCameraOptions({ isLocked: false });
-        editor.setCamera(targetStep.cameraPosition, { force: true, animation: { duration: 800 } });
+        setSceneCamera(editor, targetStep.cameraPosition, { force: true, animation: { duration: 800 } });
         setTimeout(() => editor.setCameraOptions({ isLocked: true }), 850);
       }
 
@@ -3553,7 +3739,7 @@ export default function LessonCanvas({
       applyAnimationState(editor, animationSteps, -1);
       // Restore exact presentation start camera to prevent drift from accumulated nudges
       if (presentationStartCameraRef.current) {
-        editor.setCamera(presentationStartCameraRef.current, { force: true });
+        setSceneCamera(editor, presentationStartCameraRef.current, { force: true });
       }
       setCurrentStep(-1);
       glowFlickeredRef.current.clear();
@@ -3567,7 +3753,7 @@ export default function LessonCanvas({
       if (prevStep < 0) {
         applyAnimationState(editor, animationSteps, -1);
         if (presentationStartCameraRef.current) {
-          editor.setCamera(presentationStartCameraRef.current, { force: true });
+          setSceneCamera(editor, presentationStartCameraRef.current, { force: true });
         }
         setCurrentStep(-1);
         glowFlickeredRef.current.clear();
@@ -3613,7 +3799,7 @@ export default function LessonCanvas({
     // Set camera
     const pageStep = animationSteps.find(s => s.pageId === pageId && s.cameraPosition);
     if (pageStep?.cameraPosition) {
-      editor.setCamera(pageStep.cameraPosition, { force: true });
+      setSceneCamera(editor, pageStep.cameraPosition, { force: true });
     }
 
     requestAnimationFrame(() => {
@@ -3743,7 +3929,6 @@ export default function LessonCanvas({
 
     // ─── NON-ROUGH MODE: use cumulative step durations (existing behavior) ──
     const durations = globalAudioDurationsRef.current;
-    const DEFAULT_DUR = 3;
 
     const pages = editorRef.current?.getPages() || [];
     const pageIdsList = pages.map(p => p.id as string);
@@ -3862,7 +4047,7 @@ export default function LessonCanvas({
         // Found multi-line — split it
         // Position shapes inside the guide area, not at the original shape position
         const pid = editor.getCurrentPageId() as string;
-        const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
+        const guide = getActiveGuideForPage(pid);
 
         // ── LOCK camera to prevent tldraw auto-zoom during split ──
         const savedCamera = { ...editor.getCamera() };
@@ -3874,7 +4059,7 @@ export default function LessonCanvas({
 
         const sidebarFraction = showSidebarRef.current ? 0.85 : 1;
         const screenW = window.innerWidth * sidebarFraction - 6;
-        const guideW = screenW / 0.75;
+        const guideW = sceneLayoutRef.current ? SCENE.width : screenW / 0.75;
 
         // Audio Notes split: each half is its own canvas area
         const PASTE_PADDING = 45;
@@ -3981,9 +4166,9 @@ export default function LessonCanvas({
             setAnimationSteps((prev: AnimationStep[]) => [...prev, ...newSteps]);
           } else if (audioNotesMode && canvasSplitEnabledRef.current && splitPasteSideRef.current === 'left') {
             // Left-side steps: insert before any right-side steps on this page
-            const guideForSort = getGuideBordersForPage(pageId)[0] || { x: 0, y: 0 };
+            const guideForSort = getActiveGuideForPage(pageId);
             const sidebarFrac = showSidebarRef.current ? 0.85 : 1;
-            const gW = (window.innerWidth * sidebarFrac - 6) / 0.75;
+            const gW = sceneLayoutRef.current ? SCENE.width : (window.innerWidth * sidebarFrac - 6) / 0.75;
             const midX = guideForSort.x + gW / 2;
             setAnimationSteps((prev: AnimationStep[]) => {
               // Find the first right-side step on this page
@@ -4140,14 +4325,14 @@ export default function LessonCanvas({
 
   // ─── Auto-resize paste groups on sidebar toggle ──────────────────────────
   useEffect(() => {
-    if (!editor || isLocked) return;
+    if (!editor || isLocked || sceneLayoutRef.current) return;
     const INDENT_WIDTH = 30;
     const GAP = 10;
 
     // Compute current guide width and text width (matching paste padding)
     const sidebarFraction = showSidebarRef.current ? 0.85 : 1;
     const screenW = window.innerWidth * sidebarFraction - 6;
-    const guideW = screenW / 0.75;
+    const guideW = sceneLayoutRef.current ? SCENE.width : screenW / 0.75;
 
     const PASTE_PADDING = 45;
     const SPLIT_GAP = 30;
@@ -4243,7 +4428,7 @@ export default function LessonCanvas({
         }
       }
     }, 150);
-  }, [editor, isLocked, showSidebar, canvasSplitEnabled]);
+  }, [editor, isLocked, showSidebar, canvasSplitEnabled, sceneLayout]);
 
   // Warn before refresh if audio files are loaded in memory
   useEffect(() => {
@@ -4810,6 +4995,10 @@ export default function LessonCanvas({
           if (data.snapshot && editor) {
             loadSnapshot(editor.store, data.snapshot as Parameters<typeof loadSnapshot>[1]);
           }
+          setSceneLayout(data.sceneLayout ?? false);
+          setActiveGuideMap(data.activeGuideMap || {});
+          setGuideBordersMap(data.guideBordersMap || (data.guideBorders ? { '_default': data.guideBorders } : {}));
+          setGuideCountMap(data.guideCountMap || (data.guideCount ? { '_default': data.guideCount } : {}));
           if (data.animationSteps) setAnimationSteps(data.animationSteps);
           if (data.subTopicLabels) setSubTopicLabels(data.subTopicLabels);
           if (data.shapeAnimations) setShapeAnimations(data.shapeAnimations);
@@ -4841,14 +5030,54 @@ export default function LessonCanvas({
     }
   }, [topicSlug, subtopicSlug, applyAnimationState]);
 
+  const getIntroAudioStarts = useCallback(() => {
+    const entries = computeTimedEntries({ steps: animationSteps, pageIds: editor?.getPages().map(page => page.id as string) || [], durations: globalAudioDurations,
+      pageTopicVisible, pageSubtitleVisible, pageTopicModes, pageSubtitleModes });
+    const times = new Map(entries.map(entry => [entry.id, entry.start]));
+    if (roughMode) {
+      let start = 0;
+      for (const step of animationSteps) { if (step.cameraPosition) start = step.audioStartTime ?? start; times.set(step.id, start); }
+    }
+    return times;
+  }, [editor, animationSteps, globalAudioDurations, pageTopicVisible, pageSubtitleVisible, pageTopicModes, pageSubtitleModes, roughMode]);
+  const introPlayback = useIntroPlayback({ locked: isLocked, steps: animationSteps, currentStep, audioPlaying: globalAudioPlaying, audioRef: globalAudioRef, getAudioStarts: getIntroAudioStarts });
+  const handleIntro = () => {
+    if (!editor || isLocked) return;
+    const oldPages = editor.getPages().map(page => page.id as string);
+    const oldSteps = animationStepsRef.current;
+    creatingIntroRef.current = true;
+    let result: ReturnType<typeof createIntro>;
+    try { result = createIntro(editor, animationStepsRef.current, subtopicTitle, id => explicitIntroPagesRef.current.add(id)); }
+    finally { creatingIntroRef.current = false; }
+    setSceneLayout(true);
+    setCanvasMode('reveal');
+    setActiveGuideMap(previous => ({ ...previous, [result.pageId]: 0 }));
+    setGuideBordersMap(previous => ({ ...previous, [result.pageId]: [{ x: 0, y: 0 }] }));
+    setGuideCountMap(previous => ({ ...previous, [result.pageId]: 1 }));
+    if (result.created) {
+      animationStepsRef.current = result.steps;
+      setAnimationSteps(result.steps);
+      setSubTopicLabels(previous => rebaseIntroLabels(previous, oldPages, editor.getPages().map(page => page.id), oldSteps, result.steps));
+      knownPageIdsRef.current.add(result.pageId);
+      recentlyDuplicatedPagesRef.current.delete(result.pageId);
+      knownShapeIdsRef.current = new Set(editor.getCurrentPageShapes().map(shape => shape.id));
+      markDirty();
+    }
+    setShowGlobalTimeline(true);
+    setShowLaserTimeline(false);
+    setSceneCamera(editor, { x: 0, y: 0, z: 1 }, { force: true });
+  };
+
   return (
-    <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}>
+    <div className={`w-full ${isPresenting ? 'h-screen' : 'h-[calc(100vh-78px)]'} flex flex-col overflow-hidden ${bwMode ? 'bw-theme' : ''}`}
+      style={sceneLayout && isPresenting ? { position: 'fixed', inset: 0, zIndex: 60, height: '100dvh', background: '#08090B' } : undefined}>
+      {videoExportPayload && <VideoExportDialog payload={videoExportPayload} onClose={() => setVideoExportPayload(null)} />}
       {/* Dynamic style to hide toggled-off toolbar buttons */}
       {hiddenTools.size > 0 && (
         <style>{[...hiddenTools].map(id => `[data-tool="${id}"] { display: none !important; }`).join('\n')}</style>
       )}
       {/* 16:9 Recording Guide — visible only in presenting mode before first step */}
-      <RecordingGuide visible={isPresenting && isLocked && currentStep === -1 && revealedTopicPages.size === 0 && !(roughMode && audioNotesMode && canvasSplitEnabled) && !quickPlay} />
+      <RecordingGuide visible={!sceneLayout && isPresenting && isLocked && currentStep === -1 && revealedTopicPages.size === 0 && !(roughMode && audioNotesMode && canvasSplitEnabled) && !quickPlay} />
       {/* ─── Main Toolbar ─────────────────────────────────────────────── */}
       {!isPresenting && (
       <div className="flex items-center px-4 py-3 border-b border-white/[0.12] flex-shrink-0 min-w-0" style={{ background: '#0B0D0F', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)' }}>
@@ -4884,13 +5113,13 @@ export default function LessonCanvas({
           {/* Step counter (locked) — hidden when audio auto-play in fullscreen */}
           {isLocked && animationSteps.length > 0 && !(isPresenting && (globalAudioPlaying || audioCountdown !== null)) && (
             <div className={`flex items-center gap-1.5 flex-shrink-0 ${!hideLockButton ? 'mr-2' : ''}`}>
-              <button onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-[#101214] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+              <button data-tool="previousstep" onClick={goPrevious} disabled={currentStep < 0} className="p-1 rounded bg-[#101214] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                 <ChevronLeft className="w-3.5 h-3.5 text-blue-300" />
               </button>
               <span className="text-slate-300 text-xs font-medium min-w-[40px] text-center" style={{ display: isPresenting ? 'none' : undefined }}>
                 {currentStep + 1} / {animationSteps.length}
               </span>
-              <button onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-[#101214] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
+              <button data-tool="nextstep" onClick={goNext} disabled={currentStep >= animationSteps.length - 1} className="p-1 rounded bg-[#101214] border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_6px_rgba(59,130,246,0.2)] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                 <ChevronRight className="w-3.5 h-3.5 text-blue-300" />
               </button>
               {/* Page jump — hidden in fullscreen presenting */}
@@ -4899,7 +5128,7 @@ export default function LessonCanvas({
                   value={currentStep >= 0 ? (animationSteps[currentStep]?.pageId || '') : ''}
                   onChange={(e) => { if (e.target.value) jumpToPage(e.target.value); }}
                   className="ml-1 text-[9px] bg-[#101214] text-blue-300 border border-blue-500/20 rounded px-1 py-1 outline-none cursor-pointer hover:border-blue-400/40"
-                  title="Jump to page"
+                  data-tool="pagejump" title="Jump to page"
                 >
                   <option value="" disabled>Jump to...</option>
                   {editor.getPages()
@@ -4922,7 +5151,7 @@ export default function LessonCanvas({
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm font-bold text-yellow-300 min-w-[20px] text-center animate-pulse">{audioCountdown}</span>
                   <button
-                    onClick={pauseGlobalAudio}
+                    data-tool="playback" onClick={pauseGlobalAudio}
                     className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-red-400 border border-red-500/20 hover:bg-red-500/10 transition-all"
                   >
                     Cancel
@@ -4931,27 +5160,19 @@ export default function LessonCanvas({
               ) : globalAudioPlaying ? (
                 /* Audio playing */
                 <button
-                  onClick={pauseGlobalAudio}
+                  data-tool="playback" onClick={pauseGlobalAudio}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:bg-blue-500/25 transition-all"
                 >
                   ⏸ Pause
                 </button>
               ) : (
                 <button
-                  onClick={quickPlay ? startQuickPlay : startAudioWithCountdown}
+                  data-tool="playback" onClick={quickPlay ? startQuickPlay : startAudioWithCountdown}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)] transition-all"
                 >
                   ▶ Play
                 </button>
               )}
-              {/* Quick Play toggle */}
-              <button
-                onClick={() => setQuickPlay(v => !v)}
-                className={`px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all ${quickPlay ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'text-slate-500 border border-[#191C20] hover:text-amber-300 hover:border-amber-500/30'}`}
-                title={quickPlay ? 'Quick Play ON' : 'Quick Play OFF'}
-              >
-                ⚡
-              </button>
             </div>
           )}
 
@@ -4959,7 +5180,7 @@ export default function LessonCanvas({
           {isLocked && !isPresenting && bgMusicLoaded && (
             <div className="flex items-center gap-1.5 flex-shrink-0">
               <button
-                onClick={() => setBgMusicEnabled(v => !v)}
+                data-tool="bgmusic" onClick={() => setBgMusicEnabled(v => !v)}
                 className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${
                   bgMusicEnabled
                     ? 'text-purple-300 bg-purple-500/15 border border-purple-500/30'
@@ -4972,7 +5193,7 @@ export default function LessonCanvas({
               {bgMusicEnabled && (
                 <>
                   <button
-                    onClick={() => setBgMusicLoop(v => !v)}
+                    data-tool="bgmusicloop" onClick={() => setBgMusicLoop(v => !v)}
                     className={`px-1.5 py-1 rounded text-[9px] transition-all ${
                       bgMusicLoop
                         ? 'text-blue-300 bg-blue-500/10 border border-blue-500/20'
@@ -4983,7 +5204,7 @@ export default function LessonCanvas({
                     🔁
                   </button>
                   <input
-                    type="range"
+                    data-tool="bgmusicvolume" type="range"
                     min={0}
                     max={100}
                     step={5}
@@ -4993,7 +5214,7 @@ export default function LessonCanvas({
                     style={{ accentColor: '#a78bfa' }}
                     title={`Volume: ${Math.round(bgMusicVolume * 100)}%`}
                   />
-                  <span className="text-[8px] text-slate-500 w-6">{Math.round(bgMusicVolume * 100)}%</span>
+                  <span data-tool="bgmusicvolume" className="text-[8px] text-slate-500 w-6">{Math.round(bgMusicVolume * 100)}%</span>
                 </>
               )}
             </div>
@@ -5001,10 +5222,8 @@ export default function LessonCanvas({
 
           {/* Lock/Unlock button removed from scrollable area — placed below as fixed */}
 
-          {/* Save + auto-save indicator */}
+          {/* Toolbar visibility settings — editing only */}
           {!isLocked && (
-            <>
-            {/* Tools toggle dropdown */}
             <div className="relative flex-shrink-0">
               <button
                 onClick={() => setShowToolsDropdown(v => !v)}
@@ -5016,15 +5235,22 @@ export default function LessonCanvas({
               {showToolsDropdown && (
                 <div className="fixed z-[9999] bg-[#101214] border border-[#2a2a4e] rounded-lg shadow-xl p-1.5 min-w-[160px] max-h-[350px] overflow-y-auto" style={{ top: 'auto', marginTop: 4 }} ref={(el) => { if (el) { const btn = el.parentElement?.querySelector('button'); if (btn) { const rect = btn.getBoundingClientRect(); el.style.top = (rect.bottom + 4) + 'px'; el.style.left = rect.left + 'px'; } } }} onClick={(e) => e.stopPropagation()}>
                   <div className="text-[8px] text-slate-500 uppercase tracking-wider px-2 py-1 mb-0.5">Toggle tools</div>
+                  {!toolbarPreferencesReady && <p className="text-[10px] text-slate-400 px-2 py-1">Loading saved choices…</p>}
+                  {toolbarPreferencesError && <p role="alert" className="text-[10px] text-amber-300 px-2 py-1 max-w-[240px]">{toolbarPreferencesError}</p>}
                   {TOOLBAR_TOOLS.map(tool => (
                     <label key={tool.id} className="flex items-center gap-2 px-2 py-1 hover:bg-white/[0.04] rounded cursor-pointer">
-                      <input type="checkbox" checked={!hiddenTools.has(tool.id)} onChange={() => toggleTool(tool.id)} className="w-2.5 h-2.5 accent-blue-500 cursor-pointer" />
+                      <input type="checkbox" disabled={!toolbarPreferencesReady} checked={!hiddenTools.has(tool.id)} onChange={() => toggleTool(tool.id)} className="w-2.5 h-2.5 accent-blue-500 cursor-pointer" />
                       <span className={`text-[10px] ${hiddenTools.has(tool.id) ? 'text-slate-600 line-through' : 'text-slate-300'}`}>{tool.label}</span>
                     </label>
                   ))}
                 </div>
               )}
             </div>
+          )}
+          {/* Save + auto-save indicator */}
+          {!isLocked && (
+            <>
+            <button data-tool="intro" onClick={handleIntro} disabled={!editor || showPublicCanvas} title="Create or open Page 1 / Guide 1 intro" className="px-3 py-1.5 rounded-lg text-xs font-semibold text-violet-200 border border-violet-400/40 bg-violet-500/10 disabled:opacity-40 flex-shrink-0">⚡ Intro</button>
             <button data-tool="save" onClick={handleSave} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isSaved ? 'bg-[#101214] text-blue-400/60 border border-blue-500/10' : 'bg-blue-500/15 text-blue-300 border border-blue-500/30 hover:border-blue-400/50 hover:shadow-[0_0_8px_rgba(59,130,246,0.2)]'}`}>
               <Save className="w-3.5 h-3.5" />{isSaved ? 'Saved' : 'Save'}
             </button>
@@ -5040,10 +5266,10 @@ export default function LessonCanvas({
           {/* Export / Import */}
           {!isLocked && (
             <>
-              <button data-tool="save" onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as JSON">
+              <button data-tool="exportjson" onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as JSON">
                 <Download className="w-3.5 h-3.5" />
               </button>
-              <button data-tool="save" onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as PNG">
+              <button data-tool="exportpng" onClick={handleExportPng} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all flex-shrink-0" title="Export as PNG">
                 <ImageDown className="w-3.5 h-3.5" />
               </button>
               <button data-tool="pdf" onClick={handleExportPdf} disabled={isExportingPdf} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${isExportingPdf ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 cursor-wait' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`} title="Export as PDF (all pages)">
@@ -5078,7 +5304,7 @@ export default function LessonCanvas({
                 <Boxes className="w-3 h-3" />
                 Nodes
               </button>
-              <button data-tool="sidebar" onClick={() => { setShowSidebar(s => !s); markDirty(); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
+              <button data-tool="sidebar" disabled={sceneLayout} onClick={() => { setShowSidebar(s => !s); markDirty(); }} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showSidebar ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:border-slate-400/40'}`} title={sceneLayout ? 'The progress panel is hidden in full-frame scenes' : showSidebar ? 'Hide sidebar' : 'Show sidebar'}>
                 <PanelRight className="w-3 h-3" />
               </button>
               <button
@@ -5161,6 +5387,33 @@ export default function LessonCanvas({
                 <FlipHorizontal2 className="w-3 h-3" />
                 Flip
               </button>
+              {sceneLayout && (
+                <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  data-tool="fitimage" onClick={() => fitSelectedImage()}
+                  disabled={!editor || selectedShapeIds.length !== 1 || editor.getShape(selectedShapeIds[0] as any)?.type !== 'image'}
+                  title={`Fit the selected image completely inside Guide ${activeGuideIndex + 1} (1600 × 900), without cropping`}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-cyan-300 border border-cyan-500/30 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Frame className="w-3 h-3" />Fit image to Guide {activeGuideIndex + 1}
+                </button>
+                {getGuideCountForPage(currentGuidePageId) > 1 && (
+                  <select
+                    data-tool="fitimageguide" aria-label="Fit image to another guide"
+                    title="Choose a guide to immediately fit the selected image into it"
+                    value=""
+                    onChange={event => fitSelectedImage(Number(event.target.value))}
+                    disabled={!editor || selectedShapeIds.length !== 1 || editor.getShape(selectedShapeIds[0] as any)?.type !== 'image'}
+                    className="px-2 py-1.5 rounded-lg text-xs text-cyan-300 bg-[#101214] border border-cyan-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <option value="" disabled>Choose guide…</option>
+                    {Array.from({ length: getGuideCountForPage(currentGuidePageId) }, (_, index) => (
+                      <option key={index} value={index}>Fit image to Guide {index + 1}</option>
+                    ))}
+                  </select>
+                )}
+                </div>
+              )}
               {/* Guide border toggle + add/remove + dimension panel */}
               <div className="relative flex-shrink-0">
                 <button
@@ -5175,24 +5428,26 @@ export default function LessonCanvas({
               {showGuideBorder && (
                 <>
                   <button
-                    onClick={() => { const pid = editor?.getCurrentPageId() as string || ''; setGuideCountMap(prev => ({ ...prev, [pid]: (prev[pid] ?? prev['_default'] ?? 1) + 1 })); markDirty(); }}
+                    data-tool="addguide" onClick={addGuide}
                     className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-cyan-300 border border-cyan-500/20 hover:border-cyan-400/40 hover:shadow-[0_0_8px_rgba(6,182,212,0.15)] transition-all flex-shrink-0"
                     title="Add guide border"
                   >+</button>
                   {getGuideCountForPage(editor?.getCurrentPageId() as string || '') > 1 && (
                     <button
-                      onClick={() => { const pid = editor?.getCurrentPageId() as string || ''; setGuideCountMap(prev => ({ ...prev, [pid]: Math.max(1, (prev[pid] ?? prev['_default'] ?? 1) - 1) })); markDirty(); }}
+                      data-tool="removeguide" onClick={removeLastGuide}
                       className="px-2 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-red-400 border border-red-500/20 hover:border-red-400/40 hover:shadow-[0_0_8px_rgba(239,68,68,0.15)] transition-all flex-shrink-0"
                       title="Remove last guide border"
                     >−</button>
                   )}
                   {/* Height settings button */}
                   <button
+                    disabled={sceneLayout}
                     onClick={() => setShowGuidePanel(v => !v)}
                     className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showGuidePanel ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30' : 'bg-[#101214] text-slate-400 border border-[#191C20] hover:text-cyan-300 hover:border-cyan-500/30'}`}
-                    title="Guide height presets"
+                    data-tool="guideheight" title="Guide height presets"
                   >
-                    H:{guideCustomH || autoGuidePageH}
+                    {sceneLayout ? '1600 × 900' : `H:${guideCustomH || autoGuidePageH}`}
+
                   </button>
                   {/* Height panel dropdown */}
                   {showGuidePanel && (
@@ -5345,17 +5600,21 @@ export default function LessonCanvas({
                   if (!editor) return;
                   const pid = editor.getCurrentPageId() as string;
                   const pageBorders = getGuideBordersForPage(pid);
+                  if (sceneLayout) {
+                    selectSceneGuide(getActiveGuideIndex(pid));
+                    return;
+                  }
                   if (pageBorders.length <= 1) {
                     const guide = pageBorders[0] || { x: 0, y: 0 };
-                    editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true, animation: { duration: 300 } });
+                    setSceneCamera(editor, { x: -guide.x, y: -guide.y, z: sceneLayoutRef.current ? 1 : 0.75 }, { force: true, animation: { duration: 300 } });
                   } else {
                     setShowGuideZoomPicker(v => !v);
                   }
                 }}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)] transition-all"
-                title="Set zoom to 75% and frame guide"
+                data-tool="viewguide" title={sceneLayout ? `Frame Guide ${activeGuideIndex + 1} in the preview` : "Set zoom to 75% and frame guide"}
               >
-                75%
+                {sceneLayout ? `View Guide ${activeGuideIndex + 1}` : '75%'}
               </button>
               {showGuideZoomPicker && getGuideCountForPage(editor?.getCurrentPageId() as string || '') > 1 && (
                 <div className="fixed z-[9999] bg-[#101214] border border-[#2a2a4e] rounded-lg shadow-xl p-1 min-w-[120px]" ref={(el) => { if (el) { const btn = el.parentElement?.querySelector('button'); if (btn) { const rect = btn.getBoundingClientRect(); el.style.top = (rect.bottom + 4) + 'px'; el.style.left = rect.left + 'px'; } } }} onClick={(e) => e.stopPropagation()}>
@@ -5367,7 +5626,7 @@ export default function LessonCanvas({
                         const pid = editor.getCurrentPageId() as string;
                         const pageBorders = getGuideBordersForPage(pid);
                         const guide = pageBorders[i] || { x: 0, y: 0 };
-                        editor.setCamera({ x: -guide.x, y: -guide.y, z: 0.75 }, { force: true, animation: { duration: 300 } });
+                        setSceneCamera(editor, { x: -guide.x, y: -guide.y, z: sceneLayoutRef.current ? 1 : 0.75 }, { force: true, animation: { duration: 300 } });
                         setShowGuideZoomPicker(false);
                       }}
                       className="w-full text-left px-3 py-1.5 text-[10px] font-medium text-slate-300 hover:text-blue-300 hover:bg-white/[0.04] rounded transition-colors"
@@ -5451,7 +5710,7 @@ export default function LessonCanvas({
                   markDirty();
                 }}
                 className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageTopicVisible.has(editor.getCurrentPageId() as string) ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-[0_0_10px_rgba(244,63,94,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-                title="Show/hide topic for this page"
+                data-tool="topic" title="Show/hide topic for this page"
               >
                 Topic
               </button>
@@ -5468,15 +5727,15 @@ export default function LessonCanvas({
                   markDirty();
                 }}
                 className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${editor && pageSubtitleVisible.has(editor.getCurrentPageId() as string) ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_10px_rgba(20,184,166,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-                title="Show/hide subtopic for this page"
+                data-tool="subtitle" title="Show/hide subtopic for this page"
               >
                 Subtopic
               </button>
             </>
           )}
-          {/* Public canvas toggle — hidden when presenting */}
-          {!isPresenting && (
-            <button onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showPublicCanvas ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
+          {/* Public canvas toggle — editing only */}
+          {!isPresenting && !isLocked && (
+            <button data-tool="public" onClick={() => setShowPublicCanvas(!showPublicCanvas)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${showPublicCanvas ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}>
               <Eye className="w-3 h-3" />
               Public
             </button>
@@ -5555,7 +5814,7 @@ export default function LessonCanvas({
             >
               ☁️ Draw Highlight R
             </button>
-            <div className="flex items-center gap-0.5 px-1" style={{ display: highlightDrawing ? undefined : 'none' }}>
+            <div data-tool="highlightcolors" className="flex items-center gap-0.5 px-1" style={{ display: highlightDrawing ? undefined : 'none' }}>
               {HIGHLIGHT_COLORS.map(c => (
                 <button
                   key={c.hex}
@@ -5732,7 +5991,7 @@ export default function LessonCanvas({
                 });
               }}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${audioNotesMode ? 'bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-[0_0_10px_rgba(139,92,246,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-              title={audioNotesMode ? 'Switch back to Rough canvas' : 'Switch to Audio Notes canvas'}
+              data-tool="audionotes" title={audioNotesMode ? 'Switch back to Rough canvas' : 'Switch to Audio Notes canvas'}
             >
               🎵 Audio Notes
             </button>
@@ -5747,7 +6006,7 @@ export default function LessonCanvas({
                   const pid = editor.getCurrentPageId() as string;
                   const guide = getGuideBordersForPage(pid)[0] || { x: 0, y: 0 };
                   const sidebarFrac = showSidebarRef.current ? 0.85 : 1;
-                  const gW = (window.innerWidth * sidebarFrac - 6) / 0.75;
+                  const gW = sceneLayoutRef.current ? SCENE.width : (window.innerWidth * sidebarFrac - 6) / 0.75;
                   const midX = guide.x + gW / 2;
 
                   // Check if any right-side shapes exist
@@ -5776,7 +6035,7 @@ export default function LessonCanvas({
                 }
               }}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${canvasSplitEnabled ? 'bg-violet-500/15 text-violet-300 border border-violet-500/30 shadow-[0_0_10px_rgba(139,92,246,0.2)]' : 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'}`}
-              title="Split canvas into left/right halves"
+              data-tool="splitter" title="Split canvas into left/right halves"
             >
               ✂ Canvas Splitter
             </button>
@@ -5786,7 +6045,7 @@ export default function LessonCanvas({
             <button
               onClick={() => setSplitPasteSide(s => s === 'left' ? 'right' : 'left')}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${splitPasteSide === 'left' ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]'}`}
-              title={`Paste target: ${splitPasteSide} side`}
+              data-tool="pasteside" title={`Paste target: ${splitPasteSide} side`}
             >
               {splitPasteSide === 'left' ? '◧ Left' : '◨ Right'}
             </button>
@@ -5795,6 +6054,50 @@ export default function LessonCanvas({
           )}
         </div>
 
+        {isLocked && <button
+          data-tool="video"
+          disabled={!sceneLayout || !editor || showPublicCanvas}
+          onClick={() => {
+            stopStepAudio();
+            pauseGlobalAudio();
+            const lesson = JSON.parse(JSON.stringify(buildSaveData())) as LessonCanvasData;
+            // Live move effects create temporary clones. Remove those from the
+            // export snapshot and restore only its original shapes, never the editor.
+            const store = (lesson.snapshot as { document?: { store?: Record<string, { opacity: number }> } }).document?.store;
+            if (store) for (const records of Object.values(moveOriginalPositionsRef.current)) for (const record of records) {
+              if (record.cloneId) delete store[record.cloneId];
+              if (store[record.originalId]) store[record.originalId].opacity = 1;
+            }
+            setVideoExportPayload({ lesson, siteId, options: { narration: true, tailSeconds: 1, background: { enabled: bgMusicEnabled, volume: bgMusicVolume, loop: bgMusicLoop } } });
+          }}
+          title={sceneLayout ? 'Render a 1920 × 1080 MP4 with audio' : 'Enable 16:9 Scene to export video'}
+          className="ml-2 px-3 py-2 rounded-lg text-xs font-medium text-cyan-200 border border-cyan-500/40 disabled:opacity-40 flex-shrink-0"
+        >Export video</button>}
+        <button
+          data-tool="scene"
+          hidden
+          style={{ display: 'none' }}
+          onClick={() => { setSceneLayout(value => !value); markDirty(); }}
+          aria-pressed={sceneLayout}
+          title="Fixed 16:9 presentation: canvas and topic progress. Enable before arranging your images."
+          className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium flex-shrink-0 ml-2 border ${sceneLayout ? 'text-cyan-300 border-cyan-500/40 bg-cyan-500/10' : 'text-slate-300 border-white/10'}`}
+        >
+          <Frame className="w-3.5 h-3.5" />16:9 Scene
+        </button>
+        {sceneLayout && !showPublicCanvas && !isLocked && (
+          <select
+            data-tool="sceneguide" aria-label="Active scene guide"
+            value={activeGuideIndex}
+            disabled={!editor}
+            onChange={event => selectSceneGuide(Number(event.target.value))}
+            className="ml-2 px-2 py-2 rounded-lg text-xs text-amber-200 bg-[#101214] border border-amber-400/40 flex-shrink-0"
+            title="Select the guide to preview and fit images into"
+          >
+            {Array.from({ length: getGuideCountForPage(currentGuidePageId) }, (_, index) => (
+              <option key={index} value={index}>Guide {index + 1}</option>
+            ))}
+          </select>
+        )}
         {/* Lock/Unlock — fixed, always visible, not inside scrollable area */}
         {!hideLockButton && !isPresenting && !showPublicCanvas && (
           <button onClick={toggleLock} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all flex-shrink-0 outline-none focus:outline-none ml-2 ${isLocked ? 'bg-[#101214] text-blue-300 border border-blue-500/20 hover:border-blue-400/40 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:border-emerald-400/50 hover:shadow-[0_0_8px_rgba(16,185,129,0.2)]'}`}>
@@ -5833,11 +6136,22 @@ export default function LessonCanvas({
       )}
 
       {/* ─── Canvas + Sidebar ─────────────────────────────────────── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div ref={stageHostRef} className="flex-1 relative min-h-0 overflow-hidden" style={{ background: '#08090B', overflow: 'clip' }}>
+      <div
+        data-scene-scale={sceneLayout ? stageScale : undefined}
+        data-testid={sceneLayout ? 'lesson-scene' : undefined}
+        className={`flex overflow-hidden ${sceneLayout ? 'scene-composition' : ''}`}
+        style={sceneLayout ? {
+          position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+          width: SCENE.width * stageScale, height: SCENE.height * stageScale,
+          background: 'var(--scene-matte)', overflow: 'clip',
+        } : { width: '100%', height: '100%' }}
+      >
         {/* Canvas column — full width when sidebar hidden, 85% when visible */}
-        <div className={`${showSidebar ? 'w-[85%]' : 'w-full'} flex flex-col overflow-hidden`}>
+        <div className={`${sceneLayout ? '' : showSidebar ? 'w-[85%]' : 'w-full'} flex flex-col overflow-hidden`}
+          style={sceneLayout ? { width: SCENE.width * stageScale, flexShrink: 0 } : undefined}>
           {/* Topic / Subtitle strip above canvas — per page */}
-          {editor && (() => {
+          {!sceneLayout && editor && (() => {
             const pid = editor.getCurrentPageId() as string;
             const hasTopic = pageTopicVisible.has(pid);
             const hasSubtitle = pageSubtitleVisible.has(pid);
@@ -6012,12 +6326,15 @@ export default function LessonCanvas({
           })()}
 
           {/* Canvas Area */}
-          <div className="flex-1 relative" style={{ overflow: 'hidden', minHeight: 0 }}>
+          <div className={`${sceneLayout ? '' : 'flex-1'} relative`} style={{ overflow: 'hidden', minHeight: 0,
+            ...(sceneLayout ? { width: SCENE.width * stageScale, height: SCENE.height * stageScale, flexShrink: 0 } : {}),
+          }}>
             <div id="canvas-export-area" className="absolute inset-0" onClick={() => { setEditingHighlightId(null); setEditingArrowId(null); setHighlightedStepId(null); }}>
           {/* tldraw canvas — always visible */}
           <div className={`w-full h-full ${isLocked ? 'canvas-locked' : ''} ${!isLocked && !showAnimBar ? 'hide-style-panel' : ''} ${showGlobalTimeline ? 'hide-tldraw-toolbar' : ''} ${canvasReady ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`} style={(highlightDrawing || maskDrawing || freehandMaskDrawing) ? { pointerEvents: 'none', willChange: 'auto' } : undefined}>
             <CanvasEditor
               snapshot={snapshot}
+              introPlayback={introPlayback}
               onEditorReady={handleEditorReady}
               onDocumentChange={markDirty}
               onSeedCanvas={handleSeedCanvas}
@@ -6185,100 +6502,34 @@ export default function LessonCanvas({
                   const hasFreehandPath = isMask && region.path && region.path.length > 2;
                   let showRegion = true;
                   let maskRevealing = false;
-                  console.log('[DEBUG0] START region render', { regionId: region.id, stepId: region.stepId, isLocked, currentStep, type: region.type });
                   if (isLocked) {
                     const stepIdx = animationSteps.findIndex(s => s.id === region.stepId);
-                    console.log('[DEBUG0a] stepIdx lookup', { regionStepId: region.stepId, stepIdx, currentStep, totalSteps: animationSteps.length });
                     if (isMask) {
                       // Mask: visible UNTIL step plays, then radial-reveal animation removes it
                       const justRevealed = stepIdx >= 0 && stepIdx === currentStep;
                       const alreadyRevealed = stepIdx >= 0 && stepIdx < currentStep;
-                      console.log('[DEBUG0b] mask logic', { stepIdx, currentStep, justRevealed, alreadyRevealed });
-                      if (alreadyRevealed) { showRegion = false; console.log('[DEBUG0c] alreadyRevealed set showRegion=false'); }
-                      else if (justRevealed) { showRegion = true; maskRevealing = true; console.log('[DEBUG0d] justRevealed set showRegion=true maskRevealing=true'); }
-                      else { showRegion = true; console.log('[DEBUG0e] future step set showRegion=true'); }
+                      if (alreadyRevealed) { showRegion = false; }
+                      else if (justRevealed) { showRegion = true; maskRevealing = true; }
+                      else { showRegion = true; }
                     } else {
                       // Highlight: hidden until step plays, then visible
                       showRegion = stepIdx >= 0 && stepIdx <= currentStep;
-                      console.log('[DEBUG0f] highlight logic', { stepIdx, currentStep, showRegion });
                     }
-                  } else {
-                    console.log('[DEBUG0g] not locked, showRegion=true by default');
                   }
-                  const isInteractive = !isLocked && !highlightDrawing && !maskDrawing;
-                  console.log('[DEBUG0h] isInteractive', { isLocked, highlightDrawing, maskDrawing });
                   const isRegionHighlighted = !isLocked && highlightedStepId === region.stepId;
-                  console.log('[DEBUG0i] isRegionHighlighted', { highlightedStepId, regionStepId: region.stepId, isRegionHighlighted });
                   const isSwipeMask = isMask && hasFreehandPath && region.revealType === 'swipe';
-                  console.log('[DEBUG1] isSwipeMask check', { isMask, hasFreehandPath, revealType: region.revealType, result: isSwipeMask });
-                  console.log('[DEBUG1] isSwipeMask check', { isMask, hasFreehandPath, revealType: region.revealType, result: isSwipeMask });
                   const isFadeMask = isMask && hasFreehandPath && region.revealType !== 'swipe';
-                  console.log('[DEBUG2] isFadeMask check', { isMask, hasFreehandPath, revealType: region.revealType, result: isFadeMask });
                   const polygonClip = hasFreehandPath ? `polygon(${region.path!.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})` : undefined;
-                  console.log('[DEBUG3] polygonClip', { hasFreehandPath, clip: polygonClip ? 'defined' : 'undefined' });
-                  // Swipe animation: only when locked AND revealing (swipeHidden = true)
-                  const swipeHidden = isSwipeMask && isLocked && maskRevealing;
-                  console.log('[DEBUG4] swipeHidden calc', { isSwipeMask, isLocked, maskRevealing, result: swipeHidden });
-                  const swipeVisibleClass = isSwipeMask && isLocked && !maskRevealing && !showRegion ? 'mask-swipe-visible' : '';
-                  console.log('[DEBUG5] swipeVisibleClass calc', { isSwipeMask, isLocked, maskRevealing, showRegion, result: swipeVisibleClass });
-                  const swipeHiddenClass = isSwipeMask && isLocked && maskRevealing ? 'mask-swipe-hidden' : '';
-                  console.log('[DEBUG6] swipeHiddenClass calc', { isSwipeMask, isLocked, maskRevealing, result: swipeHiddenClass });
-                  console.log('[DEBUG7] FINAL CLASSES', { swipeVisibleClass, swipeHiddenClass, isSwipeMask });
-
-                  // Swipe progress: 0 = B&W fully visible, 1 = B&W fully removed
-                  const currentSwipeProgress = isSwipeMask ? (isLocked ? (swipeProgress[region.id] ?? 0) : 1) : 0;
-
-                  // Compute swipe-clipped polygon: clip original polygon to x >= progress
-                  // This shrinks the B&W area from left to right as progress goes 0→1
-                  let swipeClip = polygonClip;
-                  if (isSwipeMask && currentSwipeProgress > 0 && currentSwipeProgress < 1 && region.path) {
-                    const xMin = currentSwipeProgress; // normalized 0-1
-                    const pts = region.path;
-                    const clipped: { x: number; y: number }[] = [];
-                    for (let i = 0; i < pts.length; i++) {
-                      const p1 = pts[i];
-                      const p2 = pts[(i + 1) % pts.length];
-                      const p1In = p1.x >= xMin;
-                      const p2In = p2.x >= xMin;
-                      if (p1In && p2In) {
-                        clipped.push(p2);
-                      } else if (p1In && !p2In) {
-                        const t = (xMin - p1.x) / (p2.x - p1.x);
-                        clipped.push({ x: xMin, y: p1.y + t * (p2.y - p1.y) });
-                      } else if (!p1In && p2In) {
-                        const t = (xMin - p1.x) / (p2.x - p1.x);
-                        clipped.push({ x: xMin, y: p1.y + t * (p2.y - p1.y) });
-                        clipped.push(p2);
-                      }
-                      // both outside: skip
-                    }
-                    if (clipped.length >= 3) {
-                      swipeClip = `polygon(${clipped.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})`;
-                    } else {
-                      swipeClip = 'polygon(0% 0%, 0% 0%, 0% 0%)'; // degenerate = hidden
-                    }
-                  }
+                  const swipeStepIndex = animationSteps.findIndex(step => step.id === region.stepId);
+                  const swipeTime = swipeElapsed[region.id] ?? (swipeStepIndex >= 0 && swipeStepIndex < currentStep ? SWIPE_GLOW_SECONDS : -1);
 
                   return (
                     <div key={region.id}>
                       {isSwipeMask && isLocked ? (
-                        // Single div: animated polygon clip + backdropFilter = B&W swipe
-                        <div
-                          className="absolute pointer-events-none"
-                          data-region-id={region.id}
-                          style={{
-                            left: (imgBounds.x + cam.x) * cam.z,
-                            top: (imgBounds.y + cam.y) * cam.z,
-                            width: imgBounds.w * cam.z,
-                            height: imgBounds.h * cam.z,
-                            background: 'transparent',
-                            backdropFilter: 'grayscale(1)',
-                            WebkitBackdropFilter: 'grayscale(1)',
-                            clipPath: currentSwipeProgress >= 1 ? 'polygon(0% 0%, 0% 0%, 0% 0%)' : swipeClip,
-                            borderRadius: 0,
-                            zIndex: 99990,
-                            display: (!showRegion && !maskRevealing) || currentSwipeProgress >= 1 ? 'none' : undefined,
-                          }}
+                        <FreehandSwipeMask
+                          path={region.path!} elapsed={swipeTime} regionId={region.id}
+                          left={(imgBounds.x + cam.x) * cam.z} top={(imgBounds.y + cam.y) * cam.z}
+                          width={imgBounds.w * cam.z} height={imgBounds.h * cam.z} zIndex={99990}
                         />
                       ) : (
                       region.shape === 'cloud' && !isMask && !hasFreehandPath ? (
@@ -6400,7 +6651,7 @@ export default function LessonCanvas({
                       if (cw < 2 || ch < 2) return;
                       const regionId = `hl-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-hl`;
                       const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: hexToRgba(highlightColor, 0.55), stepId, pageId: pid, ...(cloudHighlightModeRef.current ? { shape: 'cloud' as const } : {}) };
-                      const camNow = editor.getCamera();
+                      const camNow = getSceneCamera(editor);
                       const newStep: AnimationStep = { id: stepId, shapeIds: [targetImg.id as string], animation: 'appear' as AnimationType, duration: 100, label: 'Highlight', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: camNow.x, y: camNow.y, z: camNow.z } };
                       pendingHighlightsRef.current.push({ region: newRegion, step: newStep });
                       setHighlightRegions(prev => [...prev, newRegion]);
@@ -6435,7 +6686,7 @@ export default function LessonCanvas({
                       if (cw < 2 || ch < 2) return;
                       const regionId = `mask-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-mask`;
                       const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: (cx-imgBounds.x)/imgBounds.w, y: (cy-imgBounds.y)/imgBounds.h, w: cw/imgBounds.w, h: ch/imgBounds.h, color: '#1a1a1a', stepId, pageId: pid, type: 'mask' };
-                      const camNow = editor.getCamera();
+                      const camNow = getSceneCamera(editor);
                       const newStep: AnimationStep = { id: stepId, shapeIds: [targetImg.id as string], animation: 'appear' as AnimationType, duration: 100, label: 'Paint B&W', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: camNow.x, y: camNow.y, z: camNow.z } };
                       setHighlightRegions(prev => [...prev, newRegion]);
                       setAnimationSteps(prev => [...prev, newStep]);
@@ -6492,7 +6743,7 @@ export default function LessonCanvas({
                       }));
                       const regionId = `mask-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, stepId = `step-${Date.now()}-mask`;
                       const newRegion: HighlightRegion = { id: regionId, imageShapeId: targetImg.id as string, x: 0, y: 0, w: 1, h: 1, color: '#1a1a1a', stepId, pageId: pid, type: 'mask', path: normalizedPath, revealType: freehandMaskDrawingRef.current === 'swipe' ? 'swipe' : 'fade' };
-                      const camNow = editor.getCamera();
+                      const camNow = getSceneCamera(editor);
                       const newStep: AnimationStep = { id: stepId, shapeIds: [targetImg.id as string], animation: 'appear' as AnimationType, duration: 100, label: 'Paint B&W', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: camNow.x, y: camNow.y, z: camNow.z } };
                       setHighlightRegions(prev => [...prev, newRegion]);
                       setAnimationSteps(prev => [...prev, newStep]);
@@ -6508,7 +6759,6 @@ export default function LessonCanvas({
                   const screenY = (arrow.y + cam.y) * cam.z;
                   let showArrow = true;
                   let arrowBouncing = false;
-                  let arrowFadingOut = false;
                   if (isLocked) {
                     const stepIdx = animationSteps.findIndex(s => s.id === arrow.stepId);
                     if (stepIdx < 0 || stepIdx > currentStep) { showArrow = false; }
@@ -6573,7 +6823,7 @@ export default function LessonCanvas({
                     const arrowId = `ptr-${Date.now()}-${Math.random().toString(36).slice(2,5)}`;
                     const stepId = `step-${Date.now()}-ptr`;
                     const newArrow: PointerArrow = { id: arrowId, x: px, y: py, rotation: 315, stepId, pageId: pid, keepVisible: true, keepDuration: 5 };
-                    const newStep: AnimationStep = { id: stepId, shapeIds: [], animation: 'appear' as AnimationType, duration: 100, label: 'Pointer', action: 'enter' as StepAction, pageId: pid, cameraPosition: { x: cam.x, y: cam.y, z: cam.z } };
+                    const newStep: AnimationStep = { id: stepId, shapeIds: [], animation: 'appear' as AnimationType, duration: 100, label: 'Pointer', action: 'enter' as StepAction, pageId: pid, cameraPosition: getSceneCamera(editor) };
                     setPointerArrows(prev => [...prev, newArrow]);
                     setAnimationSteps(prev => [...prev, newStep]);
                     markDirty();
@@ -6679,16 +6929,17 @@ export default function LessonCanvas({
 
             const screenH = fullscreenTotalH - toolbarHeight - stripHeight - 47;
             // Width: ALWAYS = screen width / 0.75 (fixed, never changes)
-            const guidePageW = screenW / 0.75;
+            const guidePageW = sceneLayout ? SCENE.width : screenW / 0.75;
             // Height: custom value is TOTAL space in page units (same unit as autoGuidePageH).
             // Strips eat into it — convert strip from screen pixels to page units first.
-            const guidePageH = guideCustomH
+            const guidePageH = sceneLayout ? SCENE.height : guideCustomH
               ? guideCustomH - (stripHeight / 0.75)   // custom minus strip (converted to page units)
               : screenH / 0.75;                        // auto: screenH already has strip subtracted
             const cam = tldrawCamera;
 
             const startGuideDrag = (e: React.MouseEvent, idx: number) => {
               e.stopPropagation(); e.preventDefault();
+              if (sceneLayout) selectSceneGuide(idx, false);
               const pageBorders = getGuideBordersForPage(pid);
               guideDragRef.current = { idx, startX: e.clientX, startY: e.clientY, origOffX: pageBorders[idx].x, origOffY: pageBorders[idx].y };
               const c = tldrawCamera;
@@ -6714,9 +6965,13 @@ export default function LessonCanvas({
               const screenY = (guide.y + cam.y) * cam.z;
               const screenWPx = guidePageW * cam.z;
               const screenHPx = guidePageH * cam.z;
+              const active = sceneLayout && idx === getActiveGuideIndex(pid);
+              const borderColor = active ? 'rgba(251, 191, 36, 0.95)' : 'rgba(34, 211, 238, 0.4)';
               return (
               <div
                 key={`guide-${idx}`}
+                data-guide-index={idx}
+                data-active-guide={active ? 'true' : 'false'}
                 className="absolute z-[5] pointer-events-none"
                 style={{
                   left: screenX,
@@ -6726,23 +6981,34 @@ export default function LessonCanvas({
                 }}
               >
                 {/* Label */}
-                <div className="absolute -top-4 left-1 pointer-events-none" style={{ fontSize: 9, color: 'rgba(34, 211, 238, 0.5)', fontWeight: 600 }}>
-                  #{idx + 1}
-                </div>
+                {sceneLayout ? (
+                  <button
+                    type="button"
+                    onClick={event => { event.stopPropagation(); selectSceneGuide(idx); }}
+                    className="absolute top-2 left-2 pointer-events-auto rounded px-2 py-1 text-[10px] bg-[#101214] border"
+                    style={{ color: borderColor, borderColor }}
+                    aria-pressed={active}
+                    aria-label={`Select Guide ${idx + 1}`}
+                  >
+                    Guide {idx + 1}{active ? ' · Active' : ''} · 1600 × 900
+                  </button>
+                ) : (
+                  <div className="absolute -top-4 left-1 pointer-events-none" style={{ fontSize: 9, color: borderColor, fontWeight: 600 }}>#{idx + 1}</div>
+                )}
                 {/* Top border - draggable */}
-                <div className="absolute top-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderTop: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                <div className="absolute top-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderTop: `2px solid ${borderColor}`, boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
                   onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
                 {/* Bottom border */}
-                <div className="absolute bottom-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderBottom: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                <div className="absolute bottom-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing" style={{ borderBottom: `2px solid ${borderColor}`, boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
                   onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
                 {/* Left border */}
-                <div className="absolute top-0 bottom-0 left-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderLeft: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                <div className="absolute top-0 bottom-0 left-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderLeft: `2px solid ${borderColor}`, boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
                   onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
                 {/* Right border */}
-                <div className="absolute top-0 bottom-0 right-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderRight: '2px solid rgba(34, 211, 238, 0.4)', boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
+                <div className="absolute top-0 bottom-0 right-0 w-[6px] cursor-grab active:cursor-grabbing" style={{ borderRight: `2px solid ${borderColor}`, boxShadow: '0 0 8px rgba(34, 211, 238, 0.3)', pointerEvents: 'auto' }}
                   onMouseDown={(e) => startGuideDrag(e, idx)}
                 />
                 {/* Audio Notes split divider — now rendered in separate always-visible overlay */}
@@ -6757,7 +7023,7 @@ export default function LessonCanvas({
             const cam = tldrawCamera;
             const sidebarFrac = showSidebarRef.current ? 0.85 : 1;
             const sW = window.innerWidth * sidebarFrac - 6;
-            const guidePageW = sW / 0.75;
+            const guidePageW = sceneLayout ? SCENE.width : sW / 0.75;
             const currentPageBorders = getGuideBordersForPage(pid);
 
             return currentPageBorders.map((guide, idx) => {
@@ -6803,7 +7069,7 @@ export default function LessonCanvas({
 
         {!isLocked && !timelineFullyCollapsed && (
           <DraggableWidget defaultPosition={{ x: 0, y: 0 }} zIndex={35} anchorBottom>
-            <div className="overflow-hidden shadow-2xl border border-[#191C20]" style={{ width: showSidebar ? '85vw' : '100vw' }}>
+            <div className="overflow-hidden shadow-2xl border border-[#191C20]" style={{ width: sceneLayout ? SCENE.width * stageScale : showSidebar ? '85vw' : '100vw' }}>
               {showLaserTimeline ? (
                 <LaserSyncTimeline
                   strokes={laserStrokes}
@@ -6905,9 +7171,11 @@ export default function LessonCanvas({
         </div>
 
         {/* Sidebar (right 15%) — hidden when showSidebar is false */}
-        {showSidebar && (
-        <div className="sub-topic-sidebar w-[15%] min-w-[180px] border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0" style={{ background: '#0B0D0F' }}>
-          {showSidebar ? (
+        {!sceneLayout && showSidebar && (
+        <div className={`sub-topic-sidebar ${sceneLayout ? '' : 'w-[15%] min-w-[180px]'} border-l border-white/[0.10] flex flex-col overflow-hidden flex-shrink-0`}
+          style={{ background: '#0B0D0F' }}>
+          <div style={{ height: '100%', minHeight: 0 }}>
+          {(sceneLayout || showSidebar) ? (
             isLocked ? (
               // Locked: always show Sub-topics
               <SubTopicTracker
@@ -6918,6 +7186,7 @@ export default function LessonCanvas({
                 currentStep={currentStep}
                 editor={editor}
                 sidebar
+                scene={sceneLayout}
                 sidebarTitle={sidebarTitle}
                 onSidebarTitleChange={(v) => { setSidebarTitle(v); markDirty(); }}
                 collapsed={false}
@@ -6951,6 +7220,7 @@ export default function LessonCanvas({
                 currentStep={currentStep}
                 editor={editor}
                 sidebar
+                scene={sceneLayout}
                 sidebarTitle={sidebarTitle}
                 onSidebarTitleChange={(v) => { setSidebarTitle(v); markDirty(); }}
                 collapsed={sidebarCollapsed}
@@ -6960,8 +7230,10 @@ export default function LessonCanvas({
               />
             )
           ) : null}
+          </div>
         </div>
         )}
+      </div>
       </div>
 
       </>

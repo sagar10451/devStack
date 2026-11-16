@@ -56,6 +56,8 @@ export interface ShapeAnimationConfig {
 export type StepAction = 'enter' | 'exit' | 'blink' | 'move' | 'teleport' | 'swap' | 'none' | 'topicRollCall' | 'topicGlowOne' | 'logoGlow';
 
 export interface AnimationStep {
+  /** Frame-based intro effect, shared by presentation and video export. */
+  introEffect?: 'electricity' | 'chapter';
   id: string;
   /** IDs of tldraw shapes or React Flow elements involved in this step */
   shapeIds: string[];
@@ -148,7 +150,9 @@ export interface LessonCanvasData {
   };
   /** tldraw document snapshot (serialized) */
   snapshot: unknown;
-  /** Saved camera position */
+  /** Full-frame 16:9 canvas, scaled to a 1920 × 1080 video. */
+  sceneLayout?: boolean;
+  /** Saved camera position (scene zoom is independent of preview size). */
   camera?: { x: number; y: number; z: number };
   /** Flat ordered animation steps */
   animationSteps: AnimationStep[];
@@ -188,6 +192,10 @@ export interface LessonCanvasData {
   bwMode?: boolean;
   /** Per-page guide border positions */
   guideBordersMap?: Record<string, { x: number; y: number }[]>;
+  /** Number of guides on each page. */
+  guideCountMap?: Record<string, number>;
+  /** Explicitly selected scene guide index on each page (zero-based). */
+  activeGuideMap?: Record<string, number>;
   /** Number of guide borders (shared across pages) */
   guideCount?: number;
   /** Custom guide height in page coordinates */

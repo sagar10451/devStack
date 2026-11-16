@@ -29,3 +29,6 @@ data/canvases/
 # Audio files (global audio, background music — local only)
 data/audio/
 public/sounds/bgmusic.mp3
+
+# Validated local video exports
+data/video-exports/

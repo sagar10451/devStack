@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "lessons": {
+    "[\"flowchart-notes\",\"class-10/english/first-flight-prose\",\"nelson-mandela\"]": [
+      "exportjson",
+      "exportpng",
+      "pdf",
+      "ppt",
+      "import",
+      "delete",
+      "lines",
+      "colors",
+      "nodes",
+      "sidebar",
+      "code",
+      "markdown",
+      "glow",
+      "stickynote",
+      "flip",
+      "scene",
+      "mode",
+      "topic",
+      "subtitle",
+      "public",
+      "drawhighlight",
+      "logoglow",
+      "chaptername",
+      "splitter",
+      "glowone",
+      "glowall",
+      "paintbwfree",
+      "paintbw",
+      "pointer",
+      "bw",
+      "guideheight",
+      "drawhighlightr"
+    ]
+  }
+}

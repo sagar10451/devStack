@@ -1,3 +1,4 @@
+import { getSceneCamera, setSceneCamera } from './sceneLayout';
 /**
  * Step animation executor.
  * CSS-only for visual effects. Clone-based for Move/Teleport.
@@ -263,7 +264,7 @@ export function applyZoomToShapes(
   if (!editor) return null;
 
   // Save current camera for rewind
-  const cam = editor.getCamera();
+  const cam = getSceneCamera(editor);
   const savedCamera = { x: cam.x, y: cam.y, z: cam.z };
 
   // If we have a captured camera position, use it directly
@@ -275,7 +276,7 @@ export function applyZoomToShapes(
     if (dx < 5 && dy < 5 && dz < 0.05) {
       return savedCamera;
     }
-    editor.setCamera(capturedCamera, {
+    setSceneCamera(editor, capturedCamera, {
       force: true,
       animation: { duration: 800, easing: (t: number) => 1 - Math.pow(1 - t, 3) },
     });
@@ -323,7 +324,7 @@ export function rewindZoom(
   editor: any,
 ) {
   if (!editor || !savedCamera) return;
-  editor.setCamera(savedCamera, {
+  setSceneCamera(editor, savedCamera, {
     force: true,
     animation: { duration: 300, easing: (t: number) => 1 - Math.pow(1 - t, 3) },
   });

@@ -11,11 +11,13 @@ import type { Plugin } from 'vite';
 import { writeFileSync, mkdirSync, existsSync, readFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
+import { toolbarPreferencesMiddleware } from './server/toolbarPreferences.ts';
 
 export function canvasApiPlugin(): Plugin {
   return {
     name: 'canvas-api',
     configureServer(server) {
+      server.middlewares.use('/__toolbar-preferences', toolbarPreferencesMiddleware(join(process.cwd(), 'data', 'toolbar-preferences.json')));
       // ─── Guide presets (global, shared across canvases) ───────────────
       const presetsPath = join(process.cwd(), 'data', 'guide-presets.json');
 

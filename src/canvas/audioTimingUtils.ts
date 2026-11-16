@@ -1,4 +1,4 @@
-import type { AnimationStep } from './types';
+import type { AnimationStep } from './types.ts';
 
 export const AUTO_GAP = 0.5;
 export const DEFAULT_DURATION = 3;
@@ -18,8 +18,10 @@ export interface GoNextTimesParams {
  * Used by both GlobalAudioTimeline (UI display) and LessonCanvas (playback engine).
  * Single source of truth for timing.
  */
-export function computeGoNextTimes(params: GoNextTimesParams): number[] {
+export function computeTimedEntries(params: GoNextTimesParams) {
   const { steps, pageIds, durations, pageTopicVisible, pageSubtitleVisible, pageTopicModes, pageSubtitleModes } = params;
+  const introPages = new Set(steps.filter(step => step.introEffect).map(step => step.pageId));
+  const firstContentPage = pageIds.find(id => !introPages.has(id));
 
   // Group steps by page
   const stepsByPage = new Map<string, AnimationStep[]>();
@@ -37,7 +39,7 @@ export function computeGoNextTimes(params: GoNextTimesParams): number[] {
     const pid = pageIds[pi];
 
     // Topic (page 1 only)
-    if (pi === 0 && pageTopicVisible.has(pid)) {
+    if (pid === firstContentPage && pageTopicVisible.has(pid)) {
       const topicMode = pageTopicModes[pid] || 'preload';
       unifiedIds.push(`__topic__${pid}`);
       unifiedIsPreloaded.push(topicMode === 'preload');
@@ -86,5 +88,13 @@ export function computeGoNextTimes(params: GoNextTimesParams): number[] {
     }
   }
 
-  return goNextTimes;
+  return goNextTimes.map((start, index) => ({
+    id: unifiedIds[index], start,
+    duration: durations[unifiedIds[index]] ?? (unifiedIsPreloaded[index] ? 0 : DEFAULT_DURATION),
+    preloaded: unifiedIsPreloaded[index],
+  }));
+}
+
+export function computeGoNextTimes(params: GoNextTimesParams): number[] {
+  return computeTimedEntries(params).map(entry => entry.start);
 }
